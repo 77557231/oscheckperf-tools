@@ -174,11 +174,15 @@ sudo apt-get install -y sysbench fio iperf3 jq
 
 # Advanced usage
 # Run system checks with custom test directory
-./oscheckperf -f servers.txt check IO_TEST_PATH='/home/vastbase/vb_test'
+./oscheckperf -f servers.txt check IO_PATH='/home/vastbase/vb_test'
 # Run multiple tests with custom parameters
 ./oscheckperf cpu mem -f servers.txt DURATION=2 THREADS=4
 # Run IO test with fio and custom parameters
-./oscheckperf io -f servers.txt IO_TOOL=fio IO_TEST_MODE=read IO_TOTAL_SIZE=10G
+./oscheckperf io -f servers.txt IO_TOOL=fio IO_TOTAL_SIZE=10G
+# Use time command to measure total duration, run all tests with parameters
+time ./oscheckperf all -f servers.txt DURATION=200 IO_TOOL=fio FIO_PROFILES="read write"
+# fio multi-profile test (test read and write simultaneously)
+./oscheckperf io IO_TOOL=fio FIO_PROFILES="read write" FIO_DURATION=60
 ```
 
 #### Install sysbench
@@ -218,9 +222,13 @@ Multi-machine installation (direct IP list):
 - Target servers need SSH passwordless login configured
 - Environment variables will be automatically configured and take effect after installation
 
-#### Dry Run Mode
+#### Dry Run Mode (Preview Commands)
 ```bash
-./oscheckperf -d
+# Use --dry-run to preview commands that will be executed
+./oscheckperf --dry-run
+
+# Combine with other parameters
+./oscheckperf io --dry-run IO_TOOL=fio FIO_PROFILES="read write"
 ```
 ### 4. View Reports
 ```bash

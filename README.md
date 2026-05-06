@@ -236,10 +236,14 @@ sudo apt-get install -y sysbench fio iperf3 jq
 - 目标服务器需要配置 SSH 免密登录
 - 安装完成后会自动配置环境变量并生效
 
-#### 干运行模式
+#### 干运行模式（预览命令）
 
 ```bash
-./oscheckperf -d
+# 使用 --dry-run 参数预览将要执行的命令
+./oscheckperf --dry-run
+
+# 配合其他参数使用
+./oscheckperf io --dry-run IO_TOOL=fio FIO_PROFILES="read write"
 ```
 
 ### 4. 查看报告
