@@ -242,13 +242,14 @@ cat output/report_benchmark_*.log
 - **events/sec**: Events per second (higher is better)
 - **avg latency**: Average latency (lower is better)
 - **P95/P99 latency**: 95th/99th percentile latency (lower is better)
-- **Threads Fairness**: Thread fairness metrics, indicating the balance of event distribution and execution time across threads (closer to 1.0 is better)
+- **Fairness (events)**: Thread fairness metrics, indicating the balance of event distribution across threads (format: avg/stddev, smaller stddev indicates more uniform distribution)
 
 ### Memory Test
 - **operations/sec**: Memory operations per second (higher is better)
 - **throughput**: Memory throughput in MB/s (higher is better)
 - **avg latency**: Average latency (lower is better)
 - **P95 latency**: 95th percentile latency (lower is better)
+- **Fairness (events)**: Thread fairness metrics, indicating the balance of event distribution across threads (format: avg/stddev, smaller stddev indicates more uniform distribution)
 
 ### IO Test
 - **IOPS**: IO operations per second (higher is better)
@@ -264,13 +265,10 @@ cat output/report_benchmark_*.log
 - **iodepth_level**: IO queue depth level (fio only, reflects IO concurrency level)
 
 ### Network Test
-- **Bandwidth**: Network bandwidth in MB/s (higher is better)
-- **Retransmits**: TCP retransmission count (lower is better, indicates network quality)
-- **RTT (min/max/mean)**: Round-trip time minimum/maximum/average (lower is better)
-- **TCP Congestion**: TCP congestion control algorithm (affects network transmission efficiency)
-- **CPU**: Sender and receiver CPU utilization
-- **Jitter**: Jitter (UDP only, lower is better)
-- **Packet loss**: Packet loss rate (UDP only, lower is better)
+- **Bandwidth (MB/s)**: Network bandwidth (higher is better)
+- **Retrans**: TCP retransmission count (lower is better, indicates network quality)
+- **RTT(ms)**: Round-trip time (format: average (Min: min_value, Max: max_value), lower is better)
+- **CPU(%)**: Sender and receiver CPU utilization (format: senderCPU%/receiverCPU%)
 
 ### IO Benchmark Details
 
@@ -365,7 +363,10 @@ FIO testing works differently:
 ```
 
 ### Network Test
-- **Bandwidth**: Network bandwidth in MB/s (higher is better)
+- **Bandwidth (MB/s)**: Network bandwidth (higher is better)
+- **Retrans**: TCP retransmission count (lower is better)
+- **RTT(ms)**: Round-trip time (format: average (Min: min_value, Max: max_value))
+- **CPU(%)**: Sender/receiver CPU utilization (format: senderCPU%/receiverCPU%)
 
 ### Threads Test
 - **events/sec**: Thread events per second (higher is better)
@@ -392,7 +393,10 @@ FIO testing works differently:
 ## FAQ
 
 ### Q1: Do tests require root privileges?
-**A**: Some tests (e.g., direct IO) require root privileges. It is recommended to run with `sudo`
+**A**: Most tests do not require root privileges. The script supports running as a regular user, but `sudo` is recommended in the following cases:
+- fio direct IO mode (enabled by default): bypasses OS cache for real disk testing
+- Installing dependency packages requires root privileges
+- It is recommended to use `./oscheckperf check` to verify system environment before testing
 
 ### Q2: Will tests delete data?
 **A**: Test files are only written to the specified directory (default `/tmp`) and can be automatically cleaned up after testing
