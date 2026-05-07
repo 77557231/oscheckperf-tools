@@ -146,7 +146,7 @@ sudo apt-get install -y sysbench fio iperf3 jq
 ./oscheckperf io
 
 # 运行网络测试（矩阵模式）
-./oscheckperf network -f servers.txt NETWORK_MODE=matrix
+./oscheckperf network -f all-servers NETWORK_MODE=matrix
 
 # 运行线程测试
 ./oscheckperf thread
@@ -174,15 +174,15 @@ sudo apt-get install -y sysbench fio iperf3 jq
 ./oscheckperf network -f "192.168.1.101 192.168.1.102" NETWORK_MODE=parallel
 
 # 矩阵网络测试（全矩阵交叉测试）
-./oscheckperf -f servers.txt NETWORK_MODE=matrix
+./oscheckperf -f all-servers NETWORK_MODE=matrix
 
 # 高级用法
 # 运行系统检查并指定测试目录
-./oscheckperf -f servers.txt check IO_TEST_PATH='/home/vastbase/vb_test'
+./oscheckperf -f all-servers check IO_TEST_PATH='/home/vastbase/vb_test'
 # 同时运行多个测试并指定参数
-./oscheckperf cpu mem -f servers.txt DURATION=2 THREADS=4
+./oscheckperf cpu mem -f all-servers DURATION=2 THREADS=4
 # 运行 IO 测试并使用 fio 工具和自定义参数
-./oscheckperf io -f servers.txt IO_TOOL=fio IO_TEST_MODE=read IO_TOTAL_SIZE=10G
+./oscheckperf io -f all-servers IO_TOOL=fio IO_TEST_MODE=read IO_TOTAL_SIZE=10G
 ```
 
 #### 安装 sysbench
@@ -206,7 +206,7 @@ sudo apt-get install -y sysbench fio iperf3 jq
 多机器安装（从服务器列表文件）：
 
 ```bash
-./oscheckperf -i -f servers.txt
+./oscheckperf -i -f all-servers
 ```
 
 多机器安装（直接指定 IP 列表）：
@@ -360,6 +360,14 @@ FIO 测试采用不同的工作方式：
 | `FIO_IOENGINE` | `libaio`   | fio IO 引擎（libaio/sync/posixaio）                                                |
 | `FIO_DURATION` | `DURATION` | fio 测试时长                                                                       |
 
+### Threads 参数
+
+| 参数              | 默认值              | 说明                                    |
+| --------------- | ---------------- | ------------------------------------- |
+| `THREADS_NUM`   | `auto (cores*4)` | 线程数（未设置时自动根据 CPU 核心数计算，公式：cores*4） |
+| `THREADS_YIELDS`| `100`            | 每个线程的 yield 次数                           |
+| `THREADS_LOCKS` | `4`              | 锁数量                                    |
+
 ### 通用参数
 
 | 参数              | 默认值                         | 说明                         |
@@ -441,10 +449,10 @@ FIO 测试采用不同的工作方式：
 
 ### Q4: 网络测试如何配置多客户端？
 
-**A**: 创建服务器列表文件 `servers.txt`，包含所有需要测试的 IP 地址，然后使用 `-f` 参数指定：
+**A**: 创建服务器列表文件 `all-servers`，包含所有需要测试的 IP 地址，然后使用 `-f` 参数指定：
 
 ```bash
-./oscheckperf network -f servers.txt
+./oscheckperf network -f all-servers
 ```
 
 ### Q5: NETWORK\_MODE 和 NETWORK\_PARALLEL 参数的区别是什么？
@@ -462,10 +470,10 @@ FIO 测试采用不同的工作方式：
 
 ```bash
 # 串行执行，每个测试使用 4 个并行连接
-./oscheckperf network -f servers.txt NETWORK_MODE=serial NETWORK_PARALLEL=4
+./oscheckperf network -f all-servers NETWORK_MODE=serial NETWORK_PARALLEL=4
 
 # 并行执行，每个测试使用 4 个并行连接
-./oscheckperf network -f servers.txt NETWORK_MODE=parallel NETWORK_PARALLEL=4
+./oscheckperf network -f all-servers NETWORK_MODE=parallel NETWORK_PARALLEL=4
 ```
 
 ## 最佳实践

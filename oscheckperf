@@ -1,9 +1,9 @@
 #!/bin/bash
 #--------------------------------------------------------------------------------
 #-- File name:   oscheckperf
-#-- Version:     v0.7.6
+#-- Version:     v0.7.7
 #-- Purpose:     Database System Benchmark Tool
-#-- Author:      Vastbase Second-line Team
+#-- Author:      Wanping Pan 
 #-- Description: One-click system benchmarking tool, supports configuration via config file or command line parameters
 #--------------------------------------------------------------------------------
 
@@ -97,7 +97,7 @@ parse_args() {
                 exit 0
                 ;;
             --version)
-                echo "Version: 0.7.6"
+                echo "Version: 0.7.7"
                 exit 0
                 ;;
             --dry-run)
@@ -200,7 +200,7 @@ parse_args() {
                         fio|sysbench)
                             # Common mistakes - provide helpful error message
                             echo "Error: '$arg' is not a valid command. Please use 'io' with IO_TOOL=$arg instead."
-                            echo "Example: ./oscheckperf io -f servers.txt IO_TOOL=$arg"
+                            echo "Example: ./oscheckperf io -f all-servers IO_TOOL=$arg"
                             show_help
                             exit 1
                             ;;
@@ -330,7 +330,7 @@ show_help() {
     echo "  NETWORK_PARALLEL=<number>  Parallel connections (default: 1)"
     echo ""
     echo "Threads test parameters:"
-    echo "  THREADS_NUM=<number>        Number of threads (default: 1000)"
+    echo "  THREADS_NUM=<number>        Number of threads (default: auto, cpu_cores*4)"
     echo "  THREADS_YIELDS=<number>     Number of yields per thread (default: 100)"
     echo "  THREADS_LOCKS=<number>      Number of locks (default: 4)"
     echo ""
@@ -353,7 +353,7 @@ show_help() {
     echo "  $0 cpu"
     echo "  $0 mem DURATION=20"
     echo "  $0 io IO_TOOL=fio"
-    echo "  $0 network -f servers.txt NETWORK_MODE=matrix"
+    echo "  $0 network -f all-servers NETWORK_MODE=matrix"
     echo ""
     echo "Directory Structure:"
     echo "  \$HOME/oscheckperf/"
@@ -1312,7 +1312,7 @@ run_sysbench_fileio() {
         fi
 
         # Generate unique temp file for each test mode
-        local temp_output_file="$TMP_DIR/vb_fileio_${test_mode}_${TIMESTAMP}.txt"
+        local temp_output_file="$TMP_DIR/vb_fileio_${test_mode}_${TIMESTAMP}.log"
 
         # Build full sysbench command
         local sysbench_prepare_cmd="sysbench fileio \
@@ -1465,7 +1465,7 @@ EOF
         # Run fio test
         local mixed_output="$TMP_DIR/fio_${profile}_mixed_${TIMESTAMP}.log"
         local json_output="$TMP_DIR/fio_${profile}_result_${TIMESTAMP}.json"
-        local normal_output="$TMP_DIR/fio_${profile}_normal_${TIMESTAMP}.txt"
+        local normal_output="$TMP_DIR/fio_${profile}_normal_${TIMESTAMP}.log"
         
         if [ "$DRY_RUN" = true ]; then
             echo "[DRY RUN] Would execute: fio \"$fio_conf\" --output=\"$mixed_output\" --output-format=json,normal"
@@ -1523,7 +1523,7 @@ EOF
             echo "    Write Latency: ${write_avg_lat_ms}ms"
             
             # Extract and display extended metrics
-            local fio_metrics=$(parse_fio_json_to_metrics "$json_output")
+            local fio_metrics=$(parse_fio_json_to_metrics "$json_output" "$normal_output")
             if [ -n "$fio_metrics" ]; then
                 echo ""
                 echo "  fio [$profile] extended metrics:"
@@ -1816,8 +1816,8 @@ run_serial_network_test() {
     # Use server IP as client IP if client IP not set (localhost test)
     local client_ip="${NETWORK_CLIENT_IP:-$server_ip}"
     
-    local temp_output_file="$TMP_DIR/vb_network_${TIMESTAMP}.txt"
-    local temp_text_output="$TMP_DIR/vb_network_text_${TIMESTAMP}.txt"
+    local temp_output_file="$TMP_DIR/vb_network_${TIMESTAMP}.log"
+    local temp_text_output="$TMP_DIR/vb_network_text_${TIMESTAMP}.log"
     local iperf3_pid=""
     local results=()
     
@@ -1870,7 +1870,7 @@ run_serial_network_test() {
         # Calculate timeout: duration + 15s buffer for each client
         local client_timeout=$((duration + 15))
         local client_output_file="$TMP_DIR/network_scenario_${client_idx}_${TIMESTAMP}.json"
-        local client_text_output="$TMP_DIR/network_scenario_${client_idx}_${TIMESTAMP}_text.txt"
+        local client_text_output="$TMP_DIR/network_scenario_${client_idx}_${TIMESTAMP}_text.log"
         
         # Run iperf3 client with timeout and capture both JSON and text output
         if [ "$DRY_RUN" = true ]; then
@@ -2032,7 +2032,7 @@ run_matrix_network_test() {
         
         # Run iperf3 client from source
         local client_output_file="$TMP_DIR/network_matrix_${pair_idx}_${TIMESTAMP}.json"
-        local client_text_output="$TMP_DIR/network_matrix_${pair_idx}_${TIMESTAMP}_text.txt"
+        local client_text_output="$TMP_DIR/network_matrix_${pair_idx}_${TIMESTAMP}_text.log"
         
         echo "  Running iperf3 client from $src to $dst..."
         
@@ -2179,7 +2179,7 @@ run_parallel_network_test() {
         echo "  Starting test $client_idx: $client_ip -> $server_ip"
         
         local client_output_file="$TMP_DIR/network_parallel_${client_idx}_${TIMESTAMP}.json"
-        local client_text_output="$TMP_DIR/network_parallel_${client_idx}_${TIMESTAMP}_text.txt"
+        local client_text_output="$TMP_DIR/network_parallel_${client_idx}_${TIMESTAMP}_text.log"
         
         if [ "$DRY_RUN" = true ]; then
             echo "[DRY RUN] ssh $client_ip 'iperf3 -c $server_ip -p $port -t $duration -P $parallel -J'"
@@ -2239,7 +2239,7 @@ run_parallel_network_test() {
 generate_parallel_report() {
     local -n results_arr=$1
     local server_ip="$2"
-    local report_file="$TMP_DIR/network_parallel_report_${TIMESTAMP}.txt"
+    local report_file="$TMP_DIR/network_parallel_report_${TIMESTAMP}.log"
     
     echo "Generating parallel network test report..."
     
@@ -2327,7 +2327,7 @@ parse_iperf3_matrix_result() {
 generate_matrix_report() {
     local -n results_arr=$1
     local -n hosts_arr=$2
-    local report_file="$TMP_DIR/network_matrix_report_${TIMESTAMP}.txt"
+    local report_file="$TMP_DIR/network_matrix_report_${TIMESTAMP}.log"
     
     echo "Generating matrix network test report..."
     
@@ -2597,6 +2597,7 @@ parse_iperf3_json_to_metrics() {
 # Parse fio JSON to metrics (extended indicators)
 parse_fio_json_to_metrics() {
     local json_file="$1"
+    local normal_output_file="$2"
     
     if [ ! -f "$json_file" ] || ! jq_available; then
         echo "lat_p99=N/A|lat_max=N/A|disk_util=N/A|cpu_usr=N/A|cpu_sys=N/A|bw_min=N/A|bw_max=N/A|slat=N/A|clat=N/A|ctx=N/A|majf=N/A|minf=N/A|iodepth=N/A"
@@ -2610,7 +2611,10 @@ parse_fio_json_to_metrics() {
     local lat_max_read=$(jq -r '.jobs[0].read.clat_ns.max // 0' "$json_file" 2>/dev/null || echo "0")
     local lat_max_write=$(jq -r '.jobs[0].write.clat_ns.max // 0' "$json_file" 2>/dev/null || echo "0")
     
-    local disk_util=$(jq -r '.jobs[0].utilization // 0' "$json_file" 2>/dev/null || echo "N/A")
+    local disk_util="N/A"
+    if [ -f "$normal_output_file" ]; then
+        disk_util=$(grep -oP 'util=\K[0-9.]+' "$normal_output_file" | head -n1 | awk '{printf "%.2f", $1}' 2>/dev/null || echo "N/A")
+    fi
     local cpu_usr=$(jq -r '.jobs[0].usr_cpu // 0' "$json_file" 2>/dev/null || echo "N/A")
     local cpu_sys=$(jq -r '.jobs[0].sys_cpu // 0' "$json_file" 2>/dev/null || echo "N/A")
     
@@ -2659,8 +2663,12 @@ parse_fio_json_to_metrics() {
 run_threads_test() {
     echo "=== Threads Performance Test ==="
     
-    local temp_output_file="$TMP_DIR/vb_threads_${TIMESTAMP}.txt"
-    local threads="${THREADS_NUM:-1000}"
+    local temp_output_file="$TMP_DIR/vb_threads_${TIMESTAMP}.log"
+    local threads="${THREADS_NUM:-0}"
+    if [ "$threads" -eq 0 ]; then
+        local cores=$(get_cpu_cores 2>/dev/null || echo "4")
+        threads=$((cores * 4))
+    fi
     local duration="${DURATION:-60}"
     
     # Only display test info in non-remote mode
@@ -2735,7 +2743,7 @@ run_mutex_test() {
         echo "=== Mutex Performance Test ==="
     fi
     
-    local temp_output_file="$TMP_DIR/vb_mutex_${TIMESTAMP}.txt"
+    local temp_output_file="$TMP_DIR/vb_mutex_${TIMESTAMP}.log"
     local threads="${MUTEX_THREADS:-0}"
     if [ "$threads" -eq 0 ]; then
         threads=$(get_cpu_cores)
@@ -2796,7 +2804,7 @@ parse_mutex_result() {
 run_cpu_test() {
     echo "=== CPU Performance Test ==="
     
-    local temp_output_file="$TMP_DIR/vb_cpu_${TIMESTAMP}.txt"
+    local temp_output_file="$TMP_DIR/vb_cpu_${TIMESTAMP}.log"
     local threads="${CPU_THREADS:-0}"
     if [ "$threads" -eq 0 ]; then
         threads=$(get_cpu_cores)
@@ -2838,7 +2846,7 @@ run_cpu_test() {
 run_memory_test() {
     echo "=== Memory Performance Test ==="
     
-    local temp_output_file="$TMP_DIR/vb_memory_${TIMESTAMP}.txt"
+    local temp_output_file="$TMP_DIR/vb_memory_${TIMESTAMP}.log"
     local threads="${MEMORY_THREADS:-0}"
     if [ "$threads" -eq 0 ]; then
         threads=$(get_cpu_cores)
@@ -2881,7 +2889,7 @@ run_memory_test() {
 run_pgbench_test() {
     echo "=== PostgreSQL Benchmark Test ==="
     
-    local temp_output_file="$TMP_DIR/vb_pgbench_${TIMESTAMP}.txt"
+    local temp_output_file="$TMP_DIR/vb_pgbench_${TIMESTAMP}.log"
     local db_name="${PGBENCH_DB:-pgbench_db}"
     local duration="${PGBENCH_DURATION:-300}"
     local threads="${PGBENCH_THREADS:-0}"
@@ -2993,9 +3001,26 @@ generate_report() {
     printf -- "\n" >> "$report_file"
     printf -- "[CPU Test]\n" >> "$report_file"
     printf -- "  Enabled: ${CPU_ENABLED:-true}\n" >> "$report_file"
-    printf -- "  Threads: $(if [ "${CPU_THREADS:-0}" = "0" ]; then echo "auto ($cpu_cores)"; else echo "${CPU_THREADS}"; fi)\n" >> "$report_file"
     printf -- "  Duration: ${unified_duration}s\n" >> "$report_file"
     printf -- "  Max Prime: ${CPU_MAX_PRIME:-20000}\n" >> "$report_file"
+    printf -- "  Threads:\n" >> "$report_file"
+    if [ "${CPU_THREADS:-0}" = "0" ]; then
+        printf -- "    %s: auto (%s)\n" "$local_ip" "$cpu_cores" >> "$report_file"
+    else
+        printf -- "    %s: %s\n" "$local_ip" "${CPU_THREADS}" >> "$report_file"
+    fi
+    if [ ${#target_servers[@]} -gt 0 ]; then
+        for server in "${target_servers[@]}"; do
+            if [ "$server" != "$local_ip" ]; then
+                if [ "${CPU_THREADS:-0}" = "0" ]; then
+                    local remote_cpu=$(ssh "$server" "nproc 2>/dev/null || grep -c ^processor /proc/cpuinfo 2>/dev/null || echo 'N/A'" 2>/dev/null || echo "N/A")
+                    printf -- "    %s: auto (%s)\n" "$server" "${remote_cpu:-N/A}" >> "$report_file"
+                else
+                    printf -- "    %s: %s\n" "$server" "${CPU_THREADS}" >> "$report_file"
+                fi
+            fi
+        done
+    fi
     printf -- "\n" >> "$report_file"
     printf -- "[Memory Test]\n" >> "$report_file"
     printf -- "  Enabled: ${MEMORY_ENABLED:-true}\n" >> "$report_file"
@@ -3036,16 +3061,42 @@ generate_report() {
     printf -- "\n" >> "$report_file"
     printf -- "[Threads Test]\n" >> "$report_file"
     printf -- "  Enabled: ${THREADS_ENABLED:-true}\n" >> "$report_file"
-    printf -- "  Threads: ${THREADS_NUM:-100}\n" >> "$report_file"
     printf -- "  Duration: ${unified_duration}s\n" >> "$report_file"
     printf -- "  Yields: ${THREADS_YIELDS:-100}\n" >> "$report_file"
     printf -- "  Locks: ${THREADS_LOCKS:-4}\n" >> "$report_file"
+    if [ -n "${THREADS_NUM}" ]; then
+        printf -- "  Threads: ${THREADS_NUM}\n" >> "$report_file"
+    else
+        printf -- "  Threads:\n" >> "$report_file"
+        printf -- "    %s: auto (%s)\n" "$local_ip" "$((cpu_cores * 4))" >> "$report_file"
+        if [ ${#target_servers[@]} -gt 0 ]; then
+            for server in "${target_servers[@]}"; do
+                if [ "$server" != "$local_ip" ]; then
+                    local remote_cpu=$(ssh "$server" "nproc 2>/dev/null || grep -c ^processor /proc/cpuinfo 2>/dev/null || echo 'N/A'" 2>/dev/null || echo "N/A")
+                    printf -- "    %s: auto (%s)\n" "$server" "$((remote_cpu * 4))" >> "$report_file"
+                fi
+            done
+        fi
+    fi
     printf -- "\n" >> "$report_file"
     printf -- "[Mutex Test]\n" >> "$report_file"
     printf -- "  Enabled: ${MUTEX_ENABLED:-true}\n" >> "$report_file"
-    printf -- "  Threads: $(if [ "${MUTEX_THREADS:-0}" = "0" ]; then echo "auto ($cpu_cores)"; else echo "${MUTEX_THREADS}"; fi)\n" >> "$report_file"
     printf -- "  Duration: ${unified_duration}s\n" >> "$report_file"
     printf -- "  Mutex Num: ${MUTEX_NUM:-1024}\n" >> "$report_file"
+    if [ "${MUTEX_THREADS:-0}" != "0" ]; then
+        printf -- "  Threads: ${MUTEX_THREADS}\n" >> "$report_file"
+    else
+        printf -- "  Threads:\n" >> "$report_file"
+        printf -- "    %s: auto (%s)\n" "$local_ip" "$cpu_cores" >> "$report_file"
+        if [ ${#target_servers[@]} -gt 0 ]; then
+            for server in "${target_servers[@]}"; do
+                if [ "$server" != "$local_ip" ]; then
+                    local remote_cpu=$(ssh "$server" "nproc 2>/dev/null || grep -c ^processor /proc/cpuinfo 2>/dev/null || echo 'N/A'" 2>/dev/null || echo "N/A")
+                    printf -- "    %s: auto (%s)\n" "$server" "${remote_cpu:-N/A}" >> "$report_file"
+                fi
+            done
+        fi
+    fi
     printf -- "\n" >> "$report_file"
     printf -- "[pgbench Test]\n" >> "$report_file"
     printf -- "  Enabled: ${PGBENCH_ENABLED:-false}\n" >> "$report_file"
@@ -3068,9 +3119,9 @@ generate_report() {
             
             # Show comparison table
             echo "  CPU Test Results" >> "$report_file"
-            echo "  ---------------------------------------------------------------------------------------------" >> "$report_file"
+            echo "  ------------------------------------------------------------------------------------------" >> "$report_file"
             printf "  %-16s %-12s %-14s %-14s %-14s %-16s\n" "Server IP" "Events/sec" "Avg Lat(ms)" "P95 Lat(ms)" "Max Lat(ms)" "Fairness" >> "$report_file"
-            echo "  ---------------------------------------------------------------------------------------------" >> "$report_file"
+            echo "  ------------------------------------------------------------------------------------------" >> "$report_file"
 
             local in_cpu_section=false
             local current_server_ip=""
@@ -3134,9 +3185,9 @@ EOF
 
             # Show comparison table
             echo "  Memory Test Results" >> "$report_file"
-            echo "  ----------------------------------------------------------------------------------------------" >> "$report_file"
+            echo "  ---------------------------------------------------------------------------------------" >> "$report_file"
             printf "  %-18s %-15s %-15s %-18s %-20s\n" "Server IP" "Ops/sec" "MiB/sec" "Avg Latency (ms)" "Fairness (events)" >> "$report_file"
-            echo "  ----------------------------------------------------------------------------------------------" >> "$report_file"
+            echo "  ---------------------------------------------------------------------------------------" >> "$report_file"
 
             local in_mem_section=false
             local current_server_ip=""
@@ -3240,7 +3291,8 @@ EOF
                         fio_iodepth_level["$key"]="$iodepth"
                     fi
                 done < <(awk 'BEGIN{OFS="|"} 
-                    /FIO TEST RESULTS/ {match($0, /Server: ([0-9.]+)/, arr); ip=arr[1]; match($0, /FIO TEST RESULTS \(([^)]+)\)/, mode_arr); io_mode=mode_arr[1]; p99="N/A"; disk="N/A"; cpu_usr="N/A"; cpu_sys="N/A"; slat="N/A"; clat="N/A"; iodepth="N/A"; in_fio=1; ext_started=0} 
+                    /RESULTS FROM SERVER:/ {match($0, /RESULTS FROM SERVER: ([0-9.]+)/, arr); current_server=arr[1]}
+                    /FIO TEST RESULTS/ {if(current_server!="") ip=current_server; else {match($0, /Server: ([0-9.]+)/, arr); ip=arr[1]}; match($0, /FIO TEST RESULTS \(([^)]+)\)/, mode_arr); io_mode=mode_arr[1]; p99="N/A"; disk="N/A"; cpu_usr="N/A"; cpu_sys="N/A"; slat="0"; clat="N/A"; iodepth="N/A"; in_fio=1; ext_started=0} 
                     in_fio && !ext_started && /slat \(usec\)/ {split($0, a, "avg="); split(a[2], b, ","); gsub(/ /, "", b[1]); slat=b[1]}
                     in_fio && !ext_started && /clat \(usec\)/ {split($0, a, "avg="); split(a[2], b, ","); gsub(/ /, "", b[1]); clat=b[1]}
                     in_fio && !ext_started && /IO depths/ {
@@ -3262,7 +3314,7 @@ EOF
                     in_fio && ext_started && /Disk Utilization:/ {disk=$3; sub(/%/, "", disk)} 
                     in_fio && ext_started && /CPU \(usr\):/ {cpu_usr=$3; sub(/%/, "", cpu_usr)} 
                     in_fio && ext_started && /CPU \(sys\):/ {cpu_sys=$3; sub(/%/, "", cpu_sys)}
-                    in_fio && ext_started && /^$/ && ip!="" {print ip, io_mode, p99, disk, cpu_usr, cpu_sys, slat, clat, iodepth; ip=""; in_fio=0}' "$combined_file")
+                    in_fio && ext_started && /^$/ && ip!="" {print ip "|" io_mode "|" p99 "|" disk "|" cpu_usr "|" cpu_sys "|" slat "|" clat "|" iodepth; ip=""; in_fio=0}' "$combined_file")
                 
                 while IFS= read -r line; do
                     if [[ "$line" =~ "SYSBENCH FILEIO TEST RESULTS" ]]; then
@@ -3316,7 +3368,7 @@ EOF
                             else
                                 current_total_bw="N/A"
                             fi
-                            printf "%s|%s|%s|%s|%s|%s|%s|%s|%s|N/A|fio\n" "$current_server_ip" "${current_read_iops:-N/A}" "${current_write_iops:-N/A}" "${current_total_iops:-N/A}" "${current_read_bw:-N/A}" "${current_write_bw:-N/A}" "${current_total_bw:-N/A}" "${current_avg_lat:-N/A}" "${current_io_mode:-read}" >> "$results_temp_file"
+                            printf "%s|%s|%s|%s|%s|%s|%s|%s|N/A|N/A|N/A|%s|N/A|fio\n" "$current_server_ip" "${current_read_iops:-N/A}" "${current_write_iops:-N/A}" "${current_total_iops:-N/A}" "${current_read_bw:-N/A}" "${current_write_bw:-N/A}" "${current_total_bw:-N/A}" "${current_avg_lat:-N/A}" "${current_io_mode:-read}" >> "$results_temp_file"
                             
                             # Try to get bw_min and bw_max from JSON if available
                             local ip_prefix="${current_server_ip//./_}_"
@@ -3465,7 +3517,7 @@ EOF
                     if [ "$current_tool" = "sysbench" ]; then
                         printf "%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|sysbench\n" "$current_server_ip" "${current_read_iops:-N/A}" "${current_write_iops:-N/A}" "${current_total_iops:-N/A}" "${current_read_bw:-N/A}" "${current_write_bw:-N/A}" "${current_total_bw:-N/A}" "${current_avg_lat:-N/A}" "${current_p95_lat:-N/A}" "${current_min_lat:-N/A}" "${current_max_lat:-N/A}" "${current_io_mode:-rndrw}" "${current_fsync_iops:-N/A}" >> "$results_temp_file"
                     else
-                        printf "%s|%s|%s|%s|%s|%s|%s|%s|%s|N/A|fio\n" "$current_server_ip" "${current_read_iops:-N/A}" "${current_write_iops:-N/A}" "${current_total_iops:-N/A}" "${current_read_bw:-N/A}" "${current_write_bw:-N/A}" "${current_total_bw:-N/A}" "${current_avg_lat:-N/A}" "${current_io_mode:-read}" >> "$results_temp_file"
+                        printf "%s|%s|%s|%s|%s|%s|%s|%s|N/A|N/A|N/A|%s|N/A|fio\n" "$current_server_ip" "${current_read_iops:-N/A}" "${current_write_iops:-N/A}" "${current_total_iops:-N/A}" "${current_read_bw:-N/A}" "${current_write_bw:-N/A}" "${current_total_bw:-N/A}" "${current_avg_lat:-N/A}" "${current_io_mode:-read}" >> "$results_temp_file"
                         
                         # Try to get bw_min and bw_max from JSON if available for last server
                         local ip_prefix="${current_server_ip//./_}_"
@@ -3530,9 +3582,9 @@ EOF
                     if [ "$is_sysbench" = true ]; then
                         echo "" >> "$report_file"
                         echo "  # Sysbench Extended Metrics" >> "$report_file"
-                        echo "  ------------------------------------------------------------------------" >> "$report_file"
+                        echo "  ---------------------------------------------------------------------------" >> "$report_file"
                         printf "  %-20s %-10s %-10s %-10s %-12s %-8s\n" "Server IP" "P95(ms)" "Min(ms)" "Max(ms)" "fsyncs/s" "Mode" >> "$report_file"
-                        echo "  ------------------------------------------------------------------------" >> "$report_file"
+                        echo "  ---------------------------------------------------------------------------" >> "$report_file"
                         
                         while IFS='|' read -r server_ip read_iops write_iops total_iops read_bw write_bw total_bw avg_lat p95_lat min_lat max_lat io_mode fsync_iops tool; do
                             if ! [[ "$server_ip" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]]; then
@@ -3556,7 +3608,7 @@ EOF
                         echo "  --------------------------------------------------------------------------------------------------------------" >> "$report_file"
                         
                         # Print extended metrics
-                        while IFS='|' read -r server_ip read_iops write_iops total_iops read_bw write_bw total_bw avg_lat io_mode fsync_iops tool; do
+                        while IFS='|' read -r server_ip read_iops write_iops total_iops read_bw write_bw total_bw avg_lat p95_lat min_lat max_lat io_mode fsync_iops tool; do
                             if ! [[ "$server_ip" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]]; then
                                 continue
                             fi
@@ -3571,13 +3623,13 @@ EOF
                             local b_min="${fio_bw_min[$server_ip]:-N/A}"
                             local b_max="${fio_bw_max[$server_ip]:-N/A}"
                             
-                            # Format all numeric values to 2 decimal places
-                            local fmt_p99=$(if [ "$p99" != "N/A" ]; then awk "BEGIN {printf \"%.2f\", $p99}" 2>/dev/null || echo "$p99"; else echo "N/A"; fi)
-                            local fmt_slat=$(if [ "$slat" != "N/A" ]; then awk "BEGIN {printf \"%.2f\", $slat}" 2>/dev/null || echo "$slat"; else echo "N/A"; fi)
+                            # Format all numeric values - integers remain as integers, decimals to 2 places
+                            local fmt_p99=$(if [ "$p99" != "N/A" ]; then awk -v val="$p99" 'BEGIN {if (val == int(val)) printf "%d", val; else printf "%.2f", val}' 2>/dev/null || echo "$p99"; else echo "N/A"; fi)
+                            local fmt_slat=$(if [ "$slat" != "N/A" ]; then awk -v val="$slat" 'BEGIN {if (val == int(val)) printf "%d", val; else printf "%.2f", val}' 2>/dev/null || echo "$slat"; else echo "N/A"; fi)
                             local fmt_clat=$(if [ "$clat" != "N/A" ]; then awk "BEGIN {printf \"%.0f\", $clat}" 2>/dev/null || echo "$clat"; else echo "N/A"; fi)
-                            local fmt_util=$(if [ "$util" != "N/A" ]; then awk "BEGIN {printf \"%.1f\", $util}" 2>/dev/null || echo "$util"; else echo "N/A"; fi)
-                            local fmt_cpu_usr=$(if [ "$cpu_usr" != "N/A" ]; then awk "BEGIN {printf \"%.1f\", $cpu_usr}" 2>/dev/null || echo "$cpu_usr"; else echo "N/A"; fi)
-                            local fmt_cpu_sys=$(if [ "$cpu_sys" != "N/A" ]; then awk "BEGIN {printf \"%.1f\", $cpu_sys}" 2>/dev/null || echo "$cpu_sys"; else echo "N/A"; fi)
+                            local fmt_util=$(if [ "$util" != "N/A" ]; then awk -v val="$util" 'BEGIN {if (val == int(val)) printf "%d", val; else printf "%.2f", val}' 2>/dev/null || echo "$util"; else echo "N/A"; fi)
+                            local fmt_cpu_usr=$(if [ "$cpu_usr" != "N/A" ]; then awk -v val="$cpu_usr" 'BEGIN {if (val == int(val)) printf "%d", val; else printf "%.2f", val}' 2>/dev/null || echo "$cpu_usr"; else echo "N/A"; fi)
+                            local fmt_cpu_sys=$(if [ "$cpu_sys" != "N/A" ]; then awk -v val="$cpu_sys" 'BEGIN {if (val == int(val)) printf "%d", val; else printf "%.2f", val}' 2>/dev/null || echo "$cpu_sys"; else echo "N/A"; fi)
                             local fmt_b_min=$(if [ "$b_min" != "N/A" ]; then awk "BEGIN {printf \"%.0f\", $b_min}" 2>/dev/null || echo "$b_min"; else echo "N/A"; fi)
                             local fmt_b_max=$(if [ "$b_max" != "N/A" ]; then awk "BEGIN {printf \"%.0f\", $b_max}" 2>/dev/null || echo "$b_max"; else echo "N/A"; fi)
                             
@@ -3607,9 +3659,9 @@ EOF
 
             # Show comparison table
             echo "  Threads Test Results" >> "$report_file"
-            echo "  ----------------------------------------------------------------------------------------------" >> "$report_file"
+            echo "  ------------------------------------------------------------------------------------------" >> "$report_file"
             printf "  %-18s %-15s %-18s %-18s %-20s\n" "Server IP" "Events/sec" "Avg Latency (ms)" "P95 Latency (ms)" "Fairness (events)" >> "$report_file"
-            echo "  ----------------------------------------------------------------------------------------------" >> "$report_file"
+            echo "  ------------------------------------------------------------------------------------------" >> "$report_file"
                 
                 local server_idx=0
                 local in_threads_section=false
@@ -3623,7 +3675,26 @@ EOF
                 local last_testing_ip=""
                 
                 while IFS= read -r line; do
-                    if [[ "$line" =~ "Testing server" ]]; then
+                    if [[ "$line" =~ "THREADS TEST RESULTS" ]]; then
+                        if [ "$in_threads_section" = true ] && [ -n "$current_server_ip" ]; then
+                            if [ -n "$current_events" ] && [ -n "$current_time" ] && [ "$current_time" != "0" ]; then
+                                current_eps=$(awk "BEGIN {printf \"%.2f\", $current_events / $current_time}" 2>/dev/null || echo "N/A")
+                            else
+                                current_eps="N/A"
+                            fi
+                            printf "  %-18s %-15s %-18s %-18s %-20s\n" "$current_server_ip" "${current_eps:-N/A}" "${current_threads_avg_lat:-N/A}" "${current_threads_p95_lat:-N/A}" "${current_threads_fairness:-N/A}" >> "$report_file"
+                        fi
+                        in_threads_section=true
+                        current_server_ip=$(echo "$line" | grep -oP 'Server: \K[0-9.]+' || echo "N/A")
+                        last_testing_ip="$current_server_ip"
+                        current_events=""
+                        current_time=""
+                        current_eps=""
+                        current_threads_avg_lat=""
+                        current_threads_p95_lat=""
+                        current_threads_fairness=""
+                        server_idx=$((server_idx + 1))
+                    elif [[ "$line" =~ "Testing server" ]]; then
                         last_testing_ip=$(echo "$line" | grep -oP 'Testing server [0-9]+/[0-9]+: \K[0-9.]+' || echo "")
                         if [ "$in_threads_section" = true ] && [ -n "$current_server_ip" ]; then
                             if [ -n "$current_events" ] && [ -n "$current_time" ] && [ "$current_time" != "0" ]; then
@@ -3635,18 +3706,6 @@ EOF
                         fi
                         in_threads_section=false
                         current_server_ip=""
-                    elif [[ "$line" =~ "THREADS TEST RESULTS" ]]; then
-                        if [ "$in_threads_section" = true ] && [ -n "$current_server_ip" ]; then
-                            if [ -n "$current_events" ] && [ -n "$current_time" ] && [ "$current_time" != "0" ]; then
-                                current_eps=$(awk "BEGIN {printf \"%.2f\", $current_events / $current_time}" 2>/dev/null || echo "N/A")
-                            else
-                                current_eps="N/A"
-                            fi
-                            printf "  %-18s %-15s %-18s %-18s %-20s\n" "$current_server_ip" "${current_eps:-N/A}" "${current_threads_avg_lat:-N/A}" "${current_threads_p95_lat:-N/A}" "${current_threads_fairness:-N/A}" >> "$report_file"
-                        fi
-                        in_threads_section=true
-                        current_server_ip=$(echo "$line" | grep -oP 'Server: \K[0-9.]+' || echo "N/A")
-                        server_idx=$((server_idx + 1))
                         current_events=""
                         current_time=""
                         current_eps=""
@@ -3678,19 +3737,21 @@ EOF
                             current_events=$(echo "$line" | awk '{print $NF}')
                         elif [[ "$line" =~ "total time:" ]]; then
                             current_time=$(echo "$line" | awk '{print $NF}' | tr -d 's')
-                        elif [[ "$line" =~ "avg:" ]] && [[ ! "$line" =~ "events (avg/stddev):" ]]; then
+                        elif [[ "$line" =~ "avg:" ]] && [[ ! "$line" =~ "events" ]]; then
                             current_threads_avg_lat=$(echo "$line" | awk '{print $NF}' | tr -d ',')
                         elif [[ "$line" =~ "95th percentile" ]]; then
                             current_threads_p95_lat=$(echo "$line" | awk '{print $NF}')
                         elif echo "$line" | grep -q "events.*avg/stddev"; then
-                        current_threads_fairness=$(echo "$line" | awk '{print $NF}')
+                            current_threads_fairness=$(echo "$line" | awk '{print $3}')
                         fi
                     fi
                 done < "$combined_file"
                 
                 if [ "$in_threads_section" = true ] && [ -n "$current_server_ip" ]; then
-                    if [ -n "$current_events" ] && [ -n "$current_time" ]; then
-                        current_eps=$(awk "BEGIN {printf \"%.2f\", $current_events / $current_time}")
+                    if [ -n "$current_events" ] && [ -n "$current_time" ] && [ "$current_time" != "0" ]; then
+                        current_eps=$(awk "BEGIN {printf \"%.2f\", $current_events / $current_time}" 2>/dev/null || echo "N/A")
+                    else
+                        current_eps="N/A"
                     fi
                     printf "  %-18s %-15s %-18s %-18s %-20s\n" "$current_server_ip" "${current_eps:-N/A}" "${current_threads_avg_lat:-N/A}" "${current_threads_p95_lat:-N/A}" "${current_threads_fairness:-N/A}" >> "$report_file"
                 fi
@@ -3714,9 +3775,9 @@ EOF
 
             # Show comparison table
             echo "  Mutex Test Results" >> "$report_file"
-            echo "  ----------------------------------------------------------------------------------------------" >> "$report_file"
+            echo "  ------------------------------------------------------------------------------------------" >> "$report_file"
             printf "  %-18s %-15s %-15s %-18s %-20s\n" "Server IP" "Transactions" "TPS" "Avg Latency (ms)" "Fairness (events)" >> "$report_file"
-            echo "  ----------------------------------------------------------------------------------------------" >> "$report_file"
+            echo "  ------------------------------------------------------------------------------------------" >> "$report_file"
                 
                 local server_idx=0
                 local in_mutex_section=false
@@ -3916,13 +3977,19 @@ EOF
                             fi
                             
                             if [ -z "$client_ip" ] || [ "$client_ip" = "null" ] || [ "$client_ip" = "N/A" ]; then
-                                # Fallback: get client IP from filename
+                                # Fallback: check if this is a matrix test file and try to get IP from results
                                 local file_name=$(basename "$json_file")
-                                client_ip=$(echo "$file_name" | grep -oP 'network_\w+_\K[0-9]+' | head -1)
-                                if [ -z "$client_ip" ]; then
-                                    client_ip="Client"
+                                if echo "$file_name" | grep -q "network_matrix"; then
+                                    # For matrix tests, use placeholder indicating failed connection
+                                    client_ip="Unknown"
+                                elif echo "$file_name" | grep -q "network_parallel"; then
+                                    # For parallel tests
+                                    client_ip="Unknown"
+                                elif echo "$file_name" | grep -q "network_scenario"; then
+                                    # For scenario tests
+                                    client_ip="Unknown"
                                 else
-                                    client_ip="Client $client_ip"
+                                    client_ip="Unknown"
                                 fi
                             fi
                         fi
@@ -4313,12 +4380,12 @@ main() {
                     remote_command="$remote_command CPU_THREADS=\"$CPU_THREADS\" CPU_MAX_PRIME=\"$CPU_MAX_PRIME\""
                     remote_command="$remote_command MEMORY_THREADS=\"$MEMORY_THREADS\" MEMORY_BLOCK_SIZE=\"$MEMORY_BLOCK_SIZE\" MEMORY_TOTAL_SIZE=\"$MEMORY_TOTAL_SIZE\" MEMORY_OPER=\"$MEMORY_OPER\""
                     remote_command="$remote_command IO_TOOL=\"$IO_TOOL\" IO_TOTAL_SIZE=\"$IO_TOTAL_SIZE\" SYSBENCH_PROFILES=\"${SYSBENCH_PROFILES:-rndrw}\" SYSBENCH_FILE_NUM=\"$SYSBENCH_FILE_NUM\" SYSBENCH_DURATION=\"$SYSBENCH_DURATION\" IO_PATH=\"${IO_PATH:-${IO_TEST_PATH:-$HOME/oscheckperf/io_test}}\" FIO_DURATION=\"$FIO_DURATION\""
-                    remote_command="$remote_command THREADS_THREADS=\"$THREADS_THREADS\" THREADS_YIELDS=\"$THREADS_YIELDS\" THREADS_LOCKS=\"$THREADS_LOCKS\""
+                    remote_command="$remote_command THREADS_NUM=\"$THREADS_NUM\" THREADS_YIELDS=\"$THREADS_YIELDS\" THREADS_LOCKS=\"$THREADS_LOCKS\""
                     remote_command="$remote_command MUTEX_THREADS=\"$MUTEX_THREADS\" MUTEX_NUM=\"$MUTEX_NUM\""
                     remote_command="$remote_command PGBENCH_DURATION=\"$PGBENCH_DURATION\" PGBENCH_CLIENTS=\"$PGBENCH_CLIENTS\" PGBENCH_THREADS=\"$PGBENCH_THREADS\" PGBENCH_SCALE=\"$PGBENCH_SCALE\" PGBENCH_DB=\"$PGBENCH_DB\""
                     
                     # Execute the remote command and capture output to a temporary file
-                    local temp_remote_file="$TMP_DIR/vb_remote_${target_ip//./_}_${TIMESTAMP}.txt"
+                    local temp_remote_file="$TMP_DIR/vb_remote_${target_ip//./_}_${TIMESTAMP}.log"
                     
                     # Always use remote oscheckperf for consistent execution
                     # Check if remote oscheckperf exists, if not, skip this server
@@ -4450,7 +4517,7 @@ main() {
                         fi
                     else
                         echo "  ✗ Remote oscheckperf not found, skipping this server"
-                        echo "  Hint: Use './oscheckperf -f servers.txt -i' to distribute oscheckperf to all servers"
+                        echo "  Hint: Use './oscheckperf -f all-servers -i' to distribute oscheckperf to all servers"
                     fi
                     
                     # Clean up
