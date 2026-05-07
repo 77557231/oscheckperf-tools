@@ -2,12 +2,7 @@
 !.gitignore
 output/
 sysbench-*/
-tools/oscheckperf_push_all.sh
-tools/oscheckperf_test.sh
-tools/oscheckperf_validate_logs.sh
 test*
-servers.txt
-tools/rules.md
-tools/skill.md
+all-servers
 *.log
-
+*.sh

@@ -142,7 +142,7 @@ sudo apt-get install -y sysbench fio iperf3 jq
 ./oscheckperf io
 
 # Run network test (matrix mode)
-./oscheckperf network -f servers.txt NETWORK_MODE=matrix
+./oscheckperf network -f all-servers NETWORK_MODE=matrix
 
 # Run threads test
 ./oscheckperf thread
@@ -170,17 +170,17 @@ sudo apt-get install -y sysbench fio iperf3 jq
 ./oscheckperf network -f "192.168.1.101 192.168.1.102" NETWORK_MODE=parallel
 
 # Matrix network test (all-to-all cross testing)
-./oscheckperf -f servers.txt NETWORK_MODE=matrix
+./oscheckperf -f all-servers NETWORK_MODE=matrix
 
 # Advanced usage
 # Run system checks with custom test directory
-./oscheckperf -f servers.txt check IO_PATH='/home/vastbase/vb_test'
+./oscheckperf -f all-servers check IO_PATH='/home/vastbase/vb_test'
 # Run multiple tests with custom parameters
-./oscheckperf cpu mem -f servers.txt DURATION=2 THREADS=4
+./oscheckperf cpu mem -f all-servers DURATION=2 THREADS=4
 # Run IO test with fio and custom parameters
-./oscheckperf io -f servers.txt IO_TOOL=fio IO_TOTAL_SIZE=10G
+./oscheckperf io -f all-servers IO_TOOL=fio IO_TOTAL_SIZE=10G
 # Use time command to measure total duration, run all tests with parameters
-time ./oscheckperf all -f servers.txt DURATION=200 IO_TOOL=fio FIO_PROFILES="read write"
+time ./oscheckperf all -f all-servers DURATION=200 IO_TOOL=fio FIO_PROFILES="read write"
 # fio multi-profile test (test read and write simultaneously)
 ./oscheckperf io IO_TOOL=fio FIO_PROFILES="read write" FIO_DURATION=60
 ```
@@ -194,7 +194,7 @@ Single machine installation:
 
 Multi-machine installation (from server list file):
 ```bash
-./oscheckperf -i -f servers.txt
+./oscheckperf -i -f all-servers
 ```
 
 Multi-machine installation (direct IP list):
@@ -334,6 +334,14 @@ FIO testing works differently:
 | `FIO_IOENGINE` | `libaio` | fio IO engine (libaio/sync/posixaio) |
 | `FIO_DURATION` | `DURATION` | fio test duration |
 
+### Threads Parameters
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `THREADS_NUM` | `auto (cores*4)` | Number of threads (auto-calculated based on CPU cores if not set, formula: cores*4) |
+| `THREADS_YIELDS` | `100` | Number of yields per thread |
+| `THREADS_LOCKS` | `4` | Number of locks |
+
 ### General Parameters
 
 | Parameter | Default | Description |
@@ -406,10 +414,10 @@ FIO testing works differently:
 
 ### Q4: How to configure multi-client for network testing?
 
-**A**: Create a server list file `servers.txt` containing all IP addresses to test, then specify it with the `-f` parameter:
+**A**: Create a server list file `all-servers` containing all IP addresses to test, then specify it with the `-f` parameter:
 
 ```bash
-./oscheckperf network -f servers.txt
+./oscheckperf network -f all-servers
 ```
 
 ### Q5: What is the difference between NETWORK_MODE and NETWORK_PARALLEL parameters?
@@ -426,10 +434,10 @@ FIO testing works differently:
 **Examples**:
 ```bash
 # Serial execution, each test uses 4 parallel connections
-./oscheckperf network -f servers.txt NETWORK_MODE=serial NETWORK_PARALLEL=4
+./oscheckperf network -f all-servers NETWORK_MODE=serial NETWORK_PARALLEL=4
 
 # Parallel execution, each test uses 4 parallel connections
-./oscheckperf network -f servers.txt NETWORK_MODE=parallel NETWORK_PARALLEL=4
+./oscheckperf network -f all-servers NETWORK_MODE=parallel NETWORK_PARALLEL=4
 ```
 
 ## Best Practices
