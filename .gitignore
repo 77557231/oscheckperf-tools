@@ -6,3 +6,4 @@ test*
 all-servers
 *.log
 *.sh
+tmp*
