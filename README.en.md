@@ -6,10 +6,13 @@ A system-level performance benchmarking tool designed for Vastbase, openGauss, a
 
 - ✅ **One-Click Execution**: Automated CPU/Memory/IO/Network/Threads/Mutex testing
 - ✅ **Flexible Parameters**: Control all test parameters through command line arguments
+- ✅ **Configuration File Support**: Manage all parameters through configuration files for batch configuration and version control
 - ✅ **Minimal Dependencies**: Basic mode only requires sysbench
 - ✅ **Multi-Tool Support**: IO testing supports both sysbench and fio
-- ✅ **Multi-Server Support**: Network testing supports multiple IP configurations (requires SSH passwordless login)
+- ✅ **Multi-Server Support**: Network testing supports multiple IP configurations (supports passwordless and password authentication)
+- ✅ **Password Authentication**: Support username and password configuration in server list, no SSH passwordless login required
 - ✅ **Detailed Reports**: Generate structured test reports
+- ✅ **Remote Distribution**: Automatically compile and distribute sysbench, sshpass to remote servers, supports cross-architecture deployment
 - ✅ **Security Enhancement**: Path validation, disk space check, process management optimization, protecting production environment
 - ✅ **Debug Modes**: Support `--debug` and `--dry-run` modes for troubleshooting and command preview
 

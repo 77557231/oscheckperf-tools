@@ -7,3 +7,10 @@ all-servers
 *.log
 *.sh
 tmp*
+user1-servers
+mcp
+logs
+parameter.conf.bak
+tools/test*
+tools/mcp
+
