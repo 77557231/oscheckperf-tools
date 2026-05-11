@@ -1,7 +1,7 @@
 #!/bin/bash
 #--------------------------------------------------------------------------------
 #-- File name:   oscheckperf
-#-- Version:     v0.8.3
+#-- Version:     v0.8.4
 #-- Purpose:     Database System Benchmark Tool
 #-- Author:      Wanping Pan 
 #-- Description: One-click system benchmarking tool, supports configuration via config file or command line parameters
@@ -299,7 +299,7 @@ parse_args() {
                 exit 0
                 ;;
             --version)
-                echo "Version: 0.8.3"
+                echo "Version: 0.8.4"
                 exit 0
                 ;;
             --dry-run)
@@ -797,7 +797,7 @@ get_memory_slots_detail() {
     local slot_results=$(echo "$slots_output" | awk '
         BEGIN { slot_count=0; in_device=0 }
         /Memory Device/ { 
-            if (in_device && size !~ /No Module Installed|0 MB|0 GB|0 bytes/ && size != "" && size != "No Module Installed" && size != "Unknown") {
+            if (in_device && size !~ /^(No Module Installed|Unknown)$/ && size != "" && size !~ /^0+\s*(MB|GB|bytes)$/) {
                 print "Slot " slot_count ":"
                 if (locator != "") print "  Locator: " locator
                 print "  Size: " size
@@ -1141,7 +1141,7 @@ get_machine_type() { local machine_type="Physical Machine"; if command -v system
 get_os_info() { if [ -f /etc/redhat-release ]; then cat /etc/redhat-release; return; fi; if [ -f /etc/euleros-release ]; then echo "EulerOS $(cat /etc/euleros-release | awk '{print $3}')"; return; fi; if [ -f /etc/openEuler-release ]; then cat /etc/openEuler-release | awk '{print $1, $3}'; return; fi; if [ -f /etc/os-release ]; then local pretty_name=$(grep -oP 'PRETTY_NAME="?\K[^"]+' /etc/os-release 2>/dev/null); if [ -n "$pretty_name" ]; then echo "$pretty_name"; return; fi; fi; if [ -f /etc/lsb-release ]; then local os_name=$(grep -oP 'DISTRIB_ID=\K.*' /etc/lsb-release 2>/dev/null); local os_version=$(grep -oP 'DISTRIB_RELEASE=\K.*' /etc/lsb-release 2>/dev/null); echo "$os_name $os_version"; return; fi; echo "Unknown"; }
 get_disk_info_detailed() { if command -v lsblk &>/dev/null; then lsblk -no NAME,SIZE,TYPE,FSTYPE,MOUNTPOINT 2>/dev/null | grep -v "^loop" | grep -v "^NAME" | awk '{name = $1; gsub(/^[├└─ ]+/, "", name); size = $2; type = $3; fstype = $4; mountpoint = $5; if (fstype == "") fstype = "-"; if (mountpoint == "") mountpoint = "-"; print name "|" size "|" type "|" fstype "|" mountpoint;}' || echo "N/A"; else echo "N/A"; fi; }
 get_network_info() { local result=""; for iface in $(ls /sys/class/net/ 2>/dev/null | grep -v "^lo$"); do local mac=$(cat "/sys/class/net/$iface/address" 2>/dev/null || echo "N/A"); local speed=$(cat "/sys/class/net/$iface/speed" 2>/dev/null || echo "N/A"); local mtu=$(cat "/sys/class/net/$iface/mtu" 2>/dev/null || echo "N/A"); local state=$(cat "/sys/class/net/$iface/operstate" 2>/dev/null || echo "N/A"); local ip=$(ip addr show "$iface" 2>/dev/null | grep 'inet ' | awk '{print $2}' | cut -d'/' -f1 | head -1 || echo "N/A"); local speed_str=""; if [ "$speed" != "N/A" ] && [ "$speed" -gt 0 ] 2>/dev/null; then speed_str="${speed}Mbps"; elif [ "$speed" = "N/A" ]; then speed_str="N/A"; else speed_str="Unknown"; fi; result="${result}${iface}: IP=${ip}, MAC=${mac}, Speed=${speed_str}, MTU=${mtu}, State=${state}\n"; done; echo -e "$result"; }
-get_memory_slots_detail() { if ! command -v dmidecode &>/dev/null; then echo "unknown (requires dmidecode)"; return; fi; local slots_output=$(dmidecode -t memory 2>/dev/null); if [ -z "$slots_output" ]; then echo "unknown (requires root)"; return; fi; local total_slots=$(echo "$slots_output" | grep -A10 'Physical Memory Array' | grep -i 'Number Of Devices' | awk '{print $NF}'); if [ -z "$total_slots" ] || [ "$total_slots" = "0" ]; then total_slots=$(echo "$slots_output" | grep -c 'Memory Device'); fi; if [ -z "$total_slots" ] || [ "$total_slots" = "0" ]; then echo "N/A (virtual machine)"; return; fi; local slot_results=$(echo "$slots_output" | awk 'BEGIN { slot_count=0; in_device=0 } /Memory Device/ { if (in_device && size !~ /No Module Installed|0 MB|0 GB|0 bytes/ && size != "" && size != "No Module Installed" && size != "Unknown") { print "Slot " slot_count ":"; if (locator != "") print "  Locator: " locator; print "  Size: " size; if (mem_type != "") print "  Type: " mem_type; if (speed != "" && speed != "Unknown") print "  Speed: " speed; if (manufacturer != "" && manufacturer != "Unknown") print "  Manufacturer: " manufacturer; if (part_num != "" && part_num != "Unknown") print "  Part Number: " part_num; } slot_count++; in_device=1; size=""; locator=""; mem_type=""; speed=""; manufacturer=""; part_num="" } in_device && /Locator:/ { locator = substr($0, index($0, $2)); gsub(/^[ \t]+/, "", locator); gsub(/^Locator:\s*/, "", locator) } in_device && /Size:/ { size = substr($0, index($0, "Size:") + 5); gsub(/^[ \t]+/, "", size) } in_device && /Type:/ { mem_type = substr($0, index($0, $2)); gsub(/^[ \t]+/, "", mem_type) } in_device && /Speed:/ { speed = substr($0, index($0, $2)); gsub(/^[ \t]+/, "", speed); gsub(/^Memory Speed:\s*/, "", speed) } in_device && /Manufacturer:/ { manufacturer = substr($0, index($0, $2)); gsub(/^[ \t]+/, "", manufacturer) } in_device && /Part Number:/ { part_num = substr($0, index($0, $3)); gsub(/^[ \t]+/, "", part_num) } END { if (in_device && size !~ /No Module Installed|0 MB|0 GB|0 bytes/ && size != "" && size != "No Module Installed" && size != "Unknown") { print "Slot " slot_count ":"; if (locator != "") print "  Locator: " locator; print "  Size: " size; if (mem_type != "") print "  Type: " mem_type; if (speed != "" && speed != "Unknown") print "  Speed: " speed; if (manufacturer != "" && manufacturer != "Unknown") print "  Manufacturer: " manufacturer; if (part_num != "" && part_num != "Unknown") print "  Part Number: " part_num; } }'); local used_slots=$(echo "$slot_results" | grep -c '^Slot '); echo "Total Slots: $total_slots"; echo "Used Slots: $used_slots"; echo "$slot_results"; }
+get_memory_slots_detail() { if ! command -v dmidecode &>/dev/null; then echo "unknown (requires dmidecode)"; return; fi; local slots_output=$(dmidecode -t memory 2>/dev/null); if [ -z "$slots_output" ]; then echo "unknown (requires root)"; return; fi; local total_slots=$(echo "$slots_output" | grep -A10 'Physical Memory Array' | grep -i 'Number Of Devices' | awk '{print $NF}'); if [ -z "$total_slots" ] || [ "$total_slots" = "0" ]; then total_slots=$(echo "$slots_output" | grep -c 'Memory Device'); fi; if [ -z "$total_slots" ] || [ "$total_slots" = "0" ]; then echo "N/A (virtual machine)"; return; fi; local slot_results=$(echo "$slots_output" | awk 'BEGIN { slot_count=0; in_device=0 } /Memory Device/ { if (in_device && size !~ /^(No Module Installed|Unknown)$/ && size != "" && size !~ /^0+\s*(MB|GB|bytes)$/) { print "Slot " slot_count ":"; if (locator != "") print "  Locator: " locator; print "  Size: " size; if (mem_type != "") print "  Type: " mem_type; if (speed != "" && speed != "Unknown") print "  Speed: " speed; if (manufacturer != "" && manufacturer != "Unknown") print "  Manufacturer: " manufacturer; if (part_num != "" && part_num != "Unknown") print "  Part Number: " part_num; } slot_count++; in_device=1; size=""; locator=""; mem_type=""; speed=""; manufacturer=""; part_num="" } in_device && /Locator:/ { locator = substr($0, index($0, $2)); gsub(/^[ \t]+/, "", locator); gsub(/^Locator:\s*/, "", locator) } in_device && /Size:/ { size = substr($0, index($0, "Size:") + 5); gsub(/^[ \t]+/, "", size) } in_device && /Type:/ { mem_type = substr($0, index($0, $2)); gsub(/^[ \t]+/, "", mem_type) } in_device && /Speed:/ { speed = substr($0, index($0, $2)); gsub(/^[ \t]+/, "", speed); gsub(/^Memory Speed:\s*/, "", speed) } in_device && /Manufacturer:/ { manufacturer = substr($0, index($0, $2)); gsub(/^[ \t]+/, "", manufacturer) } in_device && /Part Number:/ { part_num = substr($0, index($0, $3)); gsub(/^[ \t]+/, "", part_num) } END { if (in_device && size !~ /^(No Module Installed|Unknown)$/ && size != "" && size !~ /^0+\s*(MB|GB|bytes)$/) { print "Slot " slot_count ":"; if (locator != "") print "  Locator: " locator; print "  Size: " size; if (mem_type != "") print "  Type: " mem_type; if (speed != "" && speed != "Unknown") print "  Speed: " speed; if (manufacturer != "" && manufacturer != "Unknown") print "  Manufacturer: " manufacturer; if (part_num != "" && part_num != "Unknown") print "  Part Number: " part_num; } }'); local used_slots=$(echo "$slot_results" | grep -c '^Slot '); echo "Total Slots: $total_slots"; echo "Used Slots: $used_slots"; echo "$slot_results"; }
 REMOTE_EOF
 }
 
@@ -2802,9 +2802,11 @@ run_matrix_network_test() {
         # Start iperf3 server on destination
         echo "  Starting iperf3 server on $dst..."
         local dst_ssh=$(get_ssh_command "$dst")
-        eval "$dst_ssh 'iperf3 -s -p $port -D'" > /dev/null 2>&1
         
-        if [ "$DRY_RUN" != true ]; then
+        if [ "$DRY_RUN" = true ]; then
+            echo "[DRY RUN] $dst_ssh 'iperf3 -s -p $port -D'"
+        else
+            eval "$dst_ssh 'iperf3 -s -p $port -D'" > /dev/null 2>&1
             sleep 3  # Wait for server to start
         fi
         
@@ -2818,30 +2820,40 @@ run_matrix_network_test() {
         local client_timeout=$((duration + 15))
         
         # Check if source is local machine
-        if [ "$src" = "$LOCAL_IP" ]; then
-            # Run locally
-            if timeout --signal=KILL $client_timeout iperf3 -c "$dst" -p "$port" -t "$duration" -P "$parallel" -J > "$client_output_file" 2>&1; then
-                # Generate text format from JSON
-                generate_iperf3_text_from_json "$client_output_file" "$client_text_output"
+        if [ "$DRY_RUN" = true ]; then
+            echo "[DRY RUN] Would run iperf3 client from $src to $dst"
+            if [ "$src" = "$LOCAL_IP" ]; then
+                echo "[DRY RUN] timeout --signal=KILL $client_timeout iperf3 -c \"$dst\" -p \"$port\" -t \"$duration\" -P \"$parallel\" -J"
             else
-                results+=("$src|$dst|0")
-                echo "  ⚠ Test failed: $src -> $dst"
-                # Stop iperf3 server on destination
-                eval "$dst_ssh 'pkill -f \"iperf3 -s -p $port\"'" > /dev/null 2>&1
-                continue
+                local src_ssh=$(get_ssh_command "$src")
+                echo "[DRY RUN] timeout --signal=KILL $client_timeout $src_ssh 'iperf3 -c \"$dst\" -p \"$port\" -t \"$duration\" -P \"$parallel\" -J'"
             fi
         else
-            # Run via SSH
-            local src_ssh=$(get_ssh_command "$src")
-            if eval "timeout --signal=KILL $client_timeout $src_ssh 'iperf3 -c \"$dst\" -p \"$port\" -t \"$duration\" -P \"$parallel\" -J'" > "$client_output_file" 2>&1; then
-                # Generate text format from JSON
-                generate_iperf3_text_from_json "$client_output_file" "$client_text_output"
+            if [ "$src" = "$LOCAL_IP" ]; then
+                # Run locally
+                if timeout --signal=KILL $client_timeout iperf3 -c "$dst" -p "$port" -t "$duration" -P "$parallel" -J > "$client_output_file" 2>&1; then
+                    # Generate text format from JSON
+                    generate_iperf3_text_from_json "$client_output_file" "$client_text_output"
+                else
+                    results+=("$src|$dst|0")
+                    echo "  ⚠ Test failed: $src -> $dst"
+                    # Stop iperf3 server on destination
+                    eval "$dst_ssh 'pkill -f \"iperf3 -s -p $port\"'" > /dev/null 2>&1
+                    continue
+                fi
             else
-                results+=("$src|$dst|0")
-                echo "  ⚠ Test failed: $src -> $dst"
-                # Stop iperf3 server on destination
-                eval "$dst_ssh 'pkill -f \"iperf3 -s -p $port\"'" > /dev/null 2>&1
-                continue
+                # Run via SSH
+                local src_ssh=$(get_ssh_command "$src")
+                if eval "timeout --signal=KILL $client_timeout $src_ssh 'iperf3 -c \"$dst\" -p \"$port\" -t \"$duration\" -P \"$parallel\" -J'" > "$client_output_file" 2>&1; then
+                    # Generate text format from JSON
+                    generate_iperf3_text_from_json "$client_output_file" "$client_text_output"
+                else
+                    results+=("$src|$dst|0")
+                    echo "  ⚠ Test failed: $src -> $dst"
+                    # Stop iperf3 server on destination
+                    eval "$dst_ssh 'pkill -f \"iperf3 -s -p $port\"'" > /dev/null 2>&1
+                    continue
+                fi
             fi
         fi
         
@@ -2868,7 +2880,10 @@ run_matrix_network_test() {
         fi
         
         # Stop iperf3 server on destination
-        if [ "$DRY_RUN" != true ]; then
+        if [ "$DRY_RUN" = true ]; then
+            echo "[DRY RUN] Would stop iperf3 server on $dst"
+            echo "[DRY RUN] $dst_ssh 'pkill -f \"iperf3 -s -p $port\"'"
+        else
             # Use nohup to avoid SSH blocking
             nohup eval "$dst_ssh 'pkill -f \"iperf3 -s -p $port\" 2>/dev/null'" > /dev/null 2>&1 &
             sleep 1
@@ -2939,9 +2954,11 @@ run_parallel_network_test() {
     # Start iperf3 server on the first host
     echo "  Starting iperf3 server on $server_ip..."
     local server_ssh=$(get_ssh_command "$server_ip")
-    eval "$server_ssh 'iperf3 -s -p $port -D'" > /dev/null 2>&1
     
-    if [ "$DRY_RUN" != true ]; then
+    if [ "$DRY_RUN" = true ]; then
+        echo "[DRY RUN] $server_ssh 'iperf3 -s -p $port -D'"
+    else
+        eval "$server_ssh 'iperf3 -s -p $port -D'" > /dev/null 2>&1
         sleep 3  # Wait for server to start
     fi
     
@@ -2993,9 +3010,10 @@ run_parallel_network_test() {
     done
     
     # Stop iperf3 server
-    eval "$server_ssh 'pkill -f \"iperf3 -s -p $port\"'" > /dev/null 2>&1
-    
-    if [ "$DRY_RUN" != true ]; then
+    if [ "$DRY_RUN" = true ]; then
+        echo "[DRY RUN] $server_ssh 'pkill -f \"iperf3 -s -p $port\"'"
+    else
+        eval "$server_ssh 'pkill -f \"iperf3 -s -p $port\"'" > /dev/null 2>&1
         sleep 1
     fi
     
@@ -3113,6 +3131,10 @@ generate_matrix_report() {
     
     echo "Generating matrix network test report..."
     
+    # Calculate statistics using common function
+    local stats=$(calculate_stats "${results_arr[@]}")
+    IFS='|' read -r total_bw avg_bw min_bw max_bw median_bw count <<< "$stats"
+    
     # Create report header
     cat > "$report_file" << EOF
 ================================================================================
@@ -3159,10 +3181,6 @@ EOF
         echo >> "$report_file"
     done
     
-    # Calculate statistics using common function
-    local stats=$(calculate_stats "${results_arr[@]}")
-    IFS='|' read -r total_bw avg_bw min_bw max_bw median_bw count <<< "$stats"
-    
     # Add statistics to report
     cat >> "$report_file" << EOF
 
@@ -3176,6 +3194,30 @@ Maximum bandwidth: $(printf "%.2f" $max_bw) MB/s
 Median bandwidth: $(printf "%.2f" $median_bw) MB/s
 Total test pairs: $count
 
+================================================================================
+EOF
+    
+    # Add performance ranking section
+    cat >> "$report_file" << EOF
+                            Performance Ranking (MB/s)
+================================================================================
+EOF
+    
+    # Sort results by bandwidth (descending) and display
+    local sorted_results=$(printf "%s\n" "${results_arr[@]}" | sort -t'|' -k3 -rn)
+    local rank=1
+    echo "$sorted_results" | while IFS='|' read -r src dst bw; do
+        printf "%2d. %15s -> %-15s : %8.2f MB/s" "$rank" "$src" "$dst" "$bw" >> "$report_file"
+        # Highlight poor performers (below 50% of average)
+        if (( $(echo "$bw < $avg_bw * 0.5" | bc -l) )); then
+            echo "  ⚠ POOR PERFORMANCE" >> "$report_file"
+        else
+            echo "" >> "$report_file"
+        fi
+        rank=$((rank + 1))
+    done
+    
+    cat >> "$report_file" << EOF
 ================================================================================
 EOF
     
