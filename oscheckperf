@@ -1,7 +1,7 @@
 #!/bin/bash
 #--------------------------------------------------------------------------------
 #-- File name:   oscheckperf
-#-- Version:     v0.8.0
+#-- Version:     v0.8.1
 #-- Purpose:     Database System Benchmark Tool
 #-- Author:      Wanping Pan 
 #-- Description: One-click system benchmarking tool, supports configuration via config file or command line parameters
@@ -53,7 +53,7 @@ check_sshpass() {
 
 # Parse server entry to extract IP, username, and password
 # Format: IP[:username[:password]]
-# Returns: IP
+# Sets: LAST_PARSED_IP global variable with the IP
 # Side effect: populates SERVER_USERNAMES and SERVER_PASSWORDS arrays
 parse_server_entry() {
     local entry="$1"
@@ -82,7 +82,7 @@ parse_server_entry() {
         ip="$entry"
     fi
     
-    echo "$ip"
+    LAST_PARSED_IP="$ip"
 }
 
 # Check if server uses password authentication
@@ -100,26 +100,49 @@ get_ssh_command() {
     local ip="$1"
     
     if is_password_auth "$ip"; then
-        # Password authentication
-        if ! check_sshpass; then
-            echo "Error: sshpass is not installed but password authentication is required for server $ip"
-            echo "Please install sshpass first:"
-            echo "  CentOS/RHEL: sudo yum install -y sshpass"
-            echo "  Ubuntu/Debian: sudo apt-get install -y sshpass"
-            exit 1
-        fi
-        
         local username="${SERVER_USERNAMES[$ip]}"
         local password="${SERVER_PASSWORDS[$ip]}"
         
         if [ -n "$password" ]; then
-            echo "sshpass -p '$password' ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null $username@$ip"
+            if ! check_sshpass; then
+                echo "Error: sshpass is not installed but password authentication is required for server $ip"
+                echo "Please install sshpass first:"
+                echo "  CentOS/RHEL: sudo yum install -y sshpass"
+                echo "  Ubuntu/Debian: sudo apt-get install -y sshpass"
+                exit 1
+            fi
+            echo "sshpass -p '${password//\'/\'\\\'\'}' ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o PreferredAuthentications=password -o PubkeyAuthentication=no $username@$ip"
         else
-            echo "ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null $username@$ip"
+            echo "ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o PreferredAuthentications=password -o PubkeyAuthentication=no $username@$ip"
         fi
     else
-        # Passwordless authentication
         echo "ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null $ip"
+    fi
+}
+
+# Get SCP command prefix for a server
+# Returns: SCP command prefix (with or without sshpass)
+get_scp_command() {
+    local ip="$1"
+    
+    if is_password_auth "$ip"; then
+        local username="${SERVER_USERNAMES[$ip]}"
+        local password="${SERVER_PASSWORDS[$ip]}"
+        
+        if [ -n "$password" ]; then
+            if ! check_sshpass; then
+                echo "Error: sshpass is not installed but password authentication is required for server $ip"
+                echo "Please install sshpass first:"
+                echo "  CentOS/RHEL: sudo yum install -y sshpass"
+                echo "  Ubuntu/Debian: sudo apt-get install -y sshpass"
+                exit 1
+            fi
+            echo "sshpass -p '${password//\'/\'\\\'\'}' scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o PreferredAuthentications=password -o PubkeyAuthentication=no"
+        else
+            echo "scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o PreferredAuthentications=password -o PubkeyAuthentication=no"
+        fi
+    else
+        echo "scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
     fi
 }
 
@@ -170,7 +193,7 @@ exec_ssh() {
         return 0
     fi
     
-    $ssh_cmd "$cmd"
+    eval "$ssh_cmd '$cmd'"
 }
 
 # Execute SSH command with timeout
@@ -191,7 +214,7 @@ exec_ssh_with_timeout() {
         return 0
     fi
     
-    timeout --signal=KILL "$timeout" $ssh_cmd "$cmd"
+    eval "timeout --signal=KILL $timeout $ssh_cmd '$cmd'"
 }
 
 # Report formatting constants
@@ -252,7 +275,7 @@ parse_args() {
                 exit 0
                 ;;
             --version)
-                echo "Version: 0.8.0"
+                echo "Version: 0.8.1"
                 exit 0
                 ;;
             --dry-run)
@@ -442,7 +465,7 @@ show_help() {
     echo "  -o <output_dir>   Specify output directory path (default: $OUTPUT_DIR_DEFAULT)"
     echo "  -f <servers_file> Specify servers list file path (supports IP or IP:username:password)"
     echo "  -p <config_file>  Specify configuration file path (KEY=VALUE format)"
-    echo "  -i <component>    Install components: sysbench, sshpass, oscheckperf, all"
+    echo "  -i <component>    Install components: sysbench, sshpass, oscheckperf, all (default: all)"
     echo "  -h                Show this help message"
     echo "  --debug           Enable debug mode (show detailed logs)"
     echo "  --version         Show version information"
@@ -1088,7 +1111,8 @@ get_node_hardware_info() {
         get_network_info 2>/dev/null || echo "N/A"
     else
         # Get remote info via SSH - define functions on remote
-        local ssh_output=$(ssh "$ip" 2>/dev/null << 'EOF'
+        local remote_ssh=$(get_ssh_command "$ip")
+        local ssh_output=$(eval "$remote_ssh bash -s" 2>/dev/null << 'EOF'
 get_cpu_model() {
     if [ -f /proc/cpuinfo ]; then
         grep -m 1 'model name' /proc/cpuinfo | sed 's/model name\s*: //' 2>/dev/null || echo "N/A"
@@ -2112,16 +2136,16 @@ cleanup_residual_processes() {
         local cmd_prefix=""
         if [ "$is_remote" = "true" ]; then
             local ssh_cmd=$(get_ssh_command "$host")
-            cmd_prefix="timeout --signal=KILL 10 $ssh_cmd -o ConnectTimeout=5 -o ServerAliveInterval=2"
+            cmd_prefix="timeout --signal=KILL 10 $ssh_cmd"
             # Get remote username from SSH config or use current user
-            current_user_local=$($cmd_prefix whoami 2>/dev/null || echo "$current_user")
+            current_user_local=$(eval "$cmd_prefix whoami" 2>/dev/null || echo "$current_user")
         fi
         
         # Helper function to get PIDs for current user only
         get_user_pids() {
             local pattern="$1"
             if [ "$is_remote" = "true" ]; then
-                $cmd_prefix pgrep -u "$current_user_local" -f "$pattern" 2>/dev/null || true
+                eval "$cmd_prefix pgrep -u '$current_user_local' -f '$pattern'" 2>/dev/null || true
             else
                 pgrep -u "$current_user_local" -f "$pattern" 2>/dev/null || true
             fi
@@ -2134,7 +2158,7 @@ cleanup_residual_processes() {
             local pid_count=$(echo "$pids" | wc -l)
             cleanup_details="${cleanup_details}    - $process_desc: $pid_count process(es)\n"
             if [ "$is_remote" = "true" ]; then
-                timeout --signal=KILL 5 $cmd_prefix sh -c "echo '$pids' | xargs kill -9 2>/dev/null || true" 2>/dev/null
+                eval "$cmd_prefix sh -c 'echo $pids | xargs kill -9 2>/dev/null || true'" 2>/dev/null
             else
                 timeout --signal=KILL 5 sh -c "echo '$pids' | xargs kill -9 2>/dev/null || true" 2>/dev/null
             fi
@@ -2952,16 +2976,17 @@ run_serial_network_test() {
             fi
             
             # Check if iperf3 is installed on client
-            if ! ssh "$client" "command -v iperf3 > /dev/null 2>&1"; then
+            local client_ssh=$(get_ssh_command "$client")
+            if ! eval "$client_ssh 'command -v iperf3 > /dev/null 2>&1'" > /dev/null 2>&1; then
                 echo "  ⚠ iperf3 not installed on client $client"
-                echo "  Please run: ssh $client 'sudo yum install -y iperf3'"
+                echo "  Please install iperf3 on $client manually"
                 continue
             fi
             
             echo "  Running test: $client -> $server_ip"
             
             # Check if iperf3 server is reachable from client
-            if ! ssh -o ConnectTimeout=5 "$client" "nc -z -w 2 $server_ip $port" > /dev/null 2>&1; then
+            if ! eval "$client_ssh 'nc -z -w 2 $server_ip $port'" > /dev/null 2>&1; then
                 echo "  ⚠ Server $server_ip:$port is not reachable from client $client"
                 echo "  Possible issues: firewall blocking port $port, or iperf3 server not running"
                 continue
@@ -2970,7 +2995,8 @@ run_serial_network_test() {
             # Run iperf3 client with timeout and capture both JSON and text output in single run
             # Using --json flag to get JSON output while also capturing stdout for text output
             local combined_output=$(mktemp)
-            if run_command "timeout --signal=KILL $client_timeout ssh -o ConnectTimeout=10 -o ServerAliveInterval=5 $client 'iperf3 -c \"$server_ip\" -p \"$port\" -t \"$duration\" -P \"$parallel\" -J'" "$client_output_file"; then
+            local client_ssh=$(get_ssh_command "$client")
+            if eval "timeout --signal=KILL $client_timeout $client_ssh 'iperf3 -c \"$server_ip\" -p \"$port\" -t \"$duration\" -P \"$parallel\" -J'" > "$client_output_file" 2>&1; then
                 # Get text output by parsing JSON or running a quick summary
                 # For text output, we parse the JSON to extract per-second data
                 if [ -f "$client_output_file" ]; then
@@ -3089,7 +3115,8 @@ run_matrix_network_test() {
         
         # Start iperf3 server on destination
         echo "  Starting iperf3 server on $dst..."
-        run_command "ssh $dst 'iperf3 -s -p $port -D'" "/dev/null"
+        local dst_ssh=$(get_ssh_command "$dst")
+        eval "$dst_ssh 'iperf3 -s -p $port -D'" > /dev/null 2>&1
         
         if [ "$DRY_RUN" != true ]; then
             sleep 3  # Wait for server to start
@@ -3114,19 +3141,20 @@ run_matrix_network_test() {
                 results+=("$src|$dst|0")
                 echo "  ⚠ Test failed: $src -> $dst"
                 # Stop iperf3 server on destination
-                run_command "ssh $dst 'pkill -f \"iperf3 -s -p $port\"'" "/dev/null"
+                eval "$dst_ssh 'pkill -f \"iperf3 -s -p $port\"'" > /dev/null 2>&1
                 continue
             fi
         else
             # Run via SSH
-            if timeout --signal=KILL $client_timeout ssh -o ConnectTimeout=10 -o ServerAliveInterval=5 "$src" "iperf3 -c \"$dst\" -p \"$port\" -t \"$duration\" -P \"$parallel\" -J" > "$client_output_file" 2>&1; then
+            local src_ssh=$(get_ssh_command "$src")
+            if eval "timeout --signal=KILL $client_timeout $src_ssh 'iperf3 -c \"$dst\" -p \"$port\" -t \"$duration\" -P \"$parallel\" -J'" > "$client_output_file" 2>&1; then
                 # Generate text format from JSON
                 generate_iperf3_text_from_json "$client_output_file" "$client_text_output"
             else
                 results+=("$src|$dst|0")
                 echo "  ⚠ Test failed: $src -> $dst"
                 # Stop iperf3 server on destination
-                run_command "ssh $dst 'pkill -f \"iperf3 -s -p $port\"'" "/dev/null"
+                eval "$dst_ssh 'pkill -f \"iperf3 -s -p $port\"'" > /dev/null 2>&1
                 continue
             fi
         fi
@@ -3156,7 +3184,7 @@ run_matrix_network_test() {
         # Stop iperf3 server on destination
         if [ "$DRY_RUN" != true ]; then
             # Use nohup to avoid SSH blocking
-            nohup ssh $dst "pkill -f \"iperf3 -s -p $port\" 2>/dev/null" > /dev/null 2>&1 &
+            nohup eval "$dst_ssh 'pkill -f \"iperf3 -s -p $port\" 2>/dev/null'" > /dev/null 2>&1 &
             sleep 1
         fi
     done
@@ -3224,7 +3252,8 @@ run_parallel_network_test() {
     
     # Start iperf3 server on the first host
     echo "  Starting iperf3 server on $server_ip..."
-    run_command "ssh $server_ip 'iperf3 -s -p $port -D'" "/dev/null"
+    local server_ssh=$(get_ssh_command "$server_ip")
+    eval "$server_ssh 'iperf3 -s -p $port -D'" > /dev/null 2>&1
     
     if [ "$DRY_RUN" != true ]; then
         sleep 3  # Wait for server to start
@@ -3247,15 +3276,17 @@ run_parallel_network_test() {
         local client_text_output="$TMP_DIR/network_parallel_${client_idx}_${TIMESTAMP}_text.log"
         
         if [ "$DRY_RUN" = true ]; then
-            echo "[DRY RUN] ssh $client_ip 'iperf3 -c $server_ip -p $port -t $duration -P $parallel -J'"
-            echo "[DRY RUN] ssh $client_ip 'iperf3 -c $server_ip -p $port -t $duration -P $parallel 2>&1 | grep -v ^$'"
+            local client_ssh=$(get_ssh_command "$client_ip")
+            echo "[DRY RUN] $client_ssh 'iperf3 -c $server_ip -p $port -t $duration -P $parallel -J'"
+            echo "[DRY RUN] $client_ssh 'iperf3 -c $server_ip -p $port -t $duration -P $parallel 2>&1 | grep -v ^$'"
             results+=("$client_ip|$server_ip|0")
             echo "  [DRY RUN] Test would complete: $client_ip -> $server_ip"
         else
             # Run iperf3 client sequentially with timeout
             # Calculate timeout: duration + 15s buffer
             local client_timeout=$((duration + 15))
-            timeout --signal=KILL $client_timeout ssh -o ConnectTimeout=10 -o ServerAliveInterval=5 $client_ip "iperf3 -c $server_ip -p $port -t $duration -P $parallel -J" > "$client_output_file" 2>&1
+            local client_ssh=$(get_ssh_command "$client_ip")
+            eval "timeout --signal=KILL $client_timeout $client_ssh 'iperf3 -c $server_ip -p $port -t $duration -P $parallel -J'" > "$client_output_file" 2>&1
             local exit_status=$?
             
             if [ $exit_status -eq 0 ]; then
@@ -3276,7 +3307,7 @@ run_parallel_network_test() {
     done
     
     # Stop iperf3 server
-    run_command "ssh $server_ip 'pkill -f \"iperf3 -s -p $port\"'" "/dev/null"
+    eval "$server_ssh 'pkill -f \"iperf3 -s -p $port\"'" > /dev/null 2>&1
     
     if [ "$DRY_RUN" != true ]; then
         sleep 1
@@ -4036,8 +4067,9 @@ generate_report() {
                 local local_mem=$(get_memory_size_mb 2>/dev/null || echo "N/A")
                 server_list_display="${server_list_display}\n  - $ip (local): CPU Cores: ${local_cpu}, Memory Size: ${local_mem} MB"
             else
-                local remote_cpu=$(ssh "$ip" "nproc 2>/dev/null || grep -c ^processor /proc/cpuinfo 2>/dev/null || echo 'N/A'" 2>/dev/null || echo "N/A")
-                local remote_mem=$(ssh "$ip" "awk '/MemTotal/ {printf \"%.0f\", \$2/1024}' /proc/meminfo 2>/dev/null || echo 'N/A'" 2>/dev/null || echo "N/A")
+                local remote_ssh=$(get_ssh_command "$ip")
+                local remote_cpu=$(eval "$remote_ssh 'nproc 2>/dev/null || grep -c ^processor /proc/cpuinfo 2>/dev/null || echo N/A'" 2>/dev/null || echo "N/A")
+                local remote_mem=$(eval "$remote_ssh 'awk \"/MemTotal/ {printf \\\"%.0f\\\", \\\$2/1024}\" /proc/meminfo 2>/dev/null || echo N/A'" 2>/dev/null || echo "N/A")
                 server_list_display="${server_list_display}\n  - $ip: CPU Cores: ${remote_cpu}, Memory Size: ${remote_mem} MB"
             fi
         done
@@ -4163,7 +4195,8 @@ generate_report() {
         for server in "${target_servers[@]}"; do
             if [ "$server" != "$local_ip" ]; then
                 if [ "${CPU_THREADS:-0}" = "0" ]; then
-                    local remote_cpu=$(ssh "$server" "nproc 2>/dev/null || grep -c ^processor /proc/cpuinfo 2>/dev/null || echo 'N/A'" 2>/dev/null || echo "N/A")
+                    local remote_ssh=$(get_ssh_command "$server")
+                    local remote_cpu=$(eval "$remote_ssh 'nproc 2>/dev/null || grep -c ^processor /proc/cpuinfo 2>/dev/null || echo N/A'" 2>/dev/null || echo "N/A")
                     printf -- "    %s: auto (%s)\n" "$server" "${remote_cpu:-N/A}" >> "$report_file"
                 else
                     printf -- "    %s: %s\n" "$server" "${CPU_THREADS}" >> "$report_file"
@@ -4222,8 +4255,13 @@ generate_report() {
         if [ ${#target_servers[@]} -gt 0 ]; then
             for server in "${target_servers[@]}"; do
                 if [ "$server" != "$local_ip" ]; then
-                    local remote_cpu=$(ssh "$server" "nproc 2>/dev/null || grep -c ^processor /proc/cpuinfo 2>/dev/null || echo 'N/A'" 2>/dev/null || echo "N/A")
-                    printf -- "    %s: auto (%s)\n" "$server" "$((remote_cpu * 4))" >> "$report_file"
+                    local remote_ssh=$(get_ssh_command "$server")
+                    local remote_cpu=$(eval "$remote_ssh 'nproc 2>/dev/null || grep -c ^processor /proc/cpuinfo 2>/dev/null || echo N/A'" 2>/dev/null || echo "N/A")
+                    if [ "$remote_cpu" = "N/A" ] || [ -z "$remote_cpu" ]; then
+                        printf -- "    %s: auto (N/A)\n" "$server" >> "$report_file"
+                    else
+                        printf -- "    %s: auto (%s)\n" "$server" "$((remote_cpu * 4))" >> "$report_file"
+                    fi
                 fi
             done
         fi
@@ -4241,7 +4279,8 @@ generate_report() {
         if [ ${#target_servers[@]} -gt 0 ]; then
             for server in "${target_servers[@]}"; do
                 if [ "$server" != "$local_ip" ]; then
-                    local remote_cpu=$(ssh "$server" "nproc 2>/dev/null || grep -c ^processor /proc/cpuinfo 2>/dev/null || echo 'N/A'" 2>/dev/null || echo "N/A")
+                    local remote_ssh=$(get_ssh_command "$server")
+                    local remote_cpu=$(eval "$remote_ssh 'nproc 2>/dev/null || grep -c ^processor /proc/cpuinfo 2>/dev/null || echo N/A'" 2>/dev/null || echo "N/A")
                     printf -- "    %s: auto (%s)\n" "$server" "${remote_cpu:-N/A}" >> "$report_file"
                 fi
             done
@@ -5360,9 +5399,9 @@ main() {
                 entry=$(echo "$entry" | tr -d '\r' | xargs)
                 if [ -n "$entry" ]; then
                     # Parse server entry to extract IP and credentials
-                    local ip=$(parse_server_entry "$entry")
-                    filtered_servers+=("$ip")
-                    if [ "$ip" = "$local_ip" ]; then
+                    parse_server_entry "$entry"
+                    filtered_servers+=("$LAST_PARSED_IP")
+                    if [ "$LAST_PARSED_IP" = "$local_ip" ]; then
                         include_local=true
                     fi
                 fi
@@ -5376,9 +5415,9 @@ main() {
                 entry=$(echo "$entry" | xargs)
                 if [ -n "$entry" ]; then
                     # Parse server entry to extract IP and credentials
-                    local ip=$(parse_server_entry "$entry")
-                    filtered_ips+=("$ip")
-                    if [ "$ip" = "$local_ip" ]; then
+                    parse_server_entry "$entry"
+                    filtered_ips+=("$LAST_PARSED_IP")
+                    if [ "$LAST_PARSED_IP" = "$local_ip" ]; then
                         include_local=true
                     fi
                 fi
@@ -5446,7 +5485,8 @@ main() {
                     else
                         # Remote server check
                         echo "  Executing remote checks on $target_ip..."
-                        ssh "$target_ip" "\$HOME/oscheckperf/oscheckperf --remote check"
+                        local check_ssh=$(get_ssh_command "$target_ip")
+                        eval "$check_ssh '\$HOME/oscheckperf/oscheckperf --remote check'"
                     fi
                     echo ""
                 done
@@ -5737,7 +5777,8 @@ main() {
                     
                     # Always use remote oscheckperf for consistent execution
                     # Check if remote oscheckperf exists, if not, skip this server
-                    if ssh "$target_ip" "[ -d ~/oscheckperf ]" 2>/dev/null; then
+                    local ssh_cmd=$(get_ssh_command "$target_ip")
+                    if eval "$ssh_cmd '[ -d ~/oscheckperf ]'" 2>/dev/null; then
                         # Use remote oscheckperf
                         # Build the remote command with only the requested tests
                         local remote_test_command=""
@@ -5796,7 +5837,7 @@ main() {
                         if [ "$DRY_RUN" = true ]; then
                             echo "[DRY RUN] Would execute remote command on $target_ip:"
                             echo "  $ssh_cmd '$full_remote_command'"
-                        elif $ssh_cmd "$full_remote_command" 2>&1 > "$temp_remote_file"; then
+                        elif eval "$ssh_cmd '$full_remote_command'" 2>&1 > "$temp_remote_file"; then
                             # Display remote test output
                             cat "$temp_remote_file"
                             
@@ -5805,7 +5846,7 @@ main() {
                             local temp_remote_dir="$TMP_DIR/vb_remote_${target_ip//./_}_${TIMESTAMP}"
                             mkdir -p "$temp_remote_dir"
                             # Extract remote files to temporary directory (original_data and fio JSON)
-                            if ! $ssh_cmd "cd ~/oscheckperf && tar -czf - output/original_data_${TIMESTAMP}_* tmp/fio_*_result_${TIMESTAMP}.json 2>/dev/null || tar -czf - output/original_data_${TIMESTAMP}_*" | tar -xzf - -C "$temp_remote_dir"; then
+                            if ! eval "$ssh_cmd 'cd ~/oscheckperf && tar -czf - output/original_data_${TIMESTAMP}_* tmp/fio_*_result_${TIMESTAMP}.json 2>/dev/null || tar -czf - output/original_data_${TIMESTAMP}_*'" | tar -xzf - -C "$temp_remote_dir"; then
                                 echo "  ⚠ Warning: Failed to fetch remote output files from $target_ip"
                             fi
                             
@@ -5840,10 +5881,10 @@ main() {
                                 echo "" >> "$OUTPUT_DIR/original_data_${TIMESTAMP}_all_results.log"
                                 echo "WARNING: No output files found from remote server" >> "$OUTPUT_DIR/original_data_${TIMESTAMP}_all_results.log"
                                 echo "Checking remote server status:" >> "$OUTPUT_DIR/original_data_${TIMESTAMP}_all_results.log"
-                                echo "- fio version: $(ssh "$target_ip" "fio --version 2>/dev/null || echo 'fio not found'")" >> "$OUTPUT_DIR/original_data_${TIMESTAMP}_all_results.log"
-                                echo "- jq version: $(ssh "$target_ip" "jq --version 2>/dev/null || echo 'jq not found'")" >> "$OUTPUT_DIR/original_data_${TIMESTAMP}_all_results.log"
-                                echo "- oscheckperf exists: $(ssh "$target_ip" "[ -f ~/oscheckperf/oscheckperf ] && echo 'Yes' || echo 'No'")" >> "$OUTPUT_DIR/original_data_${TIMESTAMP}_all_results.log"
-                                echo "- Output dir exists: $(ssh "$target_ip" "[ -d ~/oscheckperf/output ] && echo 'Yes' || echo 'No'")" >> "$OUTPUT_DIR/original_data_${TIMESTAMP}_all_results.log"
+                                echo "- fio version: $(eval "$ssh_cmd 'fio --version 2>/dev/null || echo fio not found'")" >> "$OUTPUT_DIR/original_data_${TIMESTAMP}_all_results.log"
+                                echo "- jq version: $(eval "$ssh_cmd 'jq --version 2>/dev/null || echo jq not found'")" >> "$OUTPUT_DIR/original_data_${TIMESTAMP}_all_results.log"
+                                echo "- oscheckperf exists: $(eval "$ssh_cmd '[ -f ~/oscheckperf/oscheckperf ] && echo Yes || echo No'")" >> "$OUTPUT_DIR/original_data_${TIMESTAMP}_all_results.log"
+                                echo "- Output dir exists: $(eval "$ssh_cmd '[ -d ~/oscheckperf/output ] && echo Yes || echo No'")" >> "$OUTPUT_DIR/original_data_${TIMESTAMP}_all_results.log"
                                 echo "" >> "$OUTPUT_DIR/original_data_${TIMESTAMP}_all_results.log"
                                 echo "Remote command output:" >> "$OUTPUT_DIR/original_data_${TIMESTAMP}_all_results.log"
                                 cat "$temp_remote_file" >> "$OUTPUT_DIR/original_data_${TIMESTAMP}_all_results.log" 2>/dev/null || echo "No output captured" >> "$OUTPUT_DIR/original_data_${TIMESTAMP}_all_results.log"
@@ -6039,17 +6080,18 @@ distribute_to_server() {
     echo "  Distributing to $target_ip..."
     
     local ssh_cmd=$(get_ssh_command "$target_ip")
+    local scp_cmd=$(get_scp_command "$target_ip")
     
     # Get remote architecture
-    remote_arch=$($ssh_cmd "uname -m" 2>/dev/null || echo "unknown")
+    remote_arch=$(eval "$ssh_cmd 'uname -m'" 2>/dev/null || echo "unknown")
     echo "  Local architecture: $local_arch, Remote architecture: $remote_arch"
     
     # Check if remote oscheckperf directory exists
-    if $ssh_cmd "test -d $install_dir" > /dev/null 2>&1; then
+    if eval "$ssh_cmd 'test -d $install_dir'" > /dev/null 2>&1; then
         # Directory exists, only distribute main script
         echo "  oscheckperf directory exists on $target_ip, only distributing main script"
-        if scp -q "$install_dir/oscheckperf" "$target_ip:$install_dir/"; then
-            $ssh_cmd "chmod +x $install_dir/oscheckperf" > /dev/null 2>&1
+        if eval "$scp_cmd -q '$install_dir/oscheckperf' '$target_ip:$install_dir/'"; then
+            eval "$ssh_cmd 'chmod +x $install_dir/oscheckperf'" > /dev/null 2>&1
             echo "  ✓ Successfully distributed oscheckperf script to $target_ip"
         else
             echo "  ✗ Failed to distribute to $target_ip"
@@ -6062,8 +6104,8 @@ distribute_to_server() {
             echo "  oscheckperf directory doesn't exist on $target_ip, distributing entire directory"
             local tar_file="$HOME/oscheckperf.tar.gz"
             tar -czf "$tar_file" -C "$HOME" oscheckperf
-            if scp -q "$tar_file" "$target_ip:$HOME/"; then
-                $ssh_cmd "rm -rf $install_dir && mkdir -p $install_dir && tar -xzf $HOME/oscheckperf.tar.gz -C $HOME && rm -f $HOME/oscheckperf.tar.gz && chmod +x $install_dir/oscheckperf && if ! grep -q 'oscheckperf/bin' ~/.bashrc; then echo 'export PATH=\$PATH:$install_dir/bin' >> ~/.bashrc; fi && source ~/.bashrc" > /dev/null 2>&1
+            if eval "$scp_cmd -q '$tar_file' '$target_ip:\$HOME/'"; then
+                eval "$ssh_cmd 'rm -rf $install_dir && mkdir -p $install_dir && tar -xzf \$HOME/oscheckperf.tar.gz -C \$HOME && rm -f \$HOME/oscheckperf.tar.gz && chmod +x $install_dir/oscheckperf && if ! grep -q oscheckperf/bin ~/.bashrc; then echo export PATH=\\\$PATH:$install_dir/bin >> ~/.bashrc; fi && source ~/.bashrc'" > /dev/null 2>&1
                 echo "  ✓ Successfully distributed to $target_ip"
             else
                 echo "  ✗ Failed to distribute to $target_ip"
@@ -6084,8 +6126,8 @@ distribute_to_server() {
             local tar_file="/tmp/oscheckperf-src.tar.gz"
             tar -czf "$tar_file" -C /tmp oscheckperf-src
             
-            if scp -q "$tar_file" "$target_ip:$HOME/"; then
-                $ssh_cmd "rm -rf $install_dir && mkdir -p $install_dir && tar -xzf $HOME/oscheckperf-src.tar.gz -C $HOME && rm -f $HOME/oscheckperf-src.tar.gz && mv $HOME/oscheckperf-src/* $install_dir/ && rm -rf $HOME/oscheckperf-src && chmod +x $install_dir/oscheckperf && if ! grep -q 'oscheckperf/bin' ~/.bashrc; then echo 'export PATH=\$PATH:$install_dir/bin' >> ~/.bashrc; fi && source ~/.bashrc && cd $install_dir && ./oscheckperf -i all" > /dev/null 2>&1
+            if eval "$scp_cmd -q '$tar_file' '$target_ip:\$HOME/'"; then
+                eval "$ssh_cmd 'rm -rf $install_dir && mkdir -p $install_dir && tar -xzf \$HOME/oscheckperf-src.tar.gz -C \$HOME && rm -f \$HOME/oscheckperf-src.tar.gz && mv \$HOME/oscheckperf-src/* $install_dir/ && rm -rf \$HOME/oscheckperf-src && chmod +x $install_dir/oscheckperf && if ! grep -q oscheckperf/bin ~/.bashrc; then echo export PATH=\\\$PATH:$install_dir/bin >> ~/.bashrc; fi && source ~/.bashrc && cd $install_dir && ./oscheckperf -i all'" > /dev/null 2>&1
                 echo "  ✓ Successfully distributed source and triggered remote compilation"
             else
                 echo "  ✗ Failed to distribute source to $target_ip"
