@@ -1,7 +1,7 @@
 #!/bin/bash
 #--------------------------------------------------------------------------------
 #-- File name:   oscheckperf
-#-- Version:     v0.8.2
+#-- Version:     v0.8.3
 #-- Purpose:     Database System Benchmark Tool
 #-- Author:      Wanping Pan 
 #-- Description: One-click system benchmarking tool, supports configuration via config file or command line parameters
@@ -29,6 +29,32 @@ export IO_PATH_DEFAULT="$BASE_DIR/io_test"
 export OUTPUT_DIR_DEFAULT="./output"
 
 # ================================================================================
+# Resolve IO path with backward compatibility
+# Priority: IO_PATH > IO_TEST_PATH > IO_PATH_DEFAULT
+resolve_io_path() {
+    if [ -n "${IO_PATH:-}" ]; then
+        echo "$IO_PATH"
+    elif [ -n "${IO_TEST_PATH:-}" ]; then
+        echo "$IO_TEST_PATH"
+    else
+        echo "$IO_PATH_DEFAULT"
+    fi
+}
+
+# ================================================================================
+
+# ================================================================================
+# System Configuration Constants
+# ================================================================================
+# Minimum disk space required for IO tests (GB)
+MIN_DISK_SPACE_GB=1
+
+# Network test default port (chosen to avoid common port conflicts)
+NETWORK_PORT_DEFAULT=25201
+
+# SSH configuration defaults
+SSH_PORT_DEFAULT=22
+# ================================================================================
 
 # Default parameters
 CONFIG_FILE=""
@@ -36,11 +62,7 @@ OUTPUT_DIR="$OUTPUT_DIR_DEFAULT"
 DRY_RUN=false
 NO_CHECKS=false
 
-# Network configuration defaults
-NETWORK_PORT_DEFAULT=25201
 
-# SSH configuration defaults
-SSH_PORT_DEFAULT=22
 
 # Server credentials storage (associative arrays)
 declare -A SERVER_USERNAMES
@@ -97,11 +119,16 @@ is_password_auth() {
     return 1
 }
 
-# Get SSH command prefix for a server
-# Returns: SSH command prefix (with or without sshpass)
-get_ssh_command() {
+# Build authentication prefix for SSH/SCP commands
+# Parameters: ip, cmd_type (ssh/scp)
+# Returns: Command prefix with proper authentication
+build_auth_prefix() {
     local ip="$1"
+    local cmd_type="$2"
     local ssh_port="${SSH_PORT:-$SSH_PORT_DEFAULT}"
+    local pass_arg=""
+    local host_arg=""
+    local port_opt=""
     
     if is_password_auth "$ip"; then
         local username="${SERVER_USERNAMES[$ip]}"
@@ -115,40 +142,33 @@ get_ssh_command() {
                 echo "  Ubuntu/Debian: sudo apt-get install -y sshpass"
                 exit 1
             fi
-            echo "sshpass -p '${password//\'/\'\\\'\'}' ssh -p $ssh_port -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o PreferredAuthentications=password -o PubkeyAuthentication=no $username@$ip"
-        else
-            echo "ssh -p $ssh_port -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o PreferredAuthentications=password -o PubkeyAuthentication=no $username@$ip"
+            pass_arg="sshpass -p '${password//\'/\'\\\'\'}' "
         fi
+        
+        host_arg="$username@$ip"
+        port_opt="-o PreferredAuthentications=password -o PubkeyAuthentication=no"
     else
-        echo "ssh -p $ssh_port -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null $ip"
+        host_arg="$ip"
+        port_opt=""
     fi
+    
+    if [ "$cmd_type" = "ssh" ]; then
+        echo "${pass_arg}ssh -p $ssh_port -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null $port_opt $host_arg"
+    else
+        echo "${pass_arg}scp -P $ssh_port -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null $port_opt"
+    fi
+}
+
+# Get SSH command prefix for a server
+# Returns: SSH command prefix (with or without sshpass)
+get_ssh_command() {
+    build_auth_prefix "$1" "ssh"
 }
 
 # Get SCP command prefix for a server
 # Returns: SCP command prefix (with or without sshpass)
 get_scp_command() {
-    local ip="$1"
-    local ssh_port="${SSH_PORT:-$SSH_PORT_DEFAULT}"
-    
-    if is_password_auth "$ip"; then
-        local username="${SERVER_USERNAMES[$ip]}"
-        local password="${SERVER_PASSWORDS[$ip]}"
-        
-        if [ -n "$password" ]; then
-            if ! check_sshpass; then
-                echo "Error: sshpass is not installed but password authentication is required for server $ip"
-                echo "Please install sshpass first:"
-                echo "  CentOS/RHEL: sudo yum install -y sshpass"
-                echo "  Ubuntu/Debian: sudo apt-get install -y sshpass"
-                exit 1
-            fi
-            echo "sshpass -p '${password//\'/\'\\\'\'}' scp -P $ssh_port -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o PreferredAuthentications=password -o PubkeyAuthentication=no"
-        else
-            echo "scp -P $ssh_port -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o PreferredAuthentications=password -o PubkeyAuthentication=no"
-        fi
-    else
-        echo "scp -P $ssh_port -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
-    fi
+    build_auth_prefix "$1" "scp"
 }
 
 # Load configuration from file
@@ -264,7 +284,6 @@ parse_args() {
     export NETWORK_ENABLED=false
     export THREADS_ENABLED=false
     export MUTEX_ENABLED=false
-    export PGBENCH_ENABLED=false
     
     # Iterate through all arguments
     local i=1
@@ -280,7 +299,7 @@ parse_args() {
                 exit 0
                 ;;
             --version)
-                echo "Version: 0.8.2"
+                echo "Version: 0.8.3"
                 exit 0
                 ;;
             --dry-run)
@@ -366,7 +385,6 @@ parse_args() {
                         export NETWORK_ENABLED=true
                         export THREADS_ENABLED=true
                         export MUTEX_ENABLED=true
-                        export PGBENCH_ENABLED=false
                         ;;
                     check)
                         # Only run checks
@@ -423,7 +441,6 @@ parse_args() {
         export NETWORK_ENABLED="${NETWORK_ENABLED:-true}"
         export THREADS_ENABLED="${THREADS_ENABLED:-true}"
         export MUTEX_ENABLED="${MUTEX_ENABLED:-true}"
-        export PGBENCH_ENABLED="${PGBENCH_ENABLED:-false}"
     fi
     
     # Debug output
@@ -534,12 +551,6 @@ show_help() {
     echo "Mutex test parameters:"
     echo "  MUTEX_THREADS=<number>      Mutex test threads, 0=auto (default: 0)"
     echo "  MUTEX_NUM=<number>          Number of mutexes (default: 1024)"
-    echo ""
-    echo "pgbench test parameters:"
-    echo "  PGBENCH_ENABLED=true|false  Enable pgbench test (default: false)"
-    echo "  PGBENCH_DB=<database>       pgbench database name (default: pgbench_db)"
-    echo "  PGBENCH_THREADS=<number>    pgbench threads, 0=auto (default: 0)"
-    echo "  PGBENCH_DURATION=<seconds>  pgbench test duration (default: 300)"
     echo ""
     echo "Examples:"
     echo "  # Run all tests"
@@ -1085,7 +1096,54 @@ get_network_interface_count() {
     ls /sys/class/net/ 2>/dev/null | grep -v "^lo$" | wc -l 2>/dev/null || echo "0"
 }
 
-#!/bin/bash
+# Get hardware info output (common output function for local and remote)
+get_hardware_info_output() {
+    echo "CPU_ARCH: $(get_cpu_arch 2>/dev/null || echo "N/A")"
+    echo "MACHINE_TYPE: $(get_machine_type 2>/dev/null || echo "N/A")"
+    echo "OS_INFO: $(get_os_info 2>/dev/null || echo "N/A")"
+    echo "KERNEL_VERSION: $(get_kernel_version 2>/dev/null || echo "N/A")"
+    echo "CPU_MODEL: $(get_cpu_model 2>/dev/null || echo "N/A")"
+    echo "CPU_PHYSICAL_CORES: $(get_cpu_physical_cores 2>/dev/null || echo "N/A")"
+    echo "CPU_LOGICAL_CORES: $(get_cpu_logical_cores 2>/dev/null || echo "N/A")"
+    echo "CPU_FREQ: $(get_cpu_freq 2>/dev/null || echo "N/A")"
+    echo "MEM_TOTAL: $(get_memory_size_mb 2>/dev/null || echo "N/A")"
+    echo "MEM_AVAILABLE: $(get_memory_available_mb 2>/dev/null || echo "N/A")"
+    echo "MEM_TYPE: $(get_memory_type 2>/dev/null || echo "N/A")"
+    echo "MEM_FREQ: $(get_memory_freq 2>/dev/null || echo "N/A")"
+    echo "MEM_CHANNELS: $(get_memory_channels 2>/dev/null || echo "N/A")"
+    echo "NET_BOND: $(get_network_bond 2>/dev/null || echo "N/A")"
+    echo "NET_INTERFACE_COUNT: $(get_network_interface_count 2>/dev/null || echo "N/A")"
+    echo "--- Memory Slots Detail ---"
+    get_memory_slots_detail 2>/dev/null || echo "N/A"
+    echo "--- Disk Info ---"
+    get_disk_info_detailed 2>/dev/null || echo "N/A"
+    echo "--- Network Info ---"
+    get_network_info 2>/dev/null || echo "N/A"
+}
+
+# Get hardware info functions for remote execution (minified inline version)
+get_hardware_functions_for_remote() {
+    cat << 'REMOTE_EOF'
+get_cpu_model() { if [ -f /proc/cpuinfo ]; then grep -m 1 'model name' /proc/cpuinfo | sed 's/model name\s*: //' 2>/dev/null || echo "N/A"; else echo "N/A"; fi; }
+get_cpu_physical_cores() { if [ -f /proc/cpuinfo ]; then local cores=$(grep -c 'physical id' /proc/cpuinfo 2>/dev/null); if [ -n "$cores" ]; then echo "$cores"; else echo "N/A"; fi; else echo "N/A"; fi; }
+get_cpu_logical_cores() { nproc 2>/dev/null || grep -c ^processor /proc/cpuinfo 2>/dev/null || echo "N/A"; }
+get_cpu_freq() { if [ -f /proc/cpuinfo ]; then local freq=$(grep -m 1 'cpu MHz' /proc/cpuinfo | awk '{print $4}'); if [ -n "$freq" ]; then awk "BEGIN {printf \"%.2f\", $freq / 1000}"; return; fi; freq=$(grep -m 1 'BogoMIPS' /proc/cpuinfo | awk '{print $3}'); if [ -n "$freq" ]; then awk "BEGIN {printf \"%.2f\", $freq / 1000}"; return; fi; freq=$(cat /sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq 2>/dev/null); if [ -n "$freq" ]; then awk "BEGIN {printf \"%.2f\", $freq / 1000000}"; return; fi; echo "N/A"; else echo "N/A"; fi; }
+get_memory_size_mb() { if [ -f /proc/meminfo ]; then awk '/MemTotal/ {printf "%.0f", $2/1024}' /proc/meminfo 2>/dev/null || echo "N/A"; else echo "N/A"; fi; }
+get_memory_available_mb() { if [ -f /proc/meminfo ]; then awk '/MemAvailable/ {printf "%.0f", $2/1024}' /proc/meminfo 2>/dev/null || echo "N/A"; else echo "N/A"; fi; }
+get_memory_type() { local machine_type=$(get_machine_type 2>/dev/null); if echo "$machine_type" | grep -qi "virtual"; then echo "N/A (virtual machine)"; return; fi; if command -v dmidecode &>/dev/null; then local mem_type=$(dmidecode -t memory 2>/dev/null | grep -m 1 'Type:' | sed 's/Type:\s*//' | sed 's/^[ \t]*//' | sed 's/[ \t]*$//' 2>/dev/null); if [ -n "$mem_type" ] && [ "$mem_type" != "Unknown" ] && [ "$mem_type" != "Error" ]; then echo "$mem_type"; return; fi; fi; local dmesg_type=$(dmesg 2>/dev/null | grep -i 'DDR' | head -1 | grep -o 'DDR[0-9]*' | head -1); if [ -n "$dmesg_type" ]; then echo "$dmesg_type"; return; fi; echo "unknown (requires root)"; }
+get_memory_channels() { if command -v dmidecode &>/dev/null; then local channels=$(dmidecode -t memory 2>/dev/null | grep -c 'Channel' 2>/dev/null); if [ "$channels" -gt 0 ]; then echo "$channels"; return; fi; fi; if [ -d /sys/devices/system/node/ ]; then local node_count=$(ls /sys/devices/system/node/ | grep -c '^node[0-9]*$'); if [ "$node_count" -gt 0 ]; then echo "$node_count"; return; fi; fi; echo "unknown (requires root)"; }
+get_memory_freq() { local machine_type=$(get_machine_type 2>/dev/null); if echo "$machine_type" | grep -qi "virtual"; then echo "N/A (virtual machine)"; return; fi; if command -v dmidecode &>/dev/null; then local freq=$(dmidecode -t memory 2>/dev/null | grep -m 1 'Configured Clock Speed' | awk '{print $4}' 2>/dev/null); if [ -n "$freq" ] && [ "$freq" -gt 0 ] 2>/dev/null; then echo "${freq} MHz"; return; fi; freq=$(dmidecode -t memory 2>/dev/null | grep -m 1 'Speed' | awk '{print $2}' 2>/dev/null); if [ -n "$freq" ] && [ "$freq" != "Unknown" ] && [ "$freq" -gt 0 ] 2>/dev/null; then echo "${freq} MHz"; return; fi; fi; echo "unknown (requires root)"; }
+get_cpu_arch() { uname -m 2>/dev/null || echo "unknown"; }
+get_kernel_version() { uname -r 2>/dev/null || echo "unknown"; }
+get_network_bond() { if [ -d /proc/net/bonding/ ]; then local bonds=$(ls /proc/net/bonding/ 2>/dev/null | tr '\n' ', '); if [ -n "$bonds" ]; then echo "$bonds"; return; fi; fi; echo "None"; }
+get_network_interface_count() { ls /sys/class/net/ 2>/dev/null | grep -v "^lo$" | wc -l 2>/dev/null || echo "0"; }
+get_machine_type() { local machine_type="Physical Machine"; if command -v systemd-detect-virt &>/dev/null; then local virt_output=$(systemd-detect-virt 2>/dev/null); case "$virt_output" in "kvm") machine_type="Virtual Machine (KVM)";; "qemu") machine_type="Virtual Machine (QEMU)";; "vmware") machine_type="Virtual Machine (VMware)";; "virtualbox") machine_type="Virtual Machine (VirtualBox)";; "hyperv") machine_type="Virtual Machine (Hyper-V)";; "xen") machine_type="Virtual Machine (Xen)";; "none") machine_type="Physical Machine";; *) machine_type="Unknown";; esac; else if grep -qi 'kvm' /proc/cpuinfo 2>/dev/null || grep -qi 'qemu' /sys/devices/virtual/dmi/id/product_name 2>/dev/null; then machine_type="Virtual Machine (KVM/QEMU)"; elif grep -qi 'vmware' /sys/devices/virtual/dmi/id/product_name 2>/dev/null; then machine_type="Virtual Machine (VMware)"; elif grep -qi 'hypervisor' /proc/cpuinfo 2>/dev/null; then machine_type="Virtual Machine (Unknown)"; fi; fi; echo "$machine_type"; }
+get_os_info() { if [ -f /etc/redhat-release ]; then cat /etc/redhat-release; return; fi; if [ -f /etc/euleros-release ]; then echo "EulerOS $(cat /etc/euleros-release | awk '{print $3}')"; return; fi; if [ -f /etc/openEuler-release ]; then cat /etc/openEuler-release | awk '{print $1, $3}'; return; fi; if [ -f /etc/os-release ]; then local pretty_name=$(grep -oP 'PRETTY_NAME="?\K[^"]+' /etc/os-release 2>/dev/null); if [ -n "$pretty_name" ]; then echo "$pretty_name"; return; fi; fi; if [ -f /etc/lsb-release ]; then local os_name=$(grep -oP 'DISTRIB_ID=\K.*' /etc/lsb-release 2>/dev/null); local os_version=$(grep -oP 'DISTRIB_RELEASE=\K.*' /etc/lsb-release 2>/dev/null); echo "$os_name $os_version"; return; fi; echo "Unknown"; }
+get_disk_info_detailed() { if command -v lsblk &>/dev/null; then lsblk -no NAME,SIZE,TYPE,FSTYPE,MOUNTPOINT 2>/dev/null | grep -v "^loop" | grep -v "^NAME" | awk '{name = $1; gsub(/^[├└─ ]+/, "", name); size = $2; type = $3; fstype = $4; mountpoint = $5; if (fstype == "") fstype = "-"; if (mountpoint == "") mountpoint = "-"; print name "|" size "|" type "|" fstype "|" mountpoint;}' || echo "N/A"; else echo "N/A"; fi; }
+get_network_info() { local result=""; for iface in $(ls /sys/class/net/ 2>/dev/null | grep -v "^lo$"); do local mac=$(cat "/sys/class/net/$iface/address" 2>/dev/null || echo "N/A"); local speed=$(cat "/sys/class/net/$iface/speed" 2>/dev/null || echo "N/A"); local mtu=$(cat "/sys/class/net/$iface/mtu" 2>/dev/null || echo "N/A"); local state=$(cat "/sys/class/net/$iface/operstate" 2>/dev/null || echo "N/A"); local ip=$(ip addr show "$iface" 2>/dev/null | grep 'inet ' | awk '{print $2}' | cut -d'/' -f1 | head -1 || echo "N/A"); local speed_str=""; if [ "$speed" != "N/A" ] && [ "$speed" -gt 0 ] 2>/dev/null; then speed_str="${speed}Mbps"; elif [ "$speed" = "N/A" ]; then speed_str="N/A"; else speed_str="Unknown"; fi; result="${result}${iface}: IP=${ip}, MAC=${mac}, Speed=${speed_str}, MTU=${mtu}, State=${state}\n"; done; echo -e "$result"; }
+get_memory_slots_detail() { if ! command -v dmidecode &>/dev/null; then echo "unknown (requires dmidecode)"; return; fi; local slots_output=$(dmidecode -t memory 2>/dev/null); if [ -z "$slots_output" ]; then echo "unknown (requires root)"; return; fi; local total_slots=$(echo "$slots_output" | grep -A10 'Physical Memory Array' | grep -i 'Number Of Devices' | awk '{print $NF}'); if [ -z "$total_slots" ] || [ "$total_slots" = "0" ]; then total_slots=$(echo "$slots_output" | grep -c 'Memory Device'); fi; if [ -z "$total_slots" ] || [ "$total_slots" = "0" ]; then echo "N/A (virtual machine)"; return; fi; local slot_results=$(echo "$slots_output" | awk 'BEGIN { slot_count=0; in_device=0 } /Memory Device/ { if (in_device && size !~ /No Module Installed|0 MB|0 GB|0 bytes/ && size != "" && size != "No Module Installed" && size != "Unknown") { print "Slot " slot_count ":"; if (locator != "") print "  Locator: " locator; print "  Size: " size; if (mem_type != "") print "  Type: " mem_type; if (speed != "" && speed != "Unknown") print "  Speed: " speed; if (manufacturer != "" && manufacturer != "Unknown") print "  Manufacturer: " manufacturer; if (part_num != "" && part_num != "Unknown") print "  Part Number: " part_num; } slot_count++; in_device=1; size=""; locator=""; mem_type=""; speed=""; manufacturer=""; part_num="" } in_device && /Locator:/ { locator = substr($0, index($0, $2)); gsub(/^[ \t]+/, "", locator); gsub(/^Locator:\s*/, "", locator) } in_device && /Size:/ { size = substr($0, index($0, "Size:") + 5); gsub(/^[ \t]+/, "", size) } in_device && /Type:/ { mem_type = substr($0, index($0, $2)); gsub(/^[ \t]+/, "", mem_type) } in_device && /Speed:/ { speed = substr($0, index($0, $2)); gsub(/^[ \t]+/, "", speed); gsub(/^Memory Speed:\s*/, "", speed) } in_device && /Manufacturer:/ { manufacturer = substr($0, index($0, $2)); gsub(/^[ \t]+/, "", manufacturer) } in_device && /Part Number:/ { part_num = substr($0, index($0, $3)); gsub(/^[ \t]+/, "", part_num) } END { if (in_device && size !~ /No Module Installed|0 MB|0 GB|0 bytes/ && size != "" && size != "No Module Installed" && size != "Unknown") { print "Slot " slot_count ":"; if (locator != "") print "  Locator: " locator; print "  Size: " size; if (mem_type != "") print "  Type: " mem_type; if (speed != "" && speed != "Unknown") print "  Speed: " speed; if (manufacturer != "" && manufacturer != "Unknown") print "  Manufacturer: " manufacturer; if (part_num != "" && part_num != "Unknown") print "  Part Number: " part_num; } }'); local used_slots=$(echo "$slot_results" | grep -c '^Slot '); echo "Total Slots: $total_slots"; echo "Used Slots: $used_slots"; echo "$slot_results"; }
+REMOTE_EOF
+}
 
 # Get node hardware info (local or remote)
 get_node_hardware_info() {
@@ -1093,399 +1151,35 @@ get_node_hardware_info() {
     local is_local="$2"
     
     if [ "$is_local" = "true" ]; then
-        # Get local info
-        echo "CPU_ARCH: $(get_cpu_arch 2>/dev/null || echo "N/A")"
-        echo "MACHINE_TYPE: $(get_machine_type 2>/dev/null || echo "N/A")"
-        echo "OS_INFO: $(get_os_info 2>/dev/null || echo "N/A")"
-        echo "KERNEL_VERSION: $(get_kernel_version 2>/dev/null || echo "N/A")"
-        echo "CPU_MODEL: $(get_cpu_model 2>/dev/null || echo "N/A")"
-        echo "CPU_PHYSICAL_CORES: $(get_cpu_physical_cores 2>/dev/null || echo "N/A")"
-        echo "CPU_LOGICAL_CORES: $(get_cpu_logical_cores 2>/dev/null || echo "N/A")"
-        echo "CPU_FREQ: $(get_cpu_freq 2>/dev/null || echo "N/A")"
-        echo "MEM_TOTAL: $(get_memory_size_mb 2>/dev/null || echo "N/A")"
-        echo "MEM_AVAILABLE: $(get_memory_available_mb 2>/dev/null || echo "N/A")"
-        echo "MEM_TYPE: $(get_memory_type 2>/dev/null || echo "N/A")"
-        echo "MEM_FREQ: $(get_memory_freq 2>/dev/null || echo "N/A")"
-        echo "MEM_CHANNELS: $(get_memory_channels 2>/dev/null || echo "N/A")"
-        echo "NET_BOND: $(get_network_bond 2>/dev/null || echo "N/A")"
-        echo "NET_INTERFACE_COUNT: $(get_network_interface_count 2>/dev/null || echo "N/A")"
-        echo "--- Memory Slots Detail ---"
-        get_memory_slots_detail 2>/dev/null || echo "N/A"
-        echo "--- Disk Info ---"
-        get_disk_info_detailed 2>/dev/null || echo "N/A"
-        echo "--- Network Info ---"
-        get_network_info 2>/dev/null || echo "N/A"
+        get_hardware_info_output
     else
-        # Get remote info via SSH - define functions on remote
         local remote_ssh=$(get_ssh_command "$ip")
-        local ssh_output=$(eval "$remote_ssh bash -s" 2>/dev/null << 'EOF'
-get_cpu_model() {
-    if [ -f /proc/cpuinfo ]; then
-        grep -m 1 'model name' /proc/cpuinfo | sed 's/model name\s*: //' 2>/dev/null || echo "N/A"
-    else
-        echo "N/A"
-    fi
-}
+        local remote_script=$(get_hardware_functions_for_remote)
+        remote_script="$remote_script
 
-get_cpu_physical_cores() {
-    if [ -f /proc/cpuinfo ]; then
-        local cores=$(grep -c 'physical id' /proc/cpuinfo 2>/dev/null)
-        if [ -n "$cores" ]; then
-            echo "$cores"
-        else
-            echo "N/A"
-        fi
-    else
-        echo "N/A"
-    fi
-}
-
-get_cpu_logical_cores() {
-    nproc 2>/dev/null || grep -c ^processor /proc/cpuinfo 2>/dev/null || echo "N/A"
-}
-
-get_cpu_freq() {
-    if [ -f /proc/cpuinfo ]; then
-        local freq=$(grep -m 1 'cpu MHz' /proc/cpuinfo | awk '{print $4}')
-        if [ -n "$freq" ]; then
-            awk "BEGIN {printf \"%.2f\", $freq / 1000}"
-            return
-        fi
-        freq=$(grep -m 1 'BogoMIPS' /proc/cpuinfo | awk '{print $3}')
-        if [ -n "$freq" ]; then
-            awk "BEGIN {printf \"%.2f\", $freq / 1000}"
-            return
-        fi
-        freq=$(cat /sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq 2>/dev/null)
-        if [ -n "$freq" ]; then
-            awk "BEGIN {printf \"%.2f\", $freq / 1000000}"
-            return
-        fi
-        echo "N/A"
-    else
-        echo "N/A"
-    fi
-}
-
-get_memory_size_mb() {
-    if [ -f /proc/meminfo ]; then
-        awk '/MemTotal/ {printf "%.0f", $2/1024}' /proc/meminfo 2>/dev/null || echo "N/A"
-    else
-        echo "N/A"
-    fi
-}
-
-get_memory_available_mb() {
-    if [ -f /proc/meminfo ]; then
-        awk '/MemAvailable/ {printf "%.0f", $2/1024}' /proc/meminfo 2>/dev/null || echo "N/A"
-    else
-        echo "N/A"
-    fi
-}
-
-get_memory_type() {
-    local machine_type=$(get_machine_type 2>/dev/null)
-    if echo "$machine_type" | grep -qi "virtual"; then
-        echo "N/A (virtual machine)"
-        return
-    fi
-    
-    if command -v dmidecode &>/dev/null; then
-        local mem_type=$(dmidecode -t memory 2>/dev/null | grep -m 1 'Type:' | sed 's/Type:\s*//' | sed 's/^[ \t]*//' | sed 's/[ \t]*$//' 2>/dev/null)
-        if [ -n "$mem_type" ] && [ "$mem_type" != "Unknown" ] && [ "$mem_type" != "Error" ]; then
-            echo "$mem_type"
-            return
-        fi
-    fi
-    
-    local dmesg_type=$(dmesg 2>/dev/null | grep -i 'DDR' | head -1 | grep -o 'DDR[0-9]*' | head -1)
-    if [ -n "$dmesg_type" ]; then
-        echo "$dmesg_type"
-        return
-    fi
-    echo "unknown (requires root for dmidecode)"
-}
-
-get_memory_channels() {
-    if command -v dmidecode &>/dev/null; then
-        local channels=$(dmidecode -t memory 2>/dev/null | grep -c 'Channel' 2>/dev/null)
-        if [ "$channels" -gt 0 ]; then
-            echo "$channels"
-            return
-        fi
-    fi
-    if [ -d /sys/devices/system/node/ ]; then
-        local node_count=$(ls /sys/devices/system/node/ | grep -c '^node[0-9]*$')
-        if [ "$node_count" -gt 0 ]; then
-            echo "$node_count"
-            return
-        fi
-    fi
-    echo "unknown (requires root for dmidecode)"
-}
-
-get_virtualization_type() {
-    local virt_type="Physical Machine"
-    if grep -qi 'kvm' /proc/cpuinfo 2>/dev/null || grep -qi 'qemu' /sys/devices/virtual/dmi/id/product_name 2>/dev/null; then
-        virt_type="Virtual Machine (KVM/QEMU)"
-    elif grep -qi 'vmware' /sys/devices/virtual/dmi/id/product_name 2>/dev/null || grep -qi 'vmware' /proc/scsi/scsi 2>/dev/null; then
-        virt_type="Virtual Machine (VMware)"
-    elif grep -qi 'virtualbox' /sys/devices/virtual/dmi/id/product_name 2>/dev/null; then
-        virt_type="Virtual Machine (VirtualBox)"
-    elif grep -qi 'hyper-v' /proc/cpuinfo 2>/dev/null || grep -qi 'microsoft' /sys/devices/virtual/dmi/id/sys_vendor 2>/dev/null; then
-        virt_type="Virtual Machine (Hyper-V)"
-    elif grep -qi 'xen' /proc/cpuinfo 2>/dev/null || grep -qi 'xen' /sys/devices/virtual/dmi/id/product_name 2>/dev/null; then
-        virt_type="Virtual Machine (Xen)"
-    fi
-    echo "$virt_type"
-}
-
-get_cpu_arch() {
-    uname -m 2>/dev/null || echo "unknown"
-}
-
-get_machine_type() {
-    local machine_type="Physical Machine"
-    if command -v systemd-detect-virt &>/dev/null; then
-        local virt_output=$(systemd-detect-virt 2>/dev/null)
-        case "$virt_output" in
-            "kvm") machine_type="Virtual Machine (KVM)" ;;
-            "qemu") machine_type="Virtual Machine (QEMU)" ;;
-            "vmware") machine_type="Virtual Machine (VMware)" ;;
-            "virtualbox") machine_type="Virtual Machine (VirtualBox)" ;;
-            "hyperv") machine_type="Virtual Machine (Hyper-V)" ;;
-            "xen") machine_type="Virtual Machine (Xen)" ;;
-            "none") machine_type="Physical Machine" ;;
-            *) machine_type="Unknown" ;;
-        esac
-    else
-        if grep -qi 'kvm' /proc/cpuinfo 2>/dev/null || grep -qi 'qemu' /sys/devices/virtual/dmi/id/product_name 2>/dev/null; then
-            machine_type="Virtual Machine (KVM/QEMU)"
-        elif grep -qi 'vmware' /sys/devices/virtual/dmi/id/product_name 2>/dev/null; then
-            machine_type="Virtual Machine (VMware)"
-        elif grep -qi 'hypervisor' /proc/cpuinfo 2>/dev/null; then
-            machine_type="Virtual Machine (Unknown)"
-        fi
-    fi
-    echo "$machine_type"
-}
-
-get_memory_slots() {
-    if command -v dmidecode &>/dev/null; then
-        local slots=$(dmidecode -t memory 2>/dev/null | grep -c 'Memory Device' 2>/dev/null)
-        if [ "$slots" -gt 0 ]; then
-            echo "$slots"
-            return
-        fi
-    fi
-    echo "unknown (requires root)"
-}
-
-get_memory_freq() {
-    local machine_type=$(get_machine_type 2>/dev/null)
-    if echo "$machine_type" | grep -qi "virtual"; then
-        echo "N/A (virtual machine)"
-        return
-    fi
-    
-    if command -v dmidecode &>/dev/null; then
-        local freq=$(dmidecode -t memory 2>/dev/null | grep -m 1 'Configured Clock Speed' | awk '{print $4}' 2>/dev/null)
-        if [ -n "$freq" ] && [ "$freq" -gt 0 ] 2>/dev/null; then
-            echo "${freq} MHz"
-            return
-        fi
-        freq=$(dmidecode -t memory 2>/dev/null | grep -m 1 'Speed' | awk '{print $2}' 2>/dev/null)
-        if [ -n "$freq" ] && [ "$freq" != "Unknown" ] && [ "$freq" -gt 0 ] 2>/dev/null; then
-            echo "${freq} MHz"
-            return
-        fi
-    fi
-    echo "unknown (requires root)"
-}
-
-get_disk_info_detailed() {
-    if command -v lsblk &>/dev/null; then
-        lsblk -no NAME,SIZE,TYPE,FSTYPE,MOUNTPOINT 2>/dev/null | grep -v "^loop" | grep -v "^NAME" | awk '{
-            name = $1
-            gsub(/^[├└─ ]+/, "", name)
-            size = $2
-            type = $3
-            fstype = $4
-            mountpoint = $5
-            
-            if (fstype == "") fstype = "-"
-            if (mountpoint == "") mountpoint = "-"
-            
-            print name "|" size "|" type "|" fstype "|" mountpoint
-        }' || echo "N/A"
-    else
-        echo "N/A"
-    fi
-}
-
-get_network_info() {
-    local result=""
-    for iface in $(ls /sys/class/net/ 2>/dev/null | grep -v "^lo$"); do
-        local mac=$(cat "/sys/class/net/$iface/address" 2>/dev/null || echo "N/A")
-        local speed=$(cat "/sys/class/net/$iface/speed" 2>/dev/null || echo "N/A")
-        local mtu=$(cat "/sys/class/net/$iface/mtu" 2>/dev/null || echo "N/A")
-        local state=$(cat "/sys/class/net/$iface/operstate" 2>/dev/null || echo "N/A")
-        local ip=$(ip addr show "$iface" 2>/dev/null | grep 'inet ' | awk '{print $2}' | cut -d'/' -f1 | head -1 || echo "N/A")
-        
-        local speed_str=""
-        if [ "$speed" != "N/A" ] && [ "$speed" -gt 0 ] 2>/dev/null; then
-            speed_str="${speed}Mbps"
-        elif [ "$speed" = "N/A" ]; then
-            speed_str="N/A"
-        else
-            speed_str="Unknown"
-        fi
-        
-        result="${result}${iface}: IP=${ip}, MAC=${mac}, Speed=${speed_str}, MTU=${mtu}, State=${state}\n"
-    done
-    echo -e "$result"
-}
-
-get_network_bond() {
-    if [ -d /proc/net/bonding/ ]; then
-        local bonds=$(ls /proc/net/bonding/ 2>/dev/null | tr '\n' ', ')
-        if [ -n "$bonds" ]; then
-            echo "$bonds"
-            return
-        fi
-    fi
-    echo "None"
-}
-
-get_network_interface_count() {
-    ls /sys/class/net/ 2>/dev/null | grep -v "^lo$" | wc -l 2>/dev/null || echo "0"
-}
-
-get_memory_slots_detail() {
-    if ! command -v dmidecode &>/dev/null; then
-        echo "unknown (requires dmidecode)"
-        return
-    fi
-    
-    local slots_output=$(dmidecode -t memory 2>/dev/null)
-    if [ -z "$slots_output" ]; then
-        echo "unknown (requires root for dmidecode)"
-        return
-    fi
-    
-    local total_slots=$(echo "$slots_output" | grep -A10 'Physical Memory Array' | grep -i 'Number Of Devices' | awk '{print $NF}')
-    if [ -z "$total_slots" ] || [ "$total_slots" = "0" ]; then
-        total_slots=$(echo "$slots_output" | grep -c 'Memory Device')
-    fi
-    
-    if [ -z "$total_slots" ] || [ "$total_slots" = "0" ]; then
-        echo "N/A (virtual machine)"
-        return
-    fi
-    
-    local slot_results=$(echo "$slots_output" | awk '
-        BEGIN { slot_count=0; in_device=0 }
-        /Memory Device/ { 
-            if (in_device && size !~ /No Module Installed|0 MB|0 GB|0 bytes/ && size != "" && size != "No Module Installed" && size != "Unknown") {
-                print "Slot " slot_count ":"
-                if (locator != "") print "  Locator: " locator
-                print "  Size: " size
-                if (mem_type != "") print "  Type: " mem_type
-                if (speed != "" && speed != "Unknown") print "  Speed: " speed
-                if (manufacturer != "" && manufacturer != "Unknown") print "  Manufacturer: " manufacturer
-                if (part_num != "" && part_num != "Unknown") print "  Part Number: " part_num
-            }
-            slot_count++; 
-            in_device=1; 
-            size=""; locator=""; mem_type=""; speed=""; manufacturer=""; part_num=""
-        }
-        in_device && /Locator:/ { locator = substr($0, index($0, $2)); gsub(/^[ \t]+/, "", locator); gsub(/^Locator:\s*/, "", locator) }
-        in_device && /Size:/ { size = substr($0, index($0, "Size:") + 5); gsub(/^[ \t]+/, "", size) }
-        in_device && /Type:/ { mem_type = substr($0, index($0, $2)); gsub(/^[ \t]+/, "", mem_type) }
-        in_device && /Speed:/ { speed = substr($0, index($0, $2)); gsub(/^[ \t]+/, "", speed); gsub(/^Memory Speed:\s*/, "", speed) }
-        in_device && /Manufacturer:/ { manufacturer = substr($0, index($0, $2)); gsub(/^[ \t]+/, "", manufacturer) }
-        in_device && /Part Number:/ { part_num = substr($0, index($0, $3)); gsub(/^[ \t]+/, "", part_num) }
-        END { 
-            if (in_device && size !~ /No Module Installed|0 MB|0 GB|0 bytes/ && size != "" && size != "No Module Installed" && size != "Unknown") {
-                print "Slot " slot_count ":"
-                if (locator != "") print "  Locator: " locator
-                print "  Size: " size
-                if (mem_type != "") print "  Type: " mem_type
-                if (speed != "" && speed != "Unknown") print "  Speed: " speed
-                if (manufacturer != "" && manufacturer != "Unknown") print "  Manufacturer: " manufacturer
-                if (part_num != "" && part_num != "Unknown") print "  Part Number: " part_num
-            }
-        }
-    ')
-    
-    local used_slots=$(echo "$slot_results" | grep -c '^Slot ')
-    
-    echo "Total Slots: $total_slots"
-    echo "Used Slots: $used_slots"
-    echo "$slot_results"
-}
-
-get_os_info() {
-    if [ -f /etc/redhat-release ]; then
-        cat /etc/redhat-release
-        return
-    fi
-    
-    if [ -f /etc/euleros-release ]; then
-        echo "EulerOS $(cat /etc/euleros-release | awk '{print $3}')"
-        return
-    fi
-    
-    if [ -f /etc/openEuler-release ]; then
-        cat /etc/openEuler-release | awk '{print $1, $3}'
-        return
-    fi
-    
-    if [ -f /etc/os-release ]; then
-        local pretty_name=$(grep -oP 'PRETTY_NAME="?\K[^"]+' /etc/os-release 2>/dev/null)
-        if [ -n "$pretty_name" ]; then
-            echo "$pretty_name"
-            return
-        fi
-    fi
-    
-    if [ -f /etc/lsb-release ]; then
-        local os_name=$(grep -oP 'DISTRIB_ID=\K.*' /etc/lsb-release 2>/dev/null)
-        local os_version=$(grep -oP 'DISTRIB_RELEASE=\K.*' /etc/lsb-release 2>/dev/null)
-        echo "$os_name $os_version"
-        return
-    fi
-    
-    echo "Unknown"
-}
-
-get_kernel_version() {
-    uname -r 2>/dev/null || echo "unknown"
-}
-
-echo "CPU_ARCH: $(get_cpu_arch)"
-echo "MACHINE_TYPE: $(get_machine_type)"
-echo "OS_INFO: $(get_os_info)"
-echo "KERNEL_VERSION: $(get_kernel_version)"
-echo "CPU_MODEL: $(get_cpu_model)"
-echo "CPU_PHYSICAL_CORES: $(get_cpu_physical_cores)"
-echo "CPU_LOGICAL_CORES: $(get_cpu_logical_cores)"
-echo "CPU_FREQ: $(get_cpu_freq)"
-echo "MEM_TOTAL: $(get_memory_size_mb)"
-echo "MEM_AVAILABLE: $(get_memory_available_mb)"
-echo "MEM_TYPE: $(get_memory_type)"
-echo "MEM_FREQ: $(get_memory_freq)"
-echo "MEM_CHANNELS: $(get_memory_channels)"
-echo "NET_BOND: $(get_network_bond)"
-echo "NET_INTERFACE_COUNT: $(get_network_interface_count)"
-echo "--- Memory Slots Detail ---"
+echo \"CPU_ARCH: \$(get_cpu_arch)\"
+echo \"MACHINE_TYPE: \$(get_machine_type)\"
+echo \"OS_INFO: \$(get_os_info)\"
+echo \"KERNEL_VERSION: \$(get_kernel_version)\"
+echo \"CPU_MODEL: \$(get_cpu_model)\"
+echo \"CPU_PHYSICAL_CORES: \$(get_cpu_physical_cores)\"
+echo \"CPU_LOGICAL_CORES: \$(get_cpu_logical_cores)\"
+echo \"CPU_FREQ: \$(get_cpu_freq)\"
+echo \"MEM_TOTAL: \$(get_memory_size_mb)\"
+echo \"MEM_AVAILABLE: \$(get_memory_available_mb)\"
+echo \"MEM_TYPE: \$(get_memory_type)\"
+echo \"MEM_FREQ: \$(get_memory_freq)\"
+echo \"MEM_CHANNELS: \$(get_memory_channels)\"
+echo \"NET_BOND: \$(get_network_bond)\"
+echo \"NET_INTERFACE_COUNT: \$(get_network_interface_count)\"
+echo \"--- Memory Slots Detail ---\"
 get_memory_slots_detail
-echo "--- Disk Info ---"
+echo \"--- Disk Info ---\"
 get_disk_info_detailed
-echo "--- Network Info ---"
-get_network_info
-EOF
-        )
+echo \"--- Network Info ---\"
+get_network_info"
+        
+        local ssh_output=$(echo "$remote_script" | eval "$remote_ssh bash" 2>/dev/null)
         echo "$ssh_output"
     fi
 }
@@ -1764,7 +1458,7 @@ wait_with_timeout() {
     return 0
 }
 
-# Run all selected benchmark tests (CPU, Memory, IO, Threads, Mutex, Pgbench)
+# Run all selected benchmark tests (CPU, Memory, IO, Threads, Mutex)
 # Parameter: $1 - include_network (true/false), default false
 # This function is used by both single-machine and cluster modes to avoid code duplication
 run_all_selected_tests() {
@@ -1792,10 +1486,6 @@ run_all_selected_tests() {
 
     if [ "$MUTEX_ENABLED" != "false" ]; then
         run_mutex_test
-    fi
-
-    if [ "$PGBENCH_ENABLED" = "true" ]; then
-        run_pgbench_test
     fi
 }
 
@@ -1950,8 +1640,7 @@ check_permissions() {
     echo "  Checking permissions..."
     
     # Check test directory write permission
-    # Support new IO_PATH parameter with backward compatibility to IO_TEST_PATH
-    local test_path="${IO_PATH:-${IO_TEST_PATH:-$IO_PATH_DEFAULT}}"
+    local test_path=$(resolve_io_path)
     if [ -w "$test_path" ]; then
         echo "  ✓ Test directory write permission: $test_path"
     else
@@ -1993,13 +1682,12 @@ convert_to_gb() {
 check_disk_space() {
     echo "  Checking disk space..."
 
-    # Support new IO_PATH parameter with backward compatibility to IO_TEST_PATH
-    local test_path="${IO_PATH:-${IO_TEST_PATH:-$IO_PATH_DEFAULT}}"
+    local test_path=$(resolve_io_path)
     local available_kb=$(get_disk_available_kb "$test_path")
     local available_gb=$((available_kb / 1024 / 1024))
     
     # Calculate required space based on IO test configuration
-    local required_gb=2
+    local required_gb=${MIN_DISK_SPACE_GB:-1}
     
     # Space requirement is mainly determined by IO test size
     # Note: This check is for local machine only. Remote servers will check their own disk space separately.
@@ -2327,10 +2015,6 @@ append_to_original() {
             # For both local and remote tests, just append the whole file to original data
             # This ensures we capture all raw sysbench/fio output
             cat "$result_file" >> "$original_file"
-        # For pgbench tests
-        elif echo "$section_title" | grep -E "PGBENCH" > /dev/null; then
-            # Extract pgbench raw output
-            cat "$result_file" >> "$original_file"
         # For network tests
         elif echo "$section_title" | grep -E "NETWORK" > /dev/null; then
             # Extract network test raw output
@@ -2370,8 +2054,7 @@ run_io_test() {
 # sysbench fileio test
 run_sysbench_fileio() {
     # Use a real disk directory instead of /tmp (which may be tmpfs)
-    # Support new IO_PATH parameter with backward compatibility to IO_TEST_PATH
-    local test_dir="${IO_PATH:-${IO_TEST_PATH:-$HOME/oscheckperf/io_test}}"
+    local test_dir=$(resolve_io_path)
 
     # Support SYSBENCH_PROFILES parameter
     local test_modes="${SYSBENCH_PROFILES:-rndrw}"
@@ -2516,9 +2199,7 @@ run_fio_test() {
         # e.g., IO_TOTAL_SIZE=1G, FIO_FILE_NUM=4, FIO_NUMJOBS=4 → each file is 64M
         # Total = 64M * 4 files * 4 jobs = 1G (expected)
         local per_file_size="auto"
-        local size_unit="G"
         local size_value=$(echo "$total_size" | sed -E 's/([0-9]+)([GMK])/\1/')
-        local size_org_unit=$(echo "$total_size" | sed -E 's/([0-9]+)([GMK])/\2/')
         
         if [ "$file_num" -gt 0 ] && [ "$size_value" -gt 0 ]; then
             local per_size=$((size_value * 1024 / file_num))
@@ -2546,7 +2227,7 @@ bs=${bs}
 iodepth=${iodepth}
 numjobs=${numjobs}
 nrfiles=${file_num}
-filename=${IO_PATH:-${IO_TEST_PATH:-$HOME/oscheckperf/io_test}}/fio_test_${profile}_
+filename=$(resolve_io_path)/fio_test_${profile}_
 EOF
         
         # Show configuration file content (also shown in dry run mode)
@@ -2586,8 +2267,7 @@ EOF
         rm -f "$fio_conf"
         
         # Cleanup fio test files (support multiple files)
-        # Support new IO_PATH parameter with backward compatibility to IO_TEST_PATH
-        rm -f "${IO_PATH:-${IO_TEST_PATH:-$HOME/oscheckperf/io_test}}/fio_test_${profile}_"* 2>/dev/null || true
+        rm -f "$(resolve_io_path)/fio_test_${profile}_"* 2>/dev/null || true
         
         # Parse result
         if [ "$DRY_RUN" != true ] && [ -f "$json_output" ] && jq_available; then
@@ -3987,64 +3667,6 @@ run_memory_test() {
     fi
 }
 
-# pgbench test function
-run_pgbench_test() {
-    echo "=== PostgreSQL Benchmark Test ==="
-    
-    local temp_output_file="$TMP_DIR/vb_pgbench_${TIMESTAMP}.log"
-    local db_name="${PGBENCH_DB:-pgbench_db}"
-    local duration="${PGBENCH_DURATION:-300}"
-    local threads="${PGBENCH_THREADS:-0}"
-    
-    if [ "$threads" -eq 0 ]; then
-        threads=$(get_cpu_cores)
-        echo "Auto-detected CPU cores: $threads"
-    fi
-    
-    # Only display test info in non-remote mode
-    if [ "$REMOTE" != "true" ]; then
-        echo "Starting pgbench test..."
-        echo "  Database: $db_name, Threads: $threads, Duration: ${duration}s"
-        
-        # Create database if it doesn't exist
-        echo "  Creating database $db_name if it doesn't exist..."
-        run_command "psql -c \"CREATE DATABASE $db_name\" 2>/dev/null || true" "/dev/null"
-        
-        # Initialize pgbench schema
-        echo "  Initializing pgbench schema..."
-        run_command "pgbench -i -s 1 $db_name" "/dev/null"
-        
-        # Run pgbench test
-        echo "  Running pgbench benchmark..."
-    else
-        # In remote mode, run commands without output
-        run_command "psql -c \"CREATE DATABASE $db_name\" 2>/dev/null || true" "/dev/null"
-        run_command "pgbench -i -s 1 $db_name" "/dev/null"
-    fi
-    run_command "pgbench -c $threads -j $threads -T $duration -r $db_name" "$temp_output_file"
-    
-    # Display result
-    if [ "$DRY_RUN" != true ] && [ -f "$temp_output_file" ]; then
-        # Only display output in non-remote mode
-        if [ "$REMOTE" != "true" ]; then
-            echo ""
-            echo "pgbench test results:"
-            cat "$temp_output_file"
-        fi
-        
-        # Append to combined results file
-        append_to_original "PGBENCH TEST RESULTS" "$temp_output_file"
-    fi
-    
-    # Cleanup temp file
-    rm -f "$temp_output_file"
-    
-    # Only display completion message in non-remote mode
-    if [ "$REMOTE" != "true" ]; then
-        echo "✓ pgbench test completed"
-    fi
-}
-
 # Generate report
 generate_report() {
     local report_file="$OUTPUT_DIR/report_benchmark_${TIMESTAMP}.log"
@@ -4236,8 +3858,7 @@ generate_report() {
     else
         printf -- "  Test Mode: ${SYSBENCH_PROFILES:-rndrw}\n" >> "$report_file"
     fi
-    # Support new IO_PATH parameter with backward compatibility to IO_TEST_PATH
-    printf -- "  Test Path: ${IO_PATH:-${IO_TEST_PATH:-$HOME/oscheckperf/io_test}}\n" >> "$report_file"
+    printf -- "  Test Path: $(resolve_io_path)\n" >> "$report_file"
     printf -- "  Duration: $(if [ "${IO_TOOL:-sysbench}" = "fio" ]; then echo "${FIO_DURATION:-$unified_duration}s"; else echo "${SYSBENCH_DURATION:-$unified_duration}s"; fi)\n" >> "$report_file"
     printf -- "\n" >> "$report_file"
     printf -- "[Network Test]\n" >> "$report_file"
@@ -4292,12 +3913,6 @@ generate_report() {
             done
         fi
     fi
-    printf -- "\n" >> "$report_file"
-    printf -- "[pgbench Test]\n" >> "$report_file"
-    printf -- "  Enabled: ${PGBENCH_ENABLED:-false}\n" >> "$report_file"
-    printf -- "  Database: ${PGBENCH_DB:-pgbench_db}\n" >> "$report_file"
-    printf -- "  Duration: ${PGBENCH_DURATION:-300}s\n" >> "$report_file"
-    printf -- "  Threads: $(if [ "${PGBENCH_THREADS:-0}" = "0" ]; then echo "auto ($cpu_cores)"; else echo "${PGBENCH_THREADS}"; fi)\n" >> "$report_file"
     printf -- "\n" >> "$report_file"
     printf -- "================================================================================\n" >> "$report_file"
     printf -- "                           Test Results Summary\n" >> "$report_file"
@@ -5230,27 +4845,6 @@ EOF
         echo "  Test not executed" >> "$report_file"
     fi
     
-    # Add pgbench results if available
-    cat >> "$report_file" << EOF
-
-[pgbench Test]
-EOF
-    
-    if [ -f "$combined_file" ]; then
-        if grep -q "PGBENCH TEST RESULTS" "$combined_file" 2>/dev/null; then
-            local pgbench_results=$(grep -A20 "PGBENCH TEST RESULTS" "$combined_file" 2>/dev/null)
-            if [ -n "$pgbench_results" ]; then
-                echo "$pgbench_results" >> "$report_file"
-            else
-                echo "  Test not executed" >> "$report_file"
-            fi
-        else
-            echo "  Test not executed" >> "$report_file"
-        fi
-    else
-        echo "  Test not executed" >> "$report_file"
-    fi
-    
     # Finalize report
     cat >> "$report_file" << EOF
 
@@ -5323,7 +4917,6 @@ main() {
     local config_network_enabled="${NETWORK_ENABLED:-false}"
     local config_threads_enabled="${THREADS_ENABLED:-false}"
     local config_mutex_enabled="${MUTEX_ENABLED:-false}"
-    local config_pgbench_enabled="${PGBENCH_ENABLED:-false}"
     
     # Parse command line arguments
     parse_args "$@"
@@ -5332,15 +4925,13 @@ main() {
     # restore config file ENABLED settings
     if [ "$CPU_ENABLED" = "false" ] && [ "$MEMORY_ENABLED" = "false" ] && \
        [ "$IO_ENABLED" = "false" ] && [ "$NETWORK_ENABLED" = "false" ] && \
-       [ "$THREADS_ENABLED" = "false" ] && [ "$MUTEX_ENABLED" = "false" ] && \
-       [ "$PGBENCH_ENABLED" = "false" ]; then
+       [ "$THREADS_ENABLED" = "false" ] && [ "$MUTEX_ENABLED" = "false" ]; then
         export CPU_ENABLED="$config_cpu_enabled"
         export MEMORY_ENABLED="$config_memory_enabled"
         export IO_ENABLED="$config_io_enabled"
         export NETWORK_ENABLED="$config_network_enabled"
         export THREADS_ENABLED="$config_threads_enabled"
         export MUTEX_ENABLED="$config_mutex_enabled"
-        export PGBENCH_ENABLED="$config_pgbench_enabled"
     fi
     
     # Validate all parameters first before doing anything else
@@ -5773,10 +5364,9 @@ main() {
                     # Support new SYSBENCH_PROFILES and IO_PATH parameters with backward compatibility
                     remote_command="$remote_command CPU_THREADS=\"$CPU_THREADS\" CPU_MAX_PRIME=\"$CPU_MAX_PRIME\""
                     remote_command="$remote_command MEMORY_THREADS=\"$MEMORY_THREADS\" MEMORY_BLOCK_SIZE=\"$MEMORY_BLOCK_SIZE\" MEMORY_TOTAL_SIZE=\"$MEMORY_TOTAL_SIZE\" MEMORY_OPER=\"$MEMORY_OPER\""
-                    remote_command="$remote_command IO_TOOL=\"$IO_TOOL\" IO_TOTAL_SIZE=\"$IO_TOTAL_SIZE\" SYSBENCH_PROFILES=\"${SYSBENCH_PROFILES:-rndrw}\" SYSBENCH_FILE_NUM=\"$SYSBENCH_FILE_NUM\" SYSBENCH_DURATION=\"$SYSBENCH_DURATION\" IO_PATH=\"${IO_PATH:-${IO_TEST_PATH:-$HOME/oscheckperf/io_test}}\" FIO_DURATION=\"$FIO_DURATION\""
+                    remote_command="$remote_command IO_TOOL=\"$IO_TOOL\" IO_TOTAL_SIZE=\"$IO_TOTAL_SIZE\" SYSBENCH_PROFILES=\"${SYSBENCH_PROFILES:-rndrw}\" SYSBENCH_FILE_NUM=\"$SYSBENCH_FILE_NUM\" SYSBENCH_DURATION=\"$SYSBENCH_DURATION\" IO_PATH=\"$(resolve_io_path)\" FIO_DURATION=\"$FIO_DURATION\""
                     remote_command="$remote_command THREADS_NUM=\"$THREADS_NUM\" THREADS_YIELDS=\"$THREADS_YIELDS\" THREADS_LOCKS=\"$THREADS_LOCKS\""
                     remote_command="$remote_command MUTEX_THREADS=\"$MUTEX_THREADS\" MUTEX_NUM=\"$MUTEX_NUM\""
-                    remote_command="$remote_command PGBENCH_DURATION=\"$PGBENCH_DURATION\" PGBENCH_CLIENTS=\"$PGBENCH_CLIENTS\" PGBENCH_THREADS=\"$PGBENCH_THREADS\" PGBENCH_SCALE=\"$PGBENCH_SCALE\" PGBENCH_DB=\"$PGBENCH_DB\""
                     
                     # Execute the remote command and capture output to a temporary file
                     local temp_remote_file="$TMP_DIR/vb_remote_${target_ip//./_}_${TIMESTAMP}.log"
@@ -5827,7 +5417,7 @@ main() {
                                     remote_test_command="$remote_test_command SYSBENCH_BLOCK_SIZE=\"${SYSBENCH_BLOCK_SIZE:-16K}\""
                                 fi
                                 # Support new IO_PATH parameter with backward compatibility
-                                remote_test_command="$remote_test_command IO_TOTAL_SIZE=${IO_TOTAL_SIZE:-1G} SYSBENCH_FILE_NUM=${SYSBENCH_FILE_NUM:-4} SYSBENCH_DURATION=${SYSBENCH_DURATION:-$DURATION} IO_PATH=${IO_PATH:-${IO_TEST_PATH:-$HOME/oscheckperf/io_test}}"
+                                remote_test_command="$remote_test_command IO_TOTAL_SIZE=${IO_TOTAL_SIZE:-1G} SYSBENCH_FILE_NUM=${SYSBENCH_FILE_NUM:-4} SYSBENCH_DURATION=${SYSBENCH_DURATION:-$DURATION} IO_PATH=$(resolve_io_path)"
                             fi
                         fi
                         

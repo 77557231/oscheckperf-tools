@@ -13,6 +13,8 @@ A system-level performance benchmarking tool designed for Vastbase, openGauss, a
 - ✅ **Password Authentication**: Support username and password configuration in server list, no SSH passwordless login required
 - ✅ **Detailed Reports**: Generate structured test reports
 - ✅ **Remote Distribution**: Automatically compile and distribute sysbench, sshpass to remote servers, supports cross-architecture deployment
+- ✅ **Multiple Network Modes**: Supports serial, parallel and matrix network test modes
+- ✅ **Result Analysis**: Generate multi-server comparison reports for performance analysis and problem location
 - ✅ **Security Enhancement**: Path validation, disk space check, process management optimization, protecting production environment
 - ✅ **Debug Modes**: Support `--debug` and `--dry-run` modes for troubleshooting and command preview
 
@@ -233,7 +235,141 @@ Multi-machine installation (direct IP list):
 # Combine with other parameters
 ./oscheckperf io --dry-run IO_TOOL=fio FIO_PROFILES="read write"
 ```
-### 4. View Reports
+
+### 4. Server Authentication Methods
+
+#### Method 1: SSH Passwordless Login (Recommended)
+
+**Configuration Steps**:
+
+```bash
+# Generate SSH key (if not exists)
+ssh-keygen -t rsa -b 4096
+
+# Distribute public key to target servers
+ssh-copy-id root@192.168.1.101
+ssh-copy-id root@192.168.1.102
+```
+
+**Server List File Format**:
+
+```bash
+# all-servers file content
+192.168.1.101
+192.168.1.102
+192.168.1.103
+```
+
+**Run Test**:
+
+```bash
+./oscheckperf network -f all-servers
+```
+
+#### Method 2: Password Authentication (Non-passwordless)
+
+**Install Dependencies**:
+
+```bash
+# CentOS/RHEL
+sudo yum install -y sshpass
+
+# Ubuntu/Debian
+sudo apt-get install -y sshpass
+```
+
+**Server List File Format**:
+
+```bash
+# all-servers file content (format: IP:username:password)
+192.168.1.101:root:password123
+192.168.1.102:admin:myp@ssword
+192.168.1.103:user:secret456
+```
+
+**Run Test**:
+
+```bash
+./oscheckperf network -f all-servers
+```
+
+**Notes**:
+- Password authentication requires `sshpass` tool
+- Passwords in server list are stored in plain text, keep it secure
+- Mixed mode supported: server list can contain both passwordless and password-authenticated servers
+
+### 5. Custom SSH Port
+
+**Method 1: Command Line Parameter**
+
+```bash
+# Specify SSH port as 2222
+./oscheckperf -f servers.txt SSH_PORT=2222
+
+# Network test with custom SSH port
+./oscheckperf network -f servers.txt SSH_PORT=2222
+```
+
+**Method 2: Configuration File**
+
+Add to `parameter.conf`:
+
+```bash
+SSH_PORT=2222
+```
+
+**Method 3: Environment Variable**
+
+```bash
+export SSH_PORT=2222
+./oscheckperf -f servers.txt
+```
+
+**Priority**: Command line parameters > Configuration file > Environment variable > Default (22)
+
+### 6. Configuration File Support
+
+**Create Configuration File** (`parameter.conf`):
+
+```bash
+# General parameters
+DURATION=60              # Test duration (seconds)
+OUTPUT_DIR=./output      # Output directory
+IO_TOOL=sysbench         # IO testing tool (sysbench/fio)
+SSH_PORT=22              # SSH port
+
+# Test module switches
+CPU_ENABLED=true         # Enable CPU test
+MEMORY_ENABLED=true      # Enable memory test
+IO_ENABLED=true          # Enable IO test
+NETWORK_ENABLED=true     # Enable network test
+THREADS_ENABLED=true     # Enable threads test
+MUTEX_ENABLED=true       # Enable mutex test
+
+# CPU test parameters
+CPU_THREADS=0            # CPU threads, 0=auto
+CPU_MAX_PRIME=20000      # CPU test max prime
+
+# IO test parameters
+IO_TOTAL_SIZE=1G         # Total IO test file size
+IO_PATH=$HOME/oscheckperf/io_test  # IO test path
+
+# Network test parameters
+NETWORK_MODE=matrix      # Network test mode (serial/parallel/matrix)
+NETWORK_PARALLEL=1       # Parallel connections
+```
+
+**Run with Configuration File**:
+
+```bash
+# Run tests with configuration file
+./oscheckperf -p parameter.conf
+
+# Command line parameters override configuration file values
+./oscheckperf -p parameter.conf DURATION=30 IO_TOOL=fio
+```
+
+### 7. View Reports
 ```bash
 ls -lh output/
 cat output/report_benchmark_*.log
@@ -387,10 +523,6 @@ FIO testing works differently:
 - **transactions**: Number of transactions (higher is better)
 - **TPS**: Transactions per second (higher is better)
 - **latency**: Lock wait latency (lower is better)
-
-### pgbench Test
-- **TPS**: Transactions per second (higher is better)
-- **latency average**: Average latency (lower is better)
 
 ## Dependencies
 
