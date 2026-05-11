@@ -1,6 +1,6 @@
-# 数据库系统基准测试工具
+# 系统性能基准测试工具
 
-一个为 Vastbase、openGauss 和 PostgreSQL 数据库设计的系统级性能基准测试工具，支持全面的性能测试，帮助评估服务器硬件性能边界。
+一个系统级性能基准测试工具，支持全面的 CPU、内存、IO、网络、线程、互斥锁性能测试，帮助评估服务器硬件性能边界。适用于 Vastbase、openGauss、PostgreSQL、MySQL 等数据库及各类应用场景的上线前性能检查，助力发现系统潜在性能问题。
 
 ## 特性
 
@@ -38,6 +38,7 @@ $HOME/oscheckperf/
 │   └── fio_test_file.*       # fio 创建的测试文件（保留）
 ├── tools/
 │   └── skill.md              # 开发规范文档
+├── parameter.conf            # 配置文件模板
 ├── README.md                 # 中文文档（默认）
 └── README.en.md              # 英文文档
 ```
@@ -83,7 +84,9 @@ export BASE_DIR=/custom/path/to/oscheckperf
 
 ### 1. 安装依赖
 
-#### 基础依赖（必选）
+#### 方式一：原生命令安装
+
+**基础依赖（必选）**：
 
 ```bash
 # CentOS/RHEL
@@ -93,7 +96,7 @@ sudo yum install -y sysbench
 sudo apt-get install -y sysbench
 ```
 
-#### 完整依赖（推荐）
+**完整依赖（推荐）**：
 
 ```bash
 # CentOS/RHEL
@@ -103,21 +106,60 @@ sudo yum install -y sysbench fio iperf3 jq
 sudo apt-get install -y sysbench fio iperf3 jq
 ```
 
-### 2. 支持的数据库
+#### 方式二：oscheckperf 自动安装
 
-- ✅ **Vastbase**：华为企业级数据库
-- ✅ **openGauss**：开源关系型数据库
-- ✅ **PostgreSQL**：开源对象关系型数据库
+本工具支持自动编译和分发 sysbench、sshpass 到远程服务器，降低最小额外安装影响。
 
-### 3. 运行测试
-
-#### 基本用法
+**单机安装**：
 
 ```bash
+# 安装所有组件（sysbench + sshpass + oscheckperf）
+./oscheckperf -i
+
+# 安装指定组件
+./oscheckperf -i sysbench    # 仅安装 sysbench
+./oscheckperf -i sshpass     # 仅安装 sshpass
+./oscheckperf -i all         # 安装所有组件（默认）
+```
+
+**多机器安装**：
+
+```bash
+# 从服务器列表文件安装
+./oscheckperf -i -f all-servers
+
+# 直接指定 IP 列表安装
+./oscheckperf -i -f "192.168.1.101 192.168.1.102 192.168.1.103"
+```
+
+**安装逻辑**：
+
+| 场景                               | 行为                  |
+| -------------------------------- | ------------------- |
+| 本机在 IP 列表中且无 `$HOME/oscheckperf` | 先编译，再分发             |
+| 本机有 `$HOME/oscheckperf` 目录       | 跳过编译，直接打包分发         |
+| 本机不在 IP 列表中                      | 所有服务器都需要分发（从本地已有目录） |
+| SCP 分发                           | 自动排除本机器 IP          |
+
+**优势**：
+
+- 无需在远程服务器上安装编译工具和依赖
+- 统一的 sysbench 版本，确保测试结果的一致性
+- 降低对远程服务器的影响，无需修改系统配置
+- 自动配置环境变量，使用方便
+
+### 2. 运行测试
+
+#### 方式一：不使用配置文件（直接运行）
+
+**基本用法**：
+
+```bash
+# 运行所有测试（默认）
 ./oscheckperf
 ```
 
-#### 命令行参数覆盖
+**命令行参数覆盖**：
 
 ```bash
 # 覆盖测试时长
@@ -131,11 +173,9 @@ sudo apt-get install -y sysbench fio iperf3 jq
 
 # 使用 fio 进行 IO 测试
 ./oscheckperf IO_TOOL=fio
-
-# 设置 fio 测试时长和目录
 ```
 
-#### 运行特定测试（子命令）
+**运行特定测试（子命令）**：
 
 ```bash
 # 运行 CPU 测试
@@ -163,7 +203,7 @@ sudo apt-get install -y sysbench fio iperf3 jq
 ./oscheckperf all
 ```
 
-#### 子命令与参数组合使用
+**子命令与参数组合使用**：
 
 ```bash
 # 运行 CPU 测试并指定参数
@@ -174,79 +214,143 @@ sudo apt-get install -y sysbench fio iperf3 jq
 
 # 运行网络测试并指定服务器列表
 ./oscheckperf network -f "192.168.1.101 192.168.1.102" NETWORK_MODE=parallel
-
-# 矩阵网络测试（全矩阵交叉测试）
-./oscheckperf -f all-servers NETWORK_MODE=matrix
-
-# 高级用法
-# 运行系统检查并指定测试目录
-./oscheckperf -f all-servers check IO_TEST_PATH='/home/vastbase/vb_test'
-# 同时运行多个测试并指定参数
-./oscheckperf cpu mem -f all-servers DURATION=2 THREADS=4
-# 运行 IO 测试并使用 fio 工具和自定义参数
-./oscheckperf io -f all-servers IO_TOOL=fio IO_TEST_MODE=read IO_TOTAL_SIZE=10G
 ```
 
-#### 安装 sysbench
+#### 方式二：使用配置文件
 
-本工具支持自动编译和分发 sysbench 到远程服务器，降低最小额外安装影响。
-
-**本机编译拷贝远程服务器方式**：
-
-1. **自动编译**：如果本机没有 `$HOME/oscheckperf` 目录，会自动下载并编译 sysbench
-2. **打包分发**：将编译好的 sysbench 打包并通过 SCP 分发到远程服务器
-3. **最小影响**：无需在远程服务器上安装编译依赖，只需 SSH 免密登录即可
-
-**安装命令**：
-
-单机安装：
+**创建配置文件**（`parameter.conf`）：
 
 ```bash
-./oscheckperf -i
+# 通用参数
+DURATION=60              # 测试时长（秒）
+OUTPUT_DIR=./output      # 输出目录
+IO_TOOL=sysbench         # IO测试工具（sysbench/fio）
+SSH_PORT=22              # SSH连接端口
+
+# 测试模块开关
+CPU_ENABLED=true         # 启用CPU测试
+MEMORY_ENABLED=true      # 启用内存测试
+IO_ENABLED=true          # 启用IO测试
+NETWORK_ENABLED=true     # 启用网络测试
+THREADS_ENABLED=true     # 启用线程测试
+MUTEX_ENABLED=true       # 启用互斥锁测试
+
+# CPU测试参数
+CPU_THREADS=0            # CPU线程数，0=自动
+CPU_MAX_PRIME=20000      # CPU测试最大素数
+
+# IO测试参数
+IO_TOTAL_SIZE=1G         # IO测试文件总大小
+IO_PATH=$HOME/oscheckperf/io_test  # IO测试路径
+
+# 网络测试参数
+NETWORK_MODE=matrix      # 网络测试模式（serial/parallel/matrix）
+NETWORK_PARALLEL=1       # 并行连接数
 ```
 
-多机器安装（从服务器列表文件）：
+**使用配置文件运行**：
 
 ```bash
-./oscheckperf -i -f all-servers
+# 使用配置文件运行测试
+./oscheckperf -p parameter.conf
+
+# 命令行参数会覆盖配置文件中的值
+./oscheckperf -p parameter.conf DURATION=30 IO_TOOL=fio
 ```
 
-多机器安装（直接指定 IP 列表）：
+### 3. 服务器认证方式
+
+#### 方式一：SSH 免密登录（推荐）
+
+**配置步骤**：
 
 ```bash
-./oscheckperf -i -f "192.168.1.101 192.168.1.102 192.168.1.103"
+# 生成 SSH 密钥（如果还没有）
+ssh-keygen -t rsa -b 4096
+
+# 将公钥分发到目标服务器
+ssh-copy-id root@192.168.1.101
+ssh-copy-id root@192.168.1.102
 ```
 
-**安装逻辑**：
+**服务器列表文件格式**：
 
-| 场景                               | 行为                  |
-| -------------------------------- | ------------------- |
-| 本机在 IP 列表中且无 `$HOME/oscheckperf` | 先编译，再分发             |
-| 本机有 `$HOME/oscheckperf` 目录       | 跳过编译，直接打包分发         |
-| 本机不在 IP 列表中                      | 所有服务器都需要分发（从本地已有目录） |
-| SCP 分发                           | 自动排除本机器 IP          |
+```bash
+# all-servers 文件内容
+192.168.1.101
+192.168.1.102
+192.168.1.103
+```
 
-**执行方式**：
+**运行测试**：
 
-- **本地执行**：直接使用当前目录下的 `oscheckperf` 脚本
-- **远程执行**：通过 SSH 调用远程服务器上的 `$HOME/oscheckperf/oscheckperf` 脚本
+```bash
+./oscheckperf network -f all-servers
+```
 
-**优势**：
+#### 方式二：密码认证（非免密）
 
-- 无需在远程服务器上安装编译工具和依赖
-- 统一的 sysbench 版本，确保测试结果的一致性
-- 降低对远程服务器的影响，无需修改系统配置
-- 自动配置环境变量，使用方便
+**安装依赖**：
+
+```bash
+# CentOS/RHEL
+sudo yum install -y sshpass
+
+# Ubuntu/Debian
+sudo apt-get install -y sshpass
+```
+
+**服务器列表文件格式**：
+
+```bash
+# all-servers 文件内容（格式：IP:用户名:密码）
+192.168.1.101:root:password123
+192.168.1.102:admin:myp@ssword
+192.168.1.103:user:secret456
+```
+
+**运行测试**：
+
+```bash
+./oscheckperf network -f all-servers
+```
 
 **注意事项**：
 
-- `$HOME/oscheckperf` 目录会自动创建，若已存在则跳过编译过程
-- 多机器安装时，若本机在 IP 列表中且没有 `$HOME/oscheckperf` 目录，会先编译再分发
-- SCP 分发时会自动排除本机器 IP
-- 目标服务器需要配置 SSH 免密登录
-- 安装完成后会自动配置环境变量并生效
+- 密码认证需要安装 `sshpass` 工具
+- 服务器列表中的密码会以明文形式存储，请妥善保管
+- 支持混合模式：服务器列表中可以同时包含免密和密码认证的服务器
 
-#### 干运行模式（预览命令）
+### 4. 自定义 SSH 端口
+
+**方式一：命令行参数**
+
+```bash
+# 指定SSH端口为2222
+./oscheckperf -f servers.txt SSH_PORT=2222
+
+# 网络测试指定SSH端口
+./oscheckperf network -f servers.txt SSH_PORT=2222
+```
+
+**方式二：配置文件**
+
+在 `parameter.conf` 中添加：
+
+```bash
+SSH_PORT=2222
+```
+
+**方式三：环境变量**
+
+```bash
+export SSH_PORT=2222
+./oscheckperf -f servers.txt
+```
+
+**优先级**：命令行参数 > 配置文件 > 环境变量 > 默认值（22）
+
+### 5. 干运行模式（预览命令）
 
 ```bash
 # 使用 --dry-run 参数预览将要执行的命令
@@ -256,7 +360,7 @@ sudo apt-get install -y sysbench fio iperf3 jq
 ./oscheckperf io --dry-run IO_TOOL=fio FIO_PROFILES="read write"
 ```
 
-### 4. 查看报告
+### 6. 查看报告
 
 ```bash
 ls -lh output/
@@ -293,13 +397,6 @@ cat output/report_benchmark_*.log
 - **ctx/majf/minf**：上下文切换/主要页错误/次要页错误（仅 fio，反映系统资源使用情况）
 - **iodepth\_level**：IO 队列深度级别（仅 fio，反映 IO 并发程度）
 
-### 网络测试
-
-- **Bandwidth (MB/s)**：网络带宽（越高越好）
-- **Retrans**：TCP 重传次数（越少越好）
-- **RTT(ms)**：往返时间（格式：平均值 (Min: 最小值, Max: 最大值)）
-- **CPU(%)**：发送端和接收端的 CPU 利用率（格式：发送端CPU%/接收端CPU%）
-
 ### IO 压测详细说明
 
 #### Sysbench fileio 工作流程
@@ -332,7 +429,7 @@ FIO 测试采用不同的工作方式：
 
 - 默认测试路径为 `$HOME/oscheckperf/io_test`
 - **不要使用** **`/tmp`** **目录**：某些服务器的 `/tmp` 是 tmpfs（内存文件系统），会导致测试结果不准确（测试的是内存而非磁盘）
-- 建议使用数据库数据目录所在的磁盘分区，结果更具参考价值
+- 建议使用实际业务数据所在的磁盘分区，结果更具参考价值
 - 确保目标分区有足够的可用空间（至少大于 `IO_TOTAL_SIZE`）
 
 **常用参数**：
@@ -395,8 +492,8 @@ FIO 测试采用不同的工作方式：
 # 使用 fio 进行顺序读测试
 ./oscheckperf io IO_TOOL=fio FIO_PROFILES=read FIO_DURATION=60
 
-# 指定测试路径到数据库数据目录
-./oscheckperf io IO_PATH=/data/vastbase/pg_xlog
+# 指定测试路径
+./oscheckperf io IO_PATH=/data/test
 ```
 
 ### 网络测试
@@ -430,6 +527,7 @@ FIO 测试采用不同的工作方式：
 | fio      | 可选 | 专业 IO 压测         | `yum install -y fio`      |
 | iperf3   | 可选 | 网络吞吐测试           | `yum install -y iperf3`   |
 | jq       | 推荐 | JSON 结果解析        | `yum install -y jq`       |
+| sshpass  | 可选 | 密码认证支持           | `yum install -y sshpass`  |
 
 ## 常见问题
 
@@ -447,25 +545,17 @@ FIO 测试采用不同的工作方式：
 
 ### Q3: 如何自定义 IO 测试路径？
 
-**A**: 使用 `IO_PATH` 参数：`./oscheckperf IO_PATH=/data`
+**A**: 使用 `IO_PATH` 参数：`./oscheckperf io IO_PATH=/data`
 
-### Q4: 网络测试如何配置多客户端？
-
-**A**: 创建服务器列表文件 `all-servers`，包含所有需要测试的 IP 地址，然后使用 `-f` 参数指定：
-
-```bash
-./oscheckperf network -f all-servers
-```
-
-### Q5: NETWORK\_MODE 和 NETWORK\_PARALLEL 参数的区别是什么？
+### Q4: NETWORK_MODE 和 NETWORK_PARALLEL 参数的区别是什么？
 
 **A**:
 
-- **NETWORK\_MODE**：控制多个客户端测试的执行方式
+- **NETWORK_MODE**：控制多个客户端测试的执行方式
   - `serial`：逐个执行客户端测试，一个完成后再开始下一个
   - `parallel`：同时执行所有客户端测试
   - `matrix`：执行全矩阵交叉测试（每对服务器之间都进行测试）
-- **NETWORK\_PARALLEL**：控制每个 iperf3 测试的并行连接数，在所有模式下都生效
+- **NETWORK_PARALLEL**：控制每个 iperf3 测试的并行连接数，在所有模式下都生效
   - 例如：`NETWORK_PARALLEL=4` 表示每个测试使用 4 个并行连接
 
 **示例**：
@@ -482,9 +572,9 @@ FIO 测试采用不同的工作方式：
 
 1. **测试环境**：在独立测试环境运行，避免影响生产业务
 2. **测试时长**：生产环境建议使用较长的测试时长（如 60 秒以上）
-3. **IO 测试路径**：使用数据库数据目录所在分区，结果更具参考价值
+3. **IO 测试路径**：使用实际业务数据所在的磁盘分区，结果更具参考价值
 4. **历史对比**：定期运行测试，保存报告用于历史趋势分析
-5. **多机测试**：网络压测前配置好 SSH 免密登录
+5. **多机测试**：网络压测前配置好 SSH 免密登录或准备密码认证配置
 6. **结果解读**：重点关注 P95/P99 延迟，而非仅看平均值
 7. **参数调整**：根据服务器配置调整测试参数，如线程数应与 CPU 核心数匹配
 

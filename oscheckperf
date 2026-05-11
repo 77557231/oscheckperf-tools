@@ -1,7 +1,7 @@
 #!/bin/bash
 #--------------------------------------------------------------------------------
 #-- File name:   oscheckperf
-#-- Version:     v0.8.1
+#-- Version:     v0.8.2
 #-- Purpose:     Database System Benchmark Tool
 #-- Author:      Wanping Pan 
 #-- Description: One-click system benchmarking tool, supports configuration via config file or command line parameters
@@ -38,6 +38,9 @@ NO_CHECKS=false
 
 # Network configuration defaults
 NETWORK_PORT_DEFAULT=25201
+
+# SSH configuration defaults
+SSH_PORT_DEFAULT=22
 
 # Server credentials storage (associative arrays)
 declare -A SERVER_USERNAMES
@@ -98,6 +101,7 @@ is_password_auth() {
 # Returns: SSH command prefix (with or without sshpass)
 get_ssh_command() {
     local ip="$1"
+    local ssh_port="${SSH_PORT:-$SSH_PORT_DEFAULT}"
     
     if is_password_auth "$ip"; then
         local username="${SERVER_USERNAMES[$ip]}"
@@ -111,12 +115,12 @@ get_ssh_command() {
                 echo "  Ubuntu/Debian: sudo apt-get install -y sshpass"
                 exit 1
             fi
-            echo "sshpass -p '${password//\'/\'\\\'\'}' ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o PreferredAuthentications=password -o PubkeyAuthentication=no $username@$ip"
+            echo "sshpass -p '${password//\'/\'\\\'\'}' ssh -p $ssh_port -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o PreferredAuthentications=password -o PubkeyAuthentication=no $username@$ip"
         else
-            echo "ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o PreferredAuthentications=password -o PubkeyAuthentication=no $username@$ip"
+            echo "ssh -p $ssh_port -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o PreferredAuthentications=password -o PubkeyAuthentication=no $username@$ip"
         fi
     else
-        echo "ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null $ip"
+        echo "ssh -p $ssh_port -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null $ip"
     fi
 }
 
@@ -124,6 +128,7 @@ get_ssh_command() {
 # Returns: SCP command prefix (with or without sshpass)
 get_scp_command() {
     local ip="$1"
+    local ssh_port="${SSH_PORT:-$SSH_PORT_DEFAULT}"
     
     if is_password_auth "$ip"; then
         local username="${SERVER_USERNAMES[$ip]}"
@@ -137,12 +142,12 @@ get_scp_command() {
                 echo "  Ubuntu/Debian: sudo apt-get install -y sshpass"
                 exit 1
             fi
-            echo "sshpass -p '${password//\'/\'\\\'\'}' scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o PreferredAuthentications=password -o PubkeyAuthentication=no"
+            echo "sshpass -p '${password//\'/\'\\\'\'}' scp -P $ssh_port -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o PreferredAuthentications=password -o PubkeyAuthentication=no"
         else
-            echo "scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o PreferredAuthentications=password -o PubkeyAuthentication=no"
+            echo "scp -P $ssh_port -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o PreferredAuthentications=password -o PubkeyAuthentication=no"
         fi
     else
-        echo "scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+        echo "scp -P $ssh_port -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
     fi
 }
 
@@ -275,7 +280,7 @@ parse_args() {
                 exit 0
                 ;;
             --version)
-                echo "Version: 0.8.1"
+                echo "Version: 0.8.2"
                 exit 0
                 ;;
             --dry-run)
@@ -477,6 +482,7 @@ show_help() {
     echo "  DURATION=<seconds>          Unified test duration (default: 60)"
     echo "  OUTPUT_DIR=<path>           Output directory (default: $OUTPUT_DIR_DEFAULT)"
     echo "  CLEANUP=true|false          Cleanup temp files after test (default: true)"
+    echo "  SSH_PORT=<port>             SSH port for remote server connections (default: $SSH_PORT_DEFAULT)"
     echo ""
     echo "CPU test parameters:"
     echo "  CPU_THREADS=<number>        CPU test threads, 0=auto (default: 0)"
@@ -4481,7 +4487,7 @@ EOF
                     fi
                 done < <(awk 'BEGIN{OFS="|"} 
                     /RESULTS FROM SERVER:/ {match($0, /RESULTS FROM SERVER: ([0-9.]+)/, arr); current_server=arr[1]}
-                    /FIO TEST RESULTS/ {if(current_server!="") ip=current_server; else {match($0, /Server: ([0-9.]+)/, arr); ip=arr[1]}; match($0, /FIO TEST RESULTS \(([^)]+)\)/, mode_arr); io_mode=mode_arr[1]; p99="N/A"; disk="N/A"; cpu_usr="N/A"; cpu_sys="N/A"; slat="0"; clat="N/A"; iodepth="N/A"; in_fio=1; ext_started=0} 
+                    /FIO TEST RESULTS/ {match($0, /Server: ([0-9.]+)/, arr); ip=arr[1]; if(ip=="") ip=current_server; match($0, /FIO TEST RESULTS \(([^)]+)\)/, mode_arr); io_mode=mode_arr[1]; p99="N/A"; disk="N/A"; cpu_usr="N/A"; cpu_sys="N/A"; slat="0"; clat="N/A"; iodepth="N/A"; in_fio=1; ext_started=0} 
                     in_fio && !ext_started && /slat \(usec\)/ {split($0, a, "avg="); split(a[2], b, ","); gsub(/ /, "", b[1]); slat=b[1]}
                     in_fio && !ext_started && /clat \(usec\)/ {split($0, a, "avg="); split(a[2], b, ","); gsub(/ /, "", b[1]); clat=b[1]}
                     in_fio && !ext_started && /IO depths/ {
