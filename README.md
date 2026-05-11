@@ -1,93 +1,89 @@
-# 系统性能基准测试工具
+# Database System Benchmark Tool
 
-一个系统级性能基准测试工具，支持全面的 CPU、内存、IO、网络、线程、互斥锁性能测试，帮助评估服务器硬件性能边界。适用于 Vastbase、openGauss、PostgreSQL、MySQL 等数据库及各类应用场景的上线前性能检查，助力发现系统潜在性能问题。
+A system-level performance benchmarking tool designed for Vastbase, openGauss, and PostgreSQL databases, supporting comprehensive performance testing to help evaluate server hardware performance boundaries.
 
-## 特性
+## Features
 
-- ✅ **一键执行**：自动化完成 CPU/内存/IO/网络/线程/锁测试，无需手动配置
-- ✅ **最小依赖**：基础模式仅需 sysbench，其他工具（fio、iperf3）为可选
-- ✅ **多工具支持**：IO 测试支持 sysbench 和 fio，可根据需要选择
-- ✅ **多服务器支持**：网络压测支持多 IP 配置（支持免密和密码认证），可测试集群网络性能
-- ✅ **密码认证**：支持服务器列表中配置用户名和密码，无需 SSH 免密登录
-- ✅ **配置文件支持**：支持通过配置文件管理所有参数，便于批量配置和版本控制
-- ✅ **详细报告**：生成结构化测试报告，包含系统信息、测试配置和详细指标
-- ✅ **远程分发**：自动编译和分发 sysbench、sshpass 到远程服务器，支持跨架构部署
-- ✅ **多种网络模式**：支持串行、并行和矩阵网络测试模式
-- ✅ **结果分析**：生成多服务器对比报告，便于性能分析和问题定位
-- ✅ **安全增强**：路径安全验证、磁盘空间检查、进程管理优化，保护生产环境
-- ✅ **调试模式**：支持 `--debug` 和 `--dry-run` 模式，便于问题定位和命令预览
+- ✅ **One-Click Execution**: Automated CPU/Memory/IO/Network/Threads/Mutex testing
+- ✅ **Flexible Parameters**: Control all test parameters through command line arguments
+- ✅ **Configuration File Support**: Manage all parameters through configuration files for batch configuration and version control
+- ✅ **Minimal Dependencies**: Basic mode only requires sysbench
+- ✅ **Multi-Tool Support**: IO testing supports both sysbench and fio
+- ✅ **Multi-Server Support**: Network testing supports multiple IP configurations (supports passwordless and password authentication)
+- ✅ **Password Authentication**: Support username and password configuration in server list, no SSH passwordless login required
+- ✅ **Detailed Reports**: Generate structured test reports
+- ✅ **Remote Distribution**: Automatically compile and distribute sysbench, sshpass to remote servers, supports cross-architecture deployment
+- ✅ **Multiple Network Modes**: Supports serial, parallel and matrix network test modes
+- ✅ **Result Analysis**: Generate multi-server comparison reports for performance analysis and problem location
+- ✅ **Security Enhancement**: Path validation, disk space check, process management optimization, protecting production environment
+- ✅ **Debug Modes**: Support `--debug` and `--dry-run` modes for troubleshooting and command preview
 
-## 项目结构
+## Project Structure
 
 ```
 $HOME/oscheckperf/
-├── oscheckperf              # 主入口脚本
-├── sysbench-1.0.20/         # sysbench 源码编译目录（-i 参数自动下载编译）
-├── sysbench-1.0.20.tar.gz   # sysbench 源码压缩包（自动下载）
-├── output/                   # 测试结果输出目录（当前目录下）
-│   ├── original_data_*_all_results.log  # 原始测试数据汇总
-│   ├── data_*_all_results.log           # 解析后的测试结果
-│   └── report_benchmark_*.log           # 最终性能报告
-├── tmp/                      # 临时文件目录
-│   ├── vb_fileio_*.txt       # sysbench fileio 测试输出
-│   ├── fio_*.fio             # fio 配置文件
-│   ├── fio_*_result_*.json   # fio JSON 测试结果
-│   └── network_*.json        # 网络测试 JSON 结果
-├── io_test/                  # IO测试数据目录
-│   ├── test_file.*           # sysbench 创建的测试文件（测试后自动清理）
-│   └── fio_test_file.*       # fio 创建的测试文件（保留）
+├── oscheckperf              # Main entry script
+├── sysbench-1.0.20/         # sysbench source code compilation directory (auto downloaded by -i flag)
+├── sysbench-1.0.20.tar.gz   # sysbench source code archive (auto downloaded)
+├── output/                   # Test results output directory (in current directory)
+│   ├── original_data_*_all_results.log  # Raw test data summary
+│   ├── data_*_all_results.log           # Parsed test results
+│   └── report_benchmark_*.log           # Final performance report
+├── tmp/                      # Temporary files directory
+│   ├── vb_fileio_*.txt       # sysbench fileio test output
+│   ├── fio_*.fio             # fio configuration files
+│   ├── fio_*_result_*.json   # fio JSON test results
+│   └── network_*.json        # Network test JSON results
+├── io_test/                  # IO test data directory
+│   ├── test_file.*           # Test files created by sysbench (auto cleaned)
+│   └── fio_test_file.*       # Test files created by fio (retained)
 ├── tools/
-│   └── skill.md              # 开发规范文档
-├── parameter.conf            # 配置文件模板
-├── README.md                 # 中文文档（默认）
-└── README.en.md              # 英文文档
+│   └── skill.md              # Development documentation
+├── README.md                 # Documentation (Chinese)
+└── README.en.md              # Documentation (English)
 ```
 
-### 目录结构说明
+### Directory Structure Description
 
-| 目录         | 用途                                                     | 默认路径                        |
-| ---------- | ------------------------------------------------------ | --------------------------- |
-| `output/`  | 最终报告和日志（original\_data\*, data\*, report\_benchmark\*） | `./output`（当前目录）            |
-| `tmp/`     | 临时文件（网络测试结果、fio JSON、sysbench 输出）                      | `$HOME/oscheckperf/tmp`     |
-| `io_test/` | IO测试数据文件（sysbench/fio 创建的测试文件）                         | `$HOME/oscheckperf/io_test` |
+| Directory | Purpose | Default Path |
+|-----------|---------|--------------|
+| `output/` | Final reports and logs (original_data*, data*, report_benchmark*) | `./output` (current directory) |
+| `tmp/` | Temporary files (network test results, fio JSON, sysbench output) | `$HOME/oscheckperf/tmp` |
+| `io_test/` | IO test data files (test files created by sysbench/fio) | `$HOME/oscheckperf/io_test` |
 
-### 文件类型说明
+### File Type Description
 
-| 文件类型            | 存放位置                                        | 说明                   |
-| --------------- | ------------------------------------------- | -------------------- |
-| **原始测试数据**      | `./output/original_data_*`                  | 所有测试的原始输出汇总          |
-| **解析结果**        | `./output/data_*`                           | 解析后的结构化测试结果          |
-| **最终报告**        | `./output/report_benchmark_*`               | 格式化的性能报告             |
-| **sysbench 输出** | `$HOME/oscheckperf/tmp/vb_fileio_*.txt`     | sysbench 文本输出（临时）    |
-| **fio 配置**      | `$HOME/oscheckperf/tmp/fio_*.fio`           | fio 配置文件（临时）         |
-| **fio JSON**    | `$HOME/oscheckperf/tmp/fio_*_result_*.json` | fio JSON 结果（临时）      |
-| **网络 JSON**     | `$HOME/oscheckperf/tmp/network_*.json`      | 网络测试结果（临时）           |
-| **IO测试文件**      | `$HOME/oscheckperf/io_test/`                | sysbench/fio 创建的测试文件 |
+| File Type | Location | Description |
+|-----------|----------|-------------|
+| **Raw test data** | `./output/original_data_*` | Summary of all raw test outputs |
+| **Parsed results** | `./output/data_*` | Parsed structured test results |
+| **Final report** | `./output/report_benchmark_*` | Formatted performance report |
+| **sysbench output** | `$HOME/oscheckperf/tmp/vb_fileio_*.txt` | sysbench text output (temporary) |
+| **fio config** | `$HOME/oscheckperf/tmp/fio_*.fio` | fio configuration files (temporary) |
+| **fio JSON** | `$HOME/oscheckperf/tmp/fio_*_result_*.json` | fio JSON results (temporary) |
+| **Network JSON** | `$HOME/oscheckperf/tmp/network_*.json` | Network test results (temporary) |
+| **IO test files** | `$HOME/oscheckperf/io_test/` | Test files created by sysbench/fio |
 
-### 路径配置
+### Path Configuration
 
-可以通过环境变量 `BASE_DIR` 统一修改基础目录：
+You can modify the base directory using the `BASE_DIR` environment variable:
 
 ```bash
-# 修改所有路径的基础目录
+# Modify the base directory for all paths
 export BASE_DIR=/custom/path/to/oscheckperf
 ./oscheckperf
 ```
 
-**环境变量优先级**：
+**Environment Variable Priority**:
+- `BASE_DIR` > Default `$HOME/oscheckperf`
+- `IO_PATH` > Default `$BASE_DIR/io_test`  
+- `OUTPUT_DIR` > Default `./output`
 
-- `BASE_DIR` > 默认值 `$HOME/oscheckperf`
-- `IO_PATH` > 默认值 `$BASE_DIR/io_test`
-- `OUTPUT_DIR` > 默认值 `./output`
+## Quick Start
 
-## 快速开始
+### 1. Install Dependencies
 
-### 1. 安装依赖
-
-#### 方式一：原生命令安装
-
-**基础依赖（必选）**：
-
+#### Basic Dependencies (Required)
 ```bash
 # CentOS/RHEL
 sudo yum install -y sysbench
@@ -96,8 +92,7 @@ sudo yum install -y sysbench
 sudo apt-get install -y sysbench
 ```
 
-**完整依赖（推荐）**：
-
+#### Full Dependencies (Recommended)
 ```bash
 # CentOS/RHEL
 sudo yum install -y sysbench fio iperf3 jq
@@ -106,191 +101,174 @@ sudo yum install -y sysbench fio iperf3 jq
 sudo apt-get install -y sysbench fio iperf3 jq
 ```
 
-#### 方式二：oscheckperf 自动安装
+### 2. Supported Databases
 
-本工具支持自动编译和分发 sysbench、sshpass 到远程服务器，降低最小额外安装影响。
+- ✅ **Vastbase**: Huawei enterprise-grade database
+- ✅ **openGauss**: Open source relational database
+- ✅ **PostgreSQL**: Open source object-relational database
 
-**单机安装**：
+### 3. Run Tests
 
+#### Basic Usage
 ```bash
-# 安装所有组件（sysbench + sshpass + oscheckperf）
-./oscheckperf -i
-
-# 安装指定组件
-./oscheckperf -i sysbench    # 仅安装 sysbench
-./oscheckperf -i sshpass     # 仅安装 sshpass
-./oscheckperf -i all         # 安装所有组件（默认）
-```
-
-**多机器安装**：
-
-```bash
-# 从服务器列表文件安装
-./oscheckperf -i -f all-servers
-
-# 直接指定 IP 列表安装
-./oscheckperf -i -f "192.168.1.101 192.168.1.102 192.168.1.103"
-```
-
-**安装逻辑**：
-
-| 场景                               | 行为                  |
-| -------------------------------- | ------------------- |
-| 本机在 IP 列表中且无 `$HOME/oscheckperf` | 先编译，再分发             |
-| 本机有 `$HOME/oscheckperf` 目录       | 跳过编译，直接打包分发         |
-| 本机不在 IP 列表中                      | 所有服务器都需要分发（从本地已有目录） |
-| SCP 分发                           | 自动排除本机器 IP          |
-
-**优势**：
-
-- 无需在远程服务器上安装编译工具和依赖
-- 统一的 sysbench 版本，确保测试结果的一致性
-- 降低对远程服务器的影响，无需修改系统配置
-- 自动配置环境变量，使用方便
-
-### 2. 运行测试
-
-#### 方式一：不使用配置文件（直接运行）
-
-**基本用法**：
-
-```bash
-# 运行所有测试（默认）
 ./oscheckperf
 ```
 
-**命令行参数覆盖**：
+
+
+#### Command line parameter override
 
 ```bash
-# 覆盖测试时长
+# Override test duration
 ./oscheckperf DURATION=60
 
-# 覆盖 CPU 最大素数
+# Override CPU max prime
 ./oscheckperf CPU_MAX_PRIME=10000
 
-# 禁用特定测试
+# Disable specific tests
 ./oscheckperf MEMORY_ENABLED=false NETWORK_ENABLED=false
 
-# 使用 fio 进行 IO 测试
+# Use fio for IO test
 ./oscheckperf IO_TOOL=fio
+
+# Set fio test duration and directory
 ```
 
-**运行特定测试（子命令）**：
+#### Run specific test (subcommand)
 
 ```bash
-# 运行 CPU 测试
+# Run CPU test
 ./oscheckperf cpu
 
-# 运行内存测试
+# Run memory test
 ./oscheckperf mem
 
-# 运行 IO 测试
+# Run IO test
 ./oscheckperf io
 
-# 运行网络测试（矩阵模式）
+# Run network test (matrix mode)
 ./oscheckperf network -f all-servers NETWORK_MODE=matrix
 
-# 运行线程测试
+# Run threads test
 ./oscheckperf thread
 
-# 运行互斥锁测试
+# Run mutex test
 ./oscheckperf mutex
 
-# 运行系统检查（依赖项、权限、磁盘空间、网络）
+# Run system checks (dependencies, permissions, disk space, network)
 ./oscheckperf check
 
-# 运行所有测试（默认）
+# Run all tests (default)
 ./oscheckperf all
 ```
 
-**子命令与参数组合使用**：
+#### Combine subcommand with parameters
 
 ```bash
-# 运行 CPU 测试并指定参数
+# Run CPU test with specific parameters
 ./oscheckperf cpu DURATION=20 CPU_MAX_PRIME=10000
 
-# 运行 IO 测试并使用 fio
+# Run IO test with fio
 ./oscheckperf io IO_TOOL=fio FIO_DURATION=30
 
-# 运行网络测试并指定服务器列表
+# Run network test with server list
 ./oscheckperf network -f "192.168.1.101 192.168.1.102" NETWORK_MODE=parallel
+
+# Matrix network test (all-to-all cross testing)
+./oscheckperf -f all-servers NETWORK_MODE=matrix
+
+# Advanced usage
+# Run system checks with custom test directory
+./oscheckperf -f all-servers check IO_PATH='/home/vastbase/vb_test'
+# Run multiple tests with custom parameters
+./oscheckperf cpu mem -f all-servers DURATION=2 THREADS=4
+# Run IO test with fio and custom parameters
+./oscheckperf io -f all-servers IO_TOOL=fio IO_TOTAL_SIZE=10G
+# Use time command to measure total duration, run all tests with parameters
+time ./oscheckperf all -f all-servers DURATION=200 IO_TOOL=fio FIO_PROFILES="read write"
+# fio multi-profile test (test read and write simultaneously)
+./oscheckperf io IO_TOOL=fio FIO_PROFILES="read write" FIO_DURATION=60
 ```
 
-#### 方式二：使用配置文件
+#### Install sysbench
 
-**创建配置文件**（`parameter.conf`）：
-
+Single machine installation:
 ```bash
-# 通用参数
-DURATION=60              # 测试时长（秒）
-OUTPUT_DIR=./output      # 输出目录
-IO_TOOL=sysbench         # IO测试工具（sysbench/fio）
-SSH_PORT=22              # SSH连接端口
-
-# 测试模块开关
-CPU_ENABLED=true         # 启用CPU测试
-MEMORY_ENABLED=true      # 启用内存测试
-IO_ENABLED=true          # 启用IO测试
-NETWORK_ENABLED=true     # 启用网络测试
-THREADS_ENABLED=true     # 启用线程测试
-MUTEX_ENABLED=true       # 启用互斥锁测试
-
-# CPU测试参数
-CPU_THREADS=0            # CPU线程数，0=自动
-CPU_MAX_PRIME=20000      # CPU测试最大素数
-
-# IO测试参数
-IO_TOTAL_SIZE=1G         # IO测试文件总大小
-IO_PATH=$HOME/oscheckperf/io_test  # IO测试路径
-
-# 网络测试参数
-NETWORK_MODE=matrix      # 网络测试模式（serial/parallel/matrix）
-NETWORK_PARALLEL=1       # 并行连接数
+./oscheckperf -i
 ```
 
-**使用配置文件运行**：
-
+Multi-machine installation (from server list file):
 ```bash
-# 使用配置文件运行测试
-./oscheckperf -p parameter.conf
-
-# 命令行参数会覆盖配置文件中的值
-./oscheckperf -p parameter.conf DURATION=30 IO_TOOL=fio
+./oscheckperf -i -f all-servers
 ```
 
-### 3. 服务器认证方式
+Multi-machine installation (direct IP list):
+```bash
+./oscheckperf -i -f "192.168.1.101 192.168.1.102 192.168.1.103"
+```
 
-#### 方式一：SSH 免密登录（推荐）
+**Installation Logic**:
 
-**配置步骤**：
+| Scenario | Behavior |
+|----------|----------|
+| Local machine in IP list and no `$HOME/oscheckperf` | Compile first, then distribute |
+| Local machine has `$HOME/oscheckperf` directory | Skip compilation, directly package and distribute |
+| Local machine not in IP list | All servers need distribution (from local existing directory) |
+| SCP distribution | Automatically exclude local machine IP |
+
+**Execution Method**:
+- **Local Execution**: Directly use the `oscheckperf` script in the current directory
+- **Remote Execution**: Call the `$HOME/oscheckperf/oscheckperf` script on remote servers via SSH
+
+**Notes**:
+- `$HOME/oscheckperf` directory will be created automatically, skip compilation if it already exists
+- For multi-machine installation, if local machine is in the IP list and no `$HOME/oscheckperf` directory exists, it will compile first then distribute
+- SCP distribution will automatically exclude the local machine IP
+- Target servers need SSH passwordless login configured
+- Environment variables will be automatically configured and take effect after installation
+
+#### Dry Run Mode (Preview Commands)
+```bash
+# Use --dry-run to preview commands that will be executed
+./oscheckperf --dry-run
+
+# Combine with other parameters
+./oscheckperf io --dry-run IO_TOOL=fio FIO_PROFILES="read write"
+```
+
+### 4. Server Authentication Methods
+
+#### Method 1: SSH Passwordless Login (Recommended)
+
+**Configuration Steps**:
 
 ```bash
-# 生成 SSH 密钥（如果还没有）
+# Generate SSH key (if not exists)
 ssh-keygen -t rsa -b 4096
 
-# 将公钥分发到目标服务器
+# Distribute public key to target servers
 ssh-copy-id root@192.168.1.101
 ssh-copy-id root@192.168.1.102
 ```
 
-**服务器列表文件格式**：
+**Server List File Format**:
 
 ```bash
-# all-servers 文件内容
+# all-servers file content
 192.168.1.101
 192.168.1.102
 192.168.1.103
 ```
 
-**运行测试**：
+**Run Test**:
 
 ```bash
 ./oscheckperf network -f all-servers
 ```
 
-#### 方式二：密码认证（非免密）
+#### Method 2: Password Authentication (Non-passwordless)
 
-**安装依赖**：
+**Install Dependencies**:
 
 ```bash
 # CentOS/RHEL
@@ -300,284 +278,314 @@ sudo yum install -y sshpass
 sudo apt-get install -y sshpass
 ```
 
-**服务器列表文件格式**：
+**Server List File Format**:
 
 ```bash
-# all-servers 文件内容（格式：IP:用户名:密码）
+# all-servers file content (format: IP:username:password)
 192.168.1.101:root:password123
 192.168.1.102:admin:myp@ssword
 192.168.1.103:user:secret456
 ```
 
-**运行测试**：
+**Run Test**:
 
 ```bash
 ./oscheckperf network -f all-servers
 ```
 
-**注意事项**：
+**Notes**:
+- Password authentication requires `sshpass` tool
+- Passwords in server list are stored in plain text, keep it secure
+- Mixed mode supported: server list can contain both passwordless and password-authenticated servers
 
-- 密码认证需要安装 `sshpass` 工具
-- 服务器列表中的密码会以明文形式存储，请妥善保管
-- 支持混合模式：服务器列表中可以同时包含免密和密码认证的服务器
+### 5. Custom SSH Port
 
-### 4. 自定义 SSH 端口
-
-**方式一：命令行参数**
+**Method 1: Command Line Parameter**
 
 ```bash
-# 指定SSH端口为2222
+# Specify SSH port as 2222
 ./oscheckperf -f servers.txt SSH_PORT=2222
 
-# 网络测试指定SSH端口
+# Network test with custom SSH port
 ./oscheckperf network -f servers.txt SSH_PORT=2222
 ```
 
-**方式二：配置文件**
+**Method 2: Configuration File**
 
-在 `parameter.conf` 中添加：
+Add to `parameter.conf`:
 
 ```bash
 SSH_PORT=2222
 ```
 
-**方式三：环境变量**
+**Method 3: Environment Variable**
 
 ```bash
 export SSH_PORT=2222
 ./oscheckperf -f servers.txt
 ```
 
-**优先级**：命令行参数 > 配置文件 > 环境变量 > 默认值（22）
+**Priority**: Command line parameters > Configuration file > Environment variable > Default (22)
 
-### 5. 干运行模式（预览命令）
+### 6. Configuration File Support
+
+**Create Configuration File** (`parameter.conf`):
 
 ```bash
-# 使用 --dry-run 参数预览将要执行的命令
-./oscheckperf --dry-run
+# General parameters
+DURATION=60              # Test duration (seconds)
+OUTPUT_DIR=./output      # Output directory
+IO_TOOL=sysbench         # IO testing tool (sysbench/fio)
+SSH_PORT=22              # SSH port
 
-# 配合其他参数使用
-./oscheckperf io --dry-run IO_TOOL=fio FIO_PROFILES="read write"
+# Test module switches
+CPU_ENABLED=true         # Enable CPU test
+MEMORY_ENABLED=true      # Enable memory test
+IO_ENABLED=true          # Enable IO test
+NETWORK_ENABLED=true     # Enable network test
+THREADS_ENABLED=true     # Enable threads test
+MUTEX_ENABLED=true       # Enable mutex test
+
+# CPU test parameters
+CPU_THREADS=0            # CPU threads, 0=auto
+CPU_MAX_PRIME=20000      # CPU test max prime
+
+# IO test parameters
+IO_TOTAL_SIZE=1G         # Total IO test file size
+IO_PATH=$HOME/oscheckperf/io_test  # IO test path
+
+# Network test parameters
+NETWORK_MODE=matrix      # Network test mode (serial/parallel/matrix)
+NETWORK_PARALLEL=1       # Parallel connections
 ```
 
-### 6. 查看报告
+**Run with Configuration File**:
 
+```bash
+# Run tests with configuration file
+./oscheckperf -p parameter.conf
+
+# Command line parameters override configuration file values
+./oscheckperf -p parameter.conf DURATION=30 IO_TOOL=fio
+```
+
+### 7. View Reports
 ```bash
 ls -lh output/
 cat output/report_benchmark_*.log
 ```
 
-## 输出指标说明
+## Output Metrics
 
-### CPU 测试
+### CPU Test
+- **events/sec**: Events per second (higher is better)
+- **avg latency**: Average latency (lower is better)
+- **P95/P99 latency**: 95th/99th percentile latency (lower is better)
+- **Fairness (events)**: Thread fairness metrics, indicating the balance of event distribution across threads (format: avg/stddev, smaller stddev indicates more uniform distribution)
 
-- **events/sec**：每秒执行事件数（越高越好）
-- **avg latency**：平均延迟（越低越好）
-- **P95/P99 latency**：95/99 百分位延迟（越低越好）
-- **Fairness (events)**：线程公平性指标，表示各线程间事件分布的均衡程度（格式为 avg/stddev，stddev 越小表示分布越均匀）
+### Memory Test
+- **operations/sec**: Memory operations per second (higher is better)
+- **throughput**: Memory throughput in MB/s (higher is better)
+- **avg latency**: Average latency (lower is better)
+- **P95 latency**: 95th percentile latency (lower is better)
+- **Fairness (events)**: Thread fairness metrics, indicating the balance of event distribution across threads (format: avg/stddev, smaller stddev indicates more uniform distribution)
 
-### 内存测试
+### IO Test
+- **IOPS**: IO operations per second (higher is better)
+- **Bandwidth**: Throughput in MB/s (higher is better)
+- **Latency**: Latency (lower is better)
+- **fsyncs/s**: Fsync operations per second (sysbench only, measures synchronous write performance)
+- **Min/Max/P95/P99 latency**: Minimum/Maximum/95th/99th percentile latency (fio only)
+- **Device utilization**: Device utilization rate (fio only)
+- **CPU user/system**: CPU user/system utilization (fio only)
+- **bw_min/bw_max**: Minimum/maximum bandwidth (fio only, reflects bandwidth stability)
+- **slat/clat**: Submission latency/Completion latency (fio only, slat is time to submit IO to device, clat is time for device to complete)
+- **ctx/majf/minf**: Context switches/Major page faults/Minor page faults (fio only, reflects system resource usage)
+- **iodepth_level**: IO queue depth level (fio only, reflects IO concurrency level)
 
-- **operations/sec**：每秒内存操作数（越高越好）
-- **throughput**：内存吞吐量 MB/s（越高越好）
-- **avg latency**：平均延迟（越低越好）
-- **P95 latency**：95 百分位延迟（越低越好）
+### Network Test
+- **Bandwidth (MB/s)**: Network bandwidth (higher is better)
+- **Retrans**: TCP retransmission count (lower is better, indicates network quality)
+- **RTT(ms)**: Round-trip time (format: average (Min: min_value, Max: max_value), lower is better)
+- **CPU(%)**: Sender and receiver CPU utilization (format: senderCPU%/receiverCPU%)
 
-### IO 测试
+### IO Benchmark Details
 
-- **IOPS**：每秒 IO 操作数（越高越好）
-- **Bandwidth**：吞吐量 MB/s（越高越好）
-- **Latency**：延迟（越低越好）
-- **fsyncs/s**：每秒 fsync 操作数（仅 sysbench，衡量同步写入性能）
-- **Min/Max/P95/P99 latency**：最小/最大/95/99 百分位延迟（仅 fio）
-- **Device utilization**：设备利用率（仅 fio）
-- **CPU user/system**：CPU 用户态/系统态利用率（仅 fio）
-- **bw\_min/bw\_max**：最小/最大带宽（仅 fio，反映带宽稳定性）
-- **slat/clat**：提交延迟/完成延迟（仅 fio，slat 指 IO 提交到设备的时间，clat 指设备处理完成的时间）
-- **ctx/majf/minf**：上下文切换/主要页错误/次要页错误（仅 fio，反映系统资源使用情况）
-- **iodepth\_level**：IO 队列深度级别（仅 fio，反映 IO 并发程度）
+#### Sysbench fileio Workflow
 
-### IO 压测详细说明
+Sysbench fileio testing consists of three phases:
 
-#### Sysbench fileio 工作流程
+1. **prepare phase**: Create test files
+   - Creates test files in the directory specified by `IO_TEST_PATH`
+   - Default file size is 1G (adjustable via `IO_TOTAL_SIZE`)
+   - Default number of files is 1 (adjustable via `IO_FILE_NUM`)
 
-Sysbench 的 fileio 测试分为三个阶段：
+2. **run phase**: Execute actual benchmark
+   - The `DURATION` parameter only controls the execution time of this phase
+   - Performs random read/write operations on files created in prepare phase
+   - Default test mode is `rndrw` (random read/write), adjustable via `IO_TEST_MODE`
 
-1. **prepare 阶段**：创建测试文件
-   - 在 `IO_PATH` 指定的目录中创建测试文件
-   - 默认文件大小为 1G（可通过 `IO_TOTAL_SIZE` 调整）
-   - 默认创建 1 个文件（可通过 `SYSBENCH_FILE_NUM` 调整）
-2. **run 阶段**：执行实际压测
-   - `DURATION` 参数仅控制此阶段的执行时间
-   - 对 prepare 阶段创建的文件进行随机读写操作
-   - 测试模式默认为 `rndrw`（随机读写），可通过 `SYSBENCH_PROFILES` 调整
-3. **cleanup 阶段**：自动清理测试文件
-   - 删除 prepare 阶段创建的所有测试文件
-   - 测试目录本身不会被删除
+3. **cleanup phase**: Automatically clean up test files
+   - Deletes all test files created in prepare phase
+   - The test directory itself is not deleted
 
-#### FIO 工作流程
+#### FIO Workflow
 
-FIO 测试采用不同的工作方式：
+FIO testing works differently:
 
-1. **配置生成**：根据参数生成 `.fio` 配置文件
-2. **执行测试**：FIO 在运行时自动创建测试文件
-3. **文件处理**：测试完成后 FIO 不会自动删除文件，脚本会保留结果文件
+1. **Configuration generation**: Generates `.fio` configuration file based on parameters
+2. **Execute test**: FIO automatically creates test files during runtime
+3. **File handling**: FIO does not automatically delete files after testing; the script retains result files
 
-#### 重要注意事项
+#### Important Notes
 
-**IO\_PATH 参数说明**：
+**IO_TEST_PATH Parameter**:
 
-- 默认测试路径为 `$HOME/oscheckperf/io_test`
-- **不要使用** **`/tmp`** **目录**：某些服务器的 `/tmp` 是 tmpfs（内存文件系统），会导致测试结果不准确（测试的是内存而非磁盘）
-- 建议使用实际业务数据所在的磁盘分区，结果更具参考价值
-- 确保目标分区有足够的可用空间（至少大于 `IO_TOTAL_SIZE`）
+- Default test path is `$HOME/oscheckperf/io_test`
+- **Do NOT use `/tmp` directory**: On some servers, `/tmp` is tmpfs (memory filesystem), which leads to inaccurate test results (testing memory instead of disk)
+- It is recommended to use the disk partition where the database data directory is located for more reference value
+- Ensure the target partition has enough available space (at least larger than `IO_TOTAL_SIZE`)
 
-**常用参数**：
+**Common Parameters**:
 
-### sysbench 参数
+### sysbench Parameters
 
-| 参数                     | 默认值        | 说明                                                        |
-| ---------------------- | ---------- | --------------------------------------------------------- |
-| `SYSBENCH_PROFILES`    | `rndrw`    | sysbench 测试模式，空格分隔（seqwr/seqrewr/seqrd/rndrd/rndwr/rndrw） |
-| `SYSBENCH_FILE_NUM`    | `4`        | sysbench 测试文件数量                                           |
-| `SYSBENCH_BLOCK_SIZE`  | `16K`      | sysbench 块大小                                              |
-| `SYSBENCH_IO_MODE`     | `sync`     | sysbench IO 模式（sync/async）                                |
-| `SYSBENCH_EXTRA_FLAGS` | `direct`   | sysbench 额外标志（direct/sync）                                |
-| `SYSBENCH_THREADS`     | `4`        | sysbench 线程数                                              |
-| `SYSBENCH_DURATION`    | `DURATION` | sysbench IO 测试时长                                          |
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `SYSBENCH_PROFILES` | `rndrw` | sysbench test modes, space-separated (seqwr/seqrewr/seqrd/rndrd/rndwr/rndrw) |
+| `SYSBENCH_FILE_NUM` | `4` | Number of sysbench test files |
+| `SYSBENCH_BLOCK_SIZE` | `16K` | sysbench block size |
+| `SYSBENCH_IO_MODE` | `sync` | sysbench IO mode (sync/async) |
+| `SYSBENCH_EXTRA_FLAGS` | `direct` | sysbench extra flags (direct/sync) |
+| `SYSBENCH_THREADS` | `4` | sysbench threads count |
+| `SYSBENCH_DURATION` | `DURATION` | sysbench IO test duration |
 
-### fio 参数
+### fio Parameters
 
-| 参数             | 默认值        | 说明                                                                             |
-| -------------- | ---------- | ------------------------------------------------------------------------------ |
-| `FIO_PROFILES` | `randrw`   | fio 测试模式，空格分隔（read/write/randread/randwrite/rw/randrw/trim/randtrim/trimwrite） |
-| `FIO_BS`       | `16K`      | fio 块大小（优化后更适合数据库场景）                                                           |
-| `FIO_IODEPTH`  | `32`       | fio I/O 深度                                                                     |
-| `FIO_NUMJOBS`  | `4`        | fio 工作线程数                                                                      |
-| `FIO_DIRECT`   | `1`        | fio 直接 I/O 模式                                                                  |
-| `FIO_FILE_NUM` | `4`        | fio 测试文件数量（模拟多数据文件场景）                                                          |
-| `FIO_IOENGINE` | `libaio`   | fio IO 引擎（libaio/sync/posixaio）                                                |
-| `FIO_DURATION` | `DURATION` | fio 测试时长                                                                       |
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `FIO_PROFILES` | `randrw` | fio test modes, space-separated (read/write/randread/randwrite/rw/randrw/trim/randtrim/trimwrite) |
+| `FIO_BS` | `16K` | fio block size (optimized for database workloads) |
+| `FIO_IODEPTH` | `32` | fio I/O depth |
+| `FIO_NUMJOBS` | `4` | fio job threads count |
+| `FIO_DIRECT` | `1` | fio direct I/O mode |
+| `FIO_FILE_NUM` | `4` | Number of fio test files (simulates multi-datafile scenario) |
+| `FIO_IOENGINE` | `libaio` | fio IO engine (libaio/sync/posixaio) |
+| `FIO_DURATION` | `DURATION` | fio test duration |
 
-### Threads 参数
+### Threads Parameters
 
-| 参数              | 默认值              | 说明                                    |
-| --------------- | ---------------- | ------------------------------------- |
-| `THREADS_NUM`   | `auto (cores*4)` | 线程数（未设置时自动根据 CPU 核心数计算，公式：cores*4） |
-| `THREADS_YIELDS`| `100`            | 每个线程的 yield 次数                           |
-| `THREADS_LOCKS` | `4`              | 锁数量                                    |
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `THREADS_NUM` | `auto (cores*4)` | Number of threads (auto-calculated based on CPU cores if not set, formula: cores*4) |
+| `THREADS_YIELDS` | `100` | Number of yields per thread |
+| `THREADS_LOCKS` | `4` | Number of locks |
 
-### 通用参数
+### General Parameters
 
-| 参数              | 默认值                         | 说明                         |
-| --------------- | --------------------------- | -------------------------- |
-| `IO_PATH`       | `$HOME/oscheckperf/io_test` | 测试文件目录（替代IO\_TEST\_PATH）   |
-| `IO_TOTAL_SIZE` | `1G`                        | 测试文件总大小（sysbench 和 fio 通用） |
-| `IO_TOOL`       | `sysbench`                  | IO 测试工具（sysbench/fio）      |
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `IO_PATH` | `$HOME/oscheckperf/io_test` | Test file directory |
+| `IO_TOTAL_SIZE` | `1G` | Total test file size (shared by sysbench and fio) |
+| `IO_TOOL` | `sysbench` | IO testing tool (sysbench/fio) |
 
-### 参数说明
+### Parameter Notes
 
-**FIO\_FILE\_NUM 说明**：
+**FIO_FILE_NUM Note**:
+- Sets the number of test files, default is 4
+- When `FIO_FILE_NUM` is configured, each file size = `IO_TOTAL_SIZE / FIO_FILE_NUM`
+- Example: `IO_TOTAL_SIZE=1G`, `FIO_FILE_NUM=4` → 256M per file
 
-- 设置测试文件数量，默认为 4
-- 当配置 `FIO_FILE_NUM` 时，每个文件大小 = `IO_TOTAL_SIZE / FIO_FILE_NUM`
-- 例如：`IO_TOTAL_SIZE=1G`，`FIO_FILE_NUM=4` → 每个文件 256M
-
-**示例**：
+**Examples**:
 
 ```bash
-# 使用 sysbench 进行随机读写测试
+# Random read/write test with sysbench
 ./oscheckperf io DURATION=60 IO_TOTAL_SIZE=2G
 
-# 使用 fio 进行顺序读测试
+# Sequential read test with fio
 ./oscheckperf io IO_TOOL=fio FIO_PROFILES=read FIO_DURATION=60
 
-# 指定测试路径
-./oscheckperf io IO_PATH=/data/test
+# Specify test path to database data directory
+./oscheckperf io IO_PATH=/data/vastbase/pg_xlog
 ```
 
-### 网络测试
+### Network Test
+- **Bandwidth (MB/s)**: Network bandwidth (higher is better)
+- **Retrans**: TCP retransmission count (lower is better)
+- **RTT(ms)**: Round-trip time (format: average (Min: min_value, Max: max_value))
+- **CPU(%)**: Sender/receiver CPU utilization (format: senderCPU%/receiverCPU%)
 
-- **Bandwidth (MB/s)**：网络带宽（越高越好）
-- **Retrans**：TCP 重传次数（越少越好）
-- **RTT(ms)**：往返时间（格式：平均值 (Min: 最小值, Max: 最大值)）
-- **CPU(%)**：发送端/接收端 CPU 利用率（格式：发送端CPU%/接收端CPU%）
+### Threads Test
+- **events/sec**: Thread events per second (higher is better)
+- **latency**: Thread scheduling latency (lower is better)
 
-### 线程测试
+### Mutex Test
+- **transactions**: Number of transactions (higher is better)
+- **TPS**: Transactions per second (higher is better)
+- **latency**: Lock wait latency (lower is better)
 
-- **events/sec**：每秒线程事件数（越高越好）
-- **latency**：线程调度延迟（越低越好）
+## Dependencies
 
-### 互斥锁测试
+| Tool | Required | Purpose | Install Command |
+|------|----------|---------|-----------------|
+| sysbench | Yes | CPU/Memory/IO/Threads/Mutex testing | `yum install -y sysbench` |
+| fio | Optional | Professional IO testing | `yum install -y fio` |
+| iperf3 | Optional | Network throughput testing | `yum install -y iperf3` |
+| jq | Recommended | JSON result parsing | `yum install -y jq` |
 
-- **transactions**：事务数（越高越好）
-- **TPS**：每秒事务数（越高越好）
-- **latency**：锁等待延迟（越低越好）
+## FAQ
 
-### pgbench 测试
+### Q1: Do tests require root privileges?
+**A**: Most tests do not require root privileges. The script supports running as a regular user, but `sudo` is recommended in the following cases:
+- fio direct IO mode (enabled by default): bypasses OS cache for real disk testing
+- Installing dependency packages requires root privileges
+- It is recommended to use `./oscheckperf check` to verify system environment before testing
 
-- **TPS**：每秒事务数（越高越好）
-- **latency average**：平均延迟（越低越好）
+### Q2: Will tests delete data?
+**A**: Test files are only written to the specified directory (default `/tmp`) and can be automatically cleaned up after testing
 
-## 依赖工具说明
+### Q3: How to customize IO test path?
+**A**: Use `IO_TEST_PATH` parameter: `./oscheckperf IO_TEST_PATH=/data`
 
-| 工具       | 必选 | 用途               | 安装命令                      |
-| -------- | -- | ---------------- | ------------------------- |
-| sysbench | 是  | CPU/内存/IO/线程/锁测试 | `yum install -y sysbench` |
-| fio      | 可选 | 专业 IO 压测         | `yum install -y fio`      |
-| iperf3   | 可选 | 网络吞吐测试           | `yum install -y iperf3`   |
-| jq       | 推荐 | JSON 结果解析        | `yum install -y jq`       |
-| sshpass  | 可选 | 密码认证支持           | `yum install -y sshpass`  |
+### Q4: How to configure multi-client for network testing?
 
-## 常见问题
-
-### Q1: 测试需要 root 权限吗？
-
-**A**: 大多数测试不需要 root 权限。脚本支持普通用户运行，但以下情况建议使用 `sudo`：
-
-- fio direct IO 模式（默认启用）：需要绕过 OS 缓存进行真实磁盘测试
-- 安装依赖包时需要 root 权限
-- 建议在测试前使用 `./oscheckperf check` 检查系统环境
-
-### Q2: 测试会删除数据吗？
-
-**A**: 测试文件仅写入指定目录（默认 `$HOME/oscheckperf/io_test`），测试完成后可自动清理
-
-### Q3: 如何自定义 IO 测试路径？
-
-**A**: 使用 `IO_PATH` 参数：`./oscheckperf io IO_PATH=/data`
-
-### Q4: NETWORK_MODE 和 NETWORK_PARALLEL 参数的区别是什么？
-
-**A**:
-
-- **NETWORK_MODE**：控制多个客户端测试的执行方式
-  - `serial`：逐个执行客户端测试，一个完成后再开始下一个
-  - `parallel`：同时执行所有客户端测试
-  - `matrix`：执行全矩阵交叉测试（每对服务器之间都进行测试）
-- **NETWORK_PARALLEL**：控制每个 iperf3 测试的并行连接数，在所有模式下都生效
-  - 例如：`NETWORK_PARALLEL=4` 表示每个测试使用 4 个并行连接
-
-**示例**：
+**A**: Create a server list file `all-servers` containing all IP addresses to test, then specify it with the `-f` parameter:
 
 ```bash
-# 串行执行，每个测试使用 4 个并行连接
+./oscheckperf network -f all-servers
+```
+
+### Q5: What is the difference between NETWORK_MODE and NETWORK_PARALLEL parameters?
+
+**A**:
+- **NETWORK_MODE**: Controls how multiple client tests are executed
+  - `serial`: Execute client tests one by one, starting the next after the previous completes
+  - `parallel`: Execute all client tests simultaneously
+  - `matrix`: Execute full matrix cross-testing (test between every pair of servers)
+
+- **NETWORK_PARALLEL**: Controls the number of parallel connections for each iperf3 test, effective in all modes
+  - Example: `NETWORK_PARALLEL=4` means each test uses 4 parallel connections
+
+**Examples**:
+```bash
+# Serial execution, each test uses 4 parallel connections
 ./oscheckperf network -f all-servers NETWORK_MODE=serial NETWORK_PARALLEL=4
 
-# 并行执行，每个测试使用 4 个并行连接
+# Parallel execution, each test uses 4 parallel connections
 ./oscheckperf network -f all-servers NETWORK_MODE=parallel NETWORK_PARALLEL=4
 ```
 
-## 最佳实践
+## Best Practices
 
-1. **测试环境**：在独立测试环境运行，避免影响生产业务
-2. **测试时长**：生产环境建议使用较长的测试时长（如 60 秒以上）
-3. **IO 测试路径**：使用实际业务数据所在的磁盘分区，结果更具参考价值
-4. **历史对比**：定期运行测试，保存报告用于历史趋势分析
-5. **多机测试**：网络压测前配置好 SSH 免密登录或准备密码认证配置
-6. **结果解读**：重点关注 P95/P99 延迟，而非仅看平均值
-7. **参数调整**：根据服务器配置调整测试参数，如线程数应与 CPU 核心数匹配
+1. **Test Environment**: Run in an isolated test environment to avoid impacting production business
+2. **Test Duration**: For production environments, use longer test durations (e.g., 60 seconds or more)
+3. **IO Test Path**: Use the partition where the database data directory is located for more reference value
+4. **Historical Comparison**: Run tests regularly and save reports for historical trend analysis
+5. **Multi-Machine Testing**: Configure SSH passwordless login before network stress testing
+6. **Result Interpretation**: Focus on P95/P99 latency, not just average values
+7. **Parameter Adjustment**: Adjust test parameters according to server configuration, such as matching thread count to CPU core count
 
-## 许可证
+## License
 
-本项目采用 GNU General Public License v3.0 许可证。
+This project is licensed under the GNU General Public License v3.0.
+
