@@ -81,7 +81,7 @@ description: "Development standards, coding guidelines, and workflow specificati
 ### README 验证规范
 - **结构验证**：确保中英文内容结构完全一致，章节顺序相同
 - **内容验证**：确保中英文内容语义对等，无遗漏或多余内容
-- **链接验证**：确保顶部语言切换链接 `中文 | [English](#English)` 正确无误
+- **链接验证**：确保顶部语言切换链接 `中文 | [English](#english)` 正确无误
 - **锚点验证**：确保英文部分以 `## English` 锚点正确分隔
 - **工具验证**：使用 `test-script` skill 执行自动化测试验证
 
