@@ -1,4 +1,4 @@
-中文 | [English](#English)
+中文 | [English](#english)
 
 # 系统性能基准测试工具
 
