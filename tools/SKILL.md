@@ -15,7 +15,7 @@ description: "Development standards, coding guidelines, and workflow specificati
     - `oscheckperf`：主入口脚本（单文件集成）。
     - `output/`：测试结果输出目录。
     - `tools/`：辅助工具目录。
-    - `README.md` / `README.en.md`：中英文文档。
+    - `README.md`：中英文混合文档（中文在前，英文在后）。
 - **设计原则**：避免使用 `lib` 等复杂依赖目录，保持代码简洁，所有功能集成在单一脚本中。
 
 ##  Shell 脚本编程规范
@@ -66,8 +66,7 @@ description: "Development standards, coding guidelines, and workflow specificati
 每次代码更新（新功能或 Bug 修复）必须同步执行以下操作：
 - **更新 `--help`**：脚本内的帮助信息必须完整准确。
 - **更新 `parameter.conf`**：配置文件必须包含所有可配置参数及其默认值。
-- **更新 `README.md`**：同步变更内容，保持结构统一。
-- **更新 `README.en.md`**：内容与中文版保持一致，仅语言不同。
+- **更新 `README.md`**：同步更新中英文两部分内容，保持结构统一。
 - **一致性检查**：确保帮助信息、配置文件与文档描述一致。
 
 ### 参数管理规范
@@ -76,16 +75,22 @@ description: "Development standards, coding guidelines, and workflow specificati
   1. 脚本内的参数默认值
   2. `--help` 帮助信息
   3. `parameter.conf` 配置文件
-  4. 中英文 README 文档
+  4. `README.md`（中英文内容）
 - **参数优先级**：命令行参数 > 配置文件 > 默认值
+
+### README 验证规范
+- **结构验证**：确保中英文内容结构完全一致，章节顺序相同
+- **内容验证**：确保中英文内容语义对等，无遗漏或多余内容
+- **链接验证**：确保顶部语言切换链接 `中文 | [English](#English)` 正确无误
+- **锚点验证**：确保英文部分以 `## English` 锚点正确分隔
+- **工具验证**：使用 `test-script` skill 执行自动化测试验证
 
 ### 标签与版本管理
 每次代码更新（新功能或 Bug 修复）必须同步执行以下操作：
-- **更新 `README.md`**：同步变更内容，保持结构统一。
-- **更新 `README.en.md`**：内容与中文版保持一致，仅语言不同。
+- **更新 `README.md`**：同步更新中英文两部分内容，保持结构统一。
 - **一致性检查**：确保帮助信息与文档描述一致。
+- **测试验证**：运行 `test-script` skill 验证所有功能正常，README 格式正确
 
-### 标签与版本管理
 - **版本号规则**：Git Tag 与版本号必须一致（如 `v0.6.2`）。
 - **Tag 描述格式**：必须遵循特定格式记录变更。
 
