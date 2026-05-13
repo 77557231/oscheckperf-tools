@@ -217,6 +217,7 @@ DURATION=60              # 测试时长（秒）
 OUTPUT_DIR=./output      # 输出目录
 IO_TOOL=sysbench         # IO测试工具（sysbench/fio）
 SSH_PORT=22              # SSH连接端口
+REPORT_HARDWARE_INFO=true  # 在报告中包含硬件信息
 
 # 测试模块开关
 CPU_ENABLED=true         # 启用CPU测试
