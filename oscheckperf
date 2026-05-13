@@ -1,7 +1,7 @@
 #!/bin/bash
 #--------------------------------------------------------------------------------
 #-- File name:   oscheckperf
-#-- Version:     v0.8.10
+#-- Version:     v0.8.11
 #-- Purpose:     Database System Benchmark Tool
 #-- Author:      Wanping Pan 
 #-- Description: One-click system benchmarking tool, supports configuration via config file or command line parameters
@@ -299,7 +299,7 @@ parse_args() {
                 exit 0
                 ;;
             --version)
-                echo "Version: 0.8.10"
+                echo "Version: 0.8.11"
                 exit 0
                 ;;
             --dry-run)
@@ -914,123 +914,377 @@ get_kernel_version() {
     uname -r 2>/dev/null || echo "unknown"
 }
 
-# Generate hardware report for a single node
-generate_hardware_report() {
+# ================================================================================
+# Unified Hardware Report Functions
+# ================================================================================
+
+# Print hardware basic information
+print_hardware_basic() {
     local report_file="$1"
+    local prefix="$2"
+    local cpu_arch="$3"
+    local machine_type="$4"
+    local os_info="$5"
+    local kernel_version="$6"
+    local uptime="$7"
+    local cpu_model="$8"
+    local cpu_physical_cores="$9"
+    local cpu_logical_cores="${10}"
+    local cpu_freq="${11}"
+    local mem_total="${12}"
+    local mem_available="${13}"
+    local mem_type="${14}"
+    local mem_freq="${15}"
+    local mem_channels="${16}"
+    
+    printf -- "%s[Hardware Information]\n" "$prefix" >> "$report_file"
+    printf -- "%s--------------------------------------------------------------------------------\n" "$prefix" >> "$report_file"
+    printf -- "%s%-18s %s\n" "$prefix" "CPU Architecture:" "$cpu_arch" >> "$report_file"
+    printf -- "%s%-18s %s\n" "$prefix" "Machine Type:" "$machine_type" >> "$report_file"
+    printf -- "%s%-18s %s\n" "$prefix" "OS Version:" "$os_info" >> "$report_file"
+    printf -- "%s%-18s %s\n" "$prefix" "Kernel Version:" "$kernel_version" >> "$report_file"
+    printf -- "%s%-18s %s\n" "$prefix" "System Uptime:" "$uptime" >> "$report_file"
+    printf -- "%s%-18s %s\n" "$prefix" "CPU Model:" "$cpu_model" >> "$report_file"
+    printf -- "%s%-18s %s\n" "$prefix" "Physical Cores:" "$cpu_physical_cores" >> "$report_file"
+    printf -- "%s%-18s %s\n" "$prefix" "Logical Cores:" "$cpu_logical_cores" >> "$report_file"
+    printf -- "%s%-18s %s GHz\n" "$prefix" "CPU Frequency:" "$cpu_freq" >> "$report_file"
+    printf -- "%s%-18s %s MB\n" "$prefix" "Memory Total:" "$mem_total" >> "$report_file"
+    printf -- "%s%-18s %s MB\n" "$prefix" "Memory Available:" "$mem_available" >> "$report_file"
+    printf -- "%s%-18s %s\n" "$prefix" "Memory Type:" "$mem_type" >> "$report_file"
+    printf -- "%s%-18s %s\n" "$prefix" "Memory Frequency:" "$mem_freq" >> "$report_file"
+    printf -- "%s%-18s %s\n" "$prefix" "Memory Channels:" "$mem_channels" >> "$report_file"
+    printf -- "\n" >> "$report_file"
+}
+
+# Print memory slots detail
+print_memory_slots_detail() {
+    local report_file="$1"
+    local prefix="$2"
+    local mem_slots_detail="$3"
+    
+    printf -- "%s[Memory Slots Detail]\n" "$prefix" >> "$report_file"
+    printf -- "%s--------------------------------------------------------------------------------\n" "$prefix" >> "$report_file"
+    printf -- "%s" "$mem_slots_detail" >> "$report_file"
+    printf -- "\n" >> "$report_file"
+}
+
+# Print disk information section
+print_disk_info_section() {
+    local report_file="$1"
+    local prefix="$2"
+    shift 2
+    local disk_lines=("$@")
+    
+    if [ ${#disk_lines[@]} -gt 0 ]; then
+        printf -- "%s[Disk Information]\n" "$prefix" >> "$report_file"
+        printf -- "%s--------------------------------------------------------------------------------\n" "$prefix" >> "$report_file"
+        printf -- "%s%-20s %-10s %-8s %-12s %-20s %-6s %-10s %-18s %-10s %-10s\n" "$prefix" "NAME" "SIZE" "TYPE" "FS" "MOUNTPOINT" "TYPE" "VENDOR" "MODEL" "SCHEDULER" "WCACHE" >> "$report_file"
+        printf -- "%s--------------------------------------------------------------------------------\n" "$prefix" >> "$report_file"
+        for disk_line in "${disk_lines[@]}"; do
+            if [ -n "$disk_line" ] && [ "$disk_line" != "N/A" ]; then
+                IFS='|' read -r name size type fstype mountpoint disk_type vendor model scheduler wcache <<< "$disk_line"
+                if [ "$type" = "part" ] || [ "$type" = "lvm" ] || [ "$type" = "rom" ]; then
+                    [ "$disk_type" = "Unknown" ] && disk_type="-"
+                    [ "$vendor" = "N/A" ] && vendor="-"
+                    [ "$model" = "N/A" ] && model="-"
+                    [ "$scheduler" = "N/A" ] && scheduler="-"
+                    [ "$wcache" = "N/A" ] && wcache="-"
+                fi
+                printf -- "%s%-20s %-10s %-8s %-12s %-20s %-6s %-10s %-18s %-10s %-10s\n" "$prefix" "$name" "$size" "$type" "$fstype" "$mountpoint" "$disk_type" "$vendor" "$model" "$scheduler" "$wcache" >> "$report_file"
+            fi
+        done
+        printf -- "\n" >> "$report_file"
+    fi
+}
+
+# Print disk usage section
+print_disk_usage_section() {
+    local report_file="$1"
+    local prefix="$2"
+    shift 2
+    local disk_usage_lines=("$@")
+    
+    if [ ${#disk_usage_lines[@]} -gt 0 ]; then
+        printf -- "%s[Disk Usage Information]\n" "$prefix" >> "$report_file"
+        printf -- "%s--------------------------------------------------------------------------------\n" "$prefix" >> "$report_file"
+        printf -- "%s%-25s %-12s %-12s %-12s %-8s %-20s\n" "$prefix" "FILESYSTEM" "SIZE" "USED" "AVAIL" "USE%" "MOUNTED ON" >> "$report_file"
+        printf -- "%s--------------------------------------------------------------------------------\n" "$prefix" >> "$report_file"
+        for disk_usage_line in "${disk_usage_lines[@]}"; do
+            if [ -n "$disk_usage_line" ] && [ "$disk_usage_line" != "N/A" ]; then
+                IFS='|' read -r fs size used avail pct mount <<< "$disk_usage_line"
+                printf -- "%s%-25s %-12s %-12s %-12s %-8s %-20s\n" "$prefix" "$fs" "$size" "$used" "$avail" "$pct" "$mount" >> "$report_file"
+            fi
+        done
+        printf -- "\n" >> "$report_file"
+    fi
+}
+
+# Print inode information section
+print_inode_section() {
+    local report_file="$1"
+    local prefix="$2"
+    shift 2
+    local inode_lines=("$@")
+    
+    if [ ${#inode_lines[@]} -gt 0 ]; then
+        printf -- "%s[Inode Information]\n" "$prefix" >> "$report_file"
+        printf -- "%s--------------------------------------------------------------------------------\n" "$prefix" >> "$report_file"
+        printf -- "%s%-25s %-12s %-12s %-12s %-8s %-20s\n" "$prefix" "FILESYSTEM" "INODES" "USED" "AVAIL" "USE%" "MOUNTED ON" >> "$report_file"
+        printf -- "%s--------------------------------------------------------------------------------\n" "$prefix" >> "$report_file"
+        for inode_line in "${inode_lines[@]}"; do
+            if [ -n "$inode_line" ] && [ "$inode_line" != "N/A" ]; then
+                IFS='|' read -r fs inodes used avail pct mount <<< "$inode_line"
+                printf -- "%s%-25s %-12s %-12s %-12s %-8s %-20s\n" "$prefix" "$fs" "$inodes" "$used" "$avail" "$pct" "$mount" >> "$report_file"
+            fi
+        done
+        printf -- "\n" >> "$report_file"
+    fi
+}
+
+# Print network information section
+print_network_section() {
+    local report_file="$1"
+    local prefix="$2"
+    local net_count="$3"
+    local net_bond="$4"
+    shift 4
+    local network_lines=("$@")
+    
+    if [ ${#network_lines[@]} -gt 0 ] || [ "$net_count" != "N/A" ] || [ "$net_bond" != "N/A" ]; then
+        printf -- "%s[Network Information]\n" "$prefix" >> "$report_file"
+        printf -- "%s--------------------------------------------------------------------------------\n" "$prefix" >> "$report_file"
+        printf -- "%s%-18s %s\n" "$prefix" "Interface Count:" "$net_count" >> "$report_file"
+        printf -- "%s%-18s %s\n" "$prefix" "Bond Interfaces:" "$net_bond" >> "$report_file"
+        printf -- "%s%-18s\n" "$prefix" "Interfaces:" >> "$report_file"
+        for iface_line in "${network_lines[@]}"; do
+            if [ -n "$iface_line" ]; then
+                printf -- "%s  %s\n" "$prefix" "$iface_line" >> "$report_file"
+            fi
+        done
+        printf -- "\n" >> "$report_file"
+    fi
+}
+
+# Parse and print single node hardware information
+print_node_hardware_info() {
+    local report_file="$1"
+    local node_info="$2"
+    local prefix="$3"
+    
+    local cpu_arch="N/A"
+    local machine_type="N/A"
+    local os_info="N/A"
+    local kernel_version="N/A"
+    local uptime="N/A"
+    local cpu_model="N/A"
+    local cpu_physical_cores="N/A"
+    local cpu_logical_cores="N/A"
+    local cpu_freq="N/A"
+    local mem_total="N/A"
+    local mem_available="N/A"
+    local mem_type="N/A"
+    local mem_freq="N/A"
+    local mem_channels="N/A"
+    local mem_slots_detail=""
+    local net_bond="N/A"
+    local net_count="N/A"
+    local in_disk="false"
+    local in_network="false"
+    local in_slots="false"
+    local in_inode="false"
+    local in_disk_usage="false"
+    local disk_lines=()
+    local network_lines=()
+    local inode_lines=()
+    local disk_usage_lines=()
+    
+    while IFS= read -r line; do
+        if [ "$line" = "--- Disk Info ---" ]; then
+            in_disk="true"
+            in_network="false"
+            in_slots="false"
+            in_inode="false"
+            in_disk_usage="false"
+        elif [ "$line" = "--- Disk Usage ---" ]; then
+            in_disk="false"
+            in_network="false"
+            in_slots="false"
+            in_inode="false"
+            in_disk_usage="true"
+        elif [ "$line" = "--- Inode Info ---" ]; then
+            in_disk="false"
+            in_network="false"
+            in_slots="false"
+            in_inode="true"
+            in_disk_usage="false"
+        elif [ "$line" = "--- Network Info ---" ]; then
+            in_disk="false"
+            in_network="true"
+            in_slots="false"
+            in_inode="false"
+            in_disk_usage="false"
+        elif [ "$line" = "--- Memory Slots Detail ---" ]; then
+            in_disk="false"
+            in_network="false"
+            in_slots="true"
+            in_inode="false"
+            in_disk_usage="false"
+        elif [ "$in_disk" = "true" ] && [ -n "$line" ]; then
+            disk_lines+=("$line")
+        elif [ "$in_disk_usage" = "true" ] && [ -n "$line" ]; then
+            disk_usage_lines+=("$line")
+        elif [ "$in_inode" = "true" ] && [ -n "$line" ]; then
+            inode_lines+=("$line")
+        elif [ "$in_network" = "true" ] && [ -n "$line" ]; then
+            network_lines+=("$line")
+        elif [ "$in_slots" = "true" ] && [ -n "$line" ]; then
+            mem_slots_detail="$mem_slots_detail$line"$'\n'
+        elif [[ "$line" == CPU_ARCH:* ]]; then
+            cpu_arch="${line#CPU_ARCH: }"
+        elif [[ "$line" == MACHINE_TYPE:* ]]; then
+            machine_type="${line#MACHINE_TYPE: }"
+        elif [[ "$line" == OS_INFO:* ]]; then
+            os_info="${line#OS_INFO: }"
+        elif [[ "$line" == KERNEL_VERSION:* ]]; then
+            kernel_version="${line#KERNEL_VERSION: }"
+        elif [[ "$line" == UPTIME:* ]]; then
+            uptime="${line#UPTIME: }"
+        elif [[ "$line" == CPU_MODEL:* ]]; then
+            cpu_model="${line#CPU_MODEL: }"
+        elif [[ "$line" == CPU_PHYSICAL_CORES:* ]]; then
+            cpu_physical_cores="${line#CPU_PHYSICAL_CORES: }"
+        elif [[ "$line" == CPU_LOGICAL_CORES:* ]]; then
+            cpu_logical_cores="${line#CPU_LOGICAL_CORES: }"
+        elif [[ "$line" == CPU_FREQ:* ]]; then
+            cpu_freq="${line#CPU_FREQ: }"
+        elif [[ "$line" == MEM_TOTAL:* ]]; then
+            mem_total="${line#MEM_TOTAL: }"
+        elif [[ "$line" == MEM_AVAILABLE:* ]]; then
+            mem_available="${line#MEM_AVAILABLE: }"
+        elif [[ "$line" == MEM_TYPE:* ]]; then
+            mem_type="${line#MEM_TYPE: }"
+        elif [[ "$line" == MEM_FREQ:* ]]; then
+            mem_freq="${line#MEM_FREQ: }"
+        elif [[ "$line" == MEM_CHANNELS:* ]]; then
+            mem_channels="${line#MEM_CHANNELS: }"
+        elif [[ "$line" == NET_BOND:* ]]; then
+            net_bond="${line#NET_BOND: }"
+        elif [[ "$line" == NET_INTERFACE_COUNT:* ]]; then
+            net_count="${line#NET_INTERFACE_COUNT: }"
+        fi
+    done <<< "$node_info"
+    
+    print_hardware_basic "$report_file" "$prefix" \
+        "$cpu_arch" "$machine_type" "$os_info" "$kernel_version" "$uptime" \
+        "$cpu_model" "$cpu_physical_cores" "$cpu_logical_cores" "$cpu_freq" \
+        "$mem_total" "$mem_available" "$mem_type" "$mem_freq" "$mem_channels"
+    
+    if [ -n "$mem_slots_detail" ]; then
+        print_memory_slots_detail "$report_file" "$prefix" "$mem_slots_detail"
+    fi
+    
+    print_disk_info_section "$report_file" "$prefix" "${disk_lines[@]}"
+    print_disk_usage_section "$report_file" "$prefix" "${disk_usage_lines[@]}"
+    print_inode_section "$report_file" "$prefix" "${inode_lines[@]}"
+    print_network_section "$report_file" "$prefix" "$net_count" "$net_bond" "${network_lines[@]}"
+}
+
+# Unified hardware report function - supports both single and multi-node modes
+# Usage: generate_hardware_report_unified <report_file> [server1 server2 ...]
+generate_hardware_report_unified() {
+    local report_file="$1"
+    shift
+    local servers=("$@")
     
     printf -- "================================================================================\n" > "$report_file"
     printf -- "                    Hardware Information Report\n" >> "$report_file"
     printf -- "================================================================================\n" >> "$report_file"
     printf -- "\n" >> "$report_file"
-    printf -- "Hostname: ${HOSTNAME:-N/A}\n" >> "$report_file"
-    printf -- "\n" >> "$report_file"
     
-    # Get hardware info
-    local cpu_arch=$(get_cpu_arch 2>/dev/null || echo "N/A")
-    local machine_type=$(get_machine_type 2>/dev/null || echo "N/A")
-    local os_info=$(get_os_info 2>/dev/null || echo "N/A")
-    local kernel_version=$(get_kernel_version 2>/dev/null || echo "N/A")
-    local uptime=$(get_uptime_info 2>/dev/null || echo "N/A")
-    local cpu_model=$(get_cpu_model 2>/dev/null || echo "N/A")
-    local cpu_physical_cores=$(get_cpu_physical_cores 2>/dev/null || echo "N/A")
-    local cpu_logical_cores=$(get_cpu_logical_cores 2>/dev/null || echo "N/A")
-    local cpu_freq=$(get_cpu_freq 2>/dev/null || echo "N/A")
-    local mem_total=$(get_memory_size_mb 2>/dev/null || echo "N/A")
-    local mem_available=$(get_memory_available_mb 2>/dev/null || echo "N/A")
-    local mem_type=$(get_memory_type 2>/dev/null || echo "N/A")
-    local mem_freq=$(get_memory_freq 2>/dev/null || echo "N/A")
-    local mem_channels=$(get_memory_channels 2>/dev/null || echo "N/A")
-    local net_bond=$(get_network_bond 2>/dev/null || echo "N/A")
-    local net_count=$(get_network_interface_count 2>/dev/null || echo "N/A")
-    
-    # Print Hardware Info
-    printf -- "[Hardware Information]\n" >> "$report_file"
-    printf -- "--------------------------------------------------------------------------------\n" >> "$report_file"
-    printf -- "%-18s %s\n" "CPU Architecture:" "$cpu_arch" >> "$report_file"
-    printf -- "%-18s %s\n" "Machine Type:" "$machine_type" >> "$report_file"
-    printf -- "%-18s %s\n" "OS Version:" "$os_info" >> "$report_file"
-    printf -- "%-18s %s\n" "Kernel Version:" "$kernel_version" >> "$report_file"
-    printf -- "%-18s %s\n" "System Uptime:" "$uptime" >> "$report_file"
-    printf -- "%-18s %s\n" "CPU Model:" "$cpu_model" >> "$report_file"
-    printf -- "%-18s %s\n" "Physical Cores:" "$cpu_physical_cores" >> "$report_file"
-    printf -- "%-18s %s\n" "Logical Cores:" "$cpu_logical_cores" >> "$report_file"
-    printf -- "%-18s %s GHz\n" "CPU Frequency:" "$cpu_freq" >> "$report_file"
-    printf -- "%-18s %s MB\n" "Memory Total:" "$mem_total" >> "$report_file"
-    printf -- "%-18s %s MB\n" "Memory Available:" "$mem_available" >> "$report_file"
-    printf -- "%-18s %s\n" "Memory Type:" "$mem_type" >> "$report_file"
-    printf -- "%-18s %s\n" "Memory Frequency:" "$mem_freq" >> "$report_file"
-    printf -- "%-18s %s\n" "Memory Channels:" "$mem_channels" >> "$report_file"
-    printf -- "\n" >> "$report_file"
-    
-    # Print Memory Slots Detail
-    printf -- "[Memory Slots Detail]\n" >> "$report_file"
-    printf -- "--------------------------------------------------------------------------------\n" >> "$report_file"
-    while IFS= read -r slot_line; do
-        if [ -n "$slot_line" ]; then
-            printf -- "%s\n" "$slot_line" >> "$report_file"
-        fi
-    done < <(get_memory_slots_detail 2>/dev/null)
-    printf -- "\n" >> "$report_file"
-    
-    # Print Disk Info
-    printf -- "[Disk Information]\n" >> "$report_file"
-    printf -- "--------------------------------------------------------------------------------\n" >> "$report_file"
-    printf -- "%-20s %-10s %-8s %-12s %-20s %-6s %-10s %-18s %-10s %-10s\n" "NAME" "SIZE" "TYPE" "FS" "MOUNTPOINT" "TYPE" "VENDOR" "MODEL" "SCHEDULER" "WCACHE" >> "$report_file"
-    printf -- "--------------------------------------------------------------------------------\n" >> "$report_file"
-    while IFS='|' read -r name size type fstype mountpoint disk_type vendor model scheduler wcache; do
-        if [ -n "$name" ] && [ "$name" != "N/A" ]; then
-            # 对于分区(part/lvm)，显示为-而不是N/A
-            if [ "$type" = "part" ] || [ "$type" = "lvm" ] || [ "$type" = "rom" ]; then
-                [ "$disk_type" = "Unknown" ] && disk_type="-"
-                [ "$vendor" = "N/A" ] && vendor="-"
-                [ "$model" = "N/A" ] && model="-"
-                [ "$scheduler" = "N/A" ] && scheduler="-"
-                [ "$wcache" = "N/A" ] && wcache="-"
+    if [ ${#servers[@]} -gt 0 ]; then
+        local node_idx=1
+        local local_ip=$(get_machine_ip)
+        for ip in "${servers[@]}"; do
+            printf -- "=============================================================================\n" >> "$report_file"
+            printf -- "  Node %d: %s\n" "$node_idx" "$ip" >> "$report_file"
+
+            printf -- "\n" >> "$report_file"
+            
+            local is_local="false"
+            if [ "$ip" = "$local_ip" ]; then
+                is_local="true"
             fi
-            printf -- "%-20s %-10s %-8s %-12s %-20s %-6s %-10s %-18s %-10s %-10s\n" "$name" "$size" "$type" "$fstype" "$mountpoint" "$disk_type" "$vendor" "$model" "$scheduler" "$wcache" >> "$report_file"
+            
+            local node_info=$(get_node_hardware_info "$ip" "$is_local")
+            print_node_hardware_info "$report_file" "$node_info" "  "
+            
+            node_idx=$((node_idx + 1))
+            printf -- "\n" >> "$report_file"
+        done
+    else
+        printf -- "Hostname: ${HOSTNAME:-N/A}\n" >> "$report_file"
+        printf -- "\n" >> "$report_file"
+        
+        local cpu_arch=$(get_cpu_arch 2>/dev/null || echo "N/A")
+        local machine_type=$(get_machine_type 2>/dev/null || echo "N/A")
+        local os_info=$(get_os_info 2>/dev/null || echo "N/A")
+        local kernel_version=$(get_kernel_version 2>/dev/null || echo "N/A")
+        local uptime=$(get_uptime_info 2>/dev/null || echo "N/A")
+        local cpu_model=$(get_cpu_model 2>/dev/null || echo "N/A")
+        local cpu_physical_cores=$(get_cpu_physical_cores 2>/dev/null || echo "N/A")
+        local cpu_logical_cores=$(get_cpu_logical_cores 2>/dev/null || echo "N/A")
+        local cpu_freq=$(get_cpu_freq 2>/dev/null || echo "N/A")
+        local mem_total=$(get_memory_size_mb 2>/dev/null || echo "N/A")
+        local mem_available=$(get_memory_available_mb 2>/dev/null || echo "N/A")
+        local mem_type=$(get_memory_type 2>/dev/null || echo "N/A")
+        local mem_freq=$(get_memory_freq 2>/dev/null || echo "N/A")
+        local mem_channels=$(get_memory_channels 2>/dev/null || echo "N/A")
+        local net_bond=$(get_network_bond 2>/dev/null || echo "N/A")
+        local net_count=$(get_network_interface_count 2>/dev/null || echo "N/A")
+        
+        print_hardware_basic "$report_file" "" \
+            "$cpu_arch" "$machine_type" "$os_info" "$kernel_version" "$uptime" \
+            "$cpu_model" "$cpu_physical_cores" "$cpu_logical_cores" "$cpu_freq" \
+            "$mem_total" "$mem_available" "$mem_type" "$mem_freq" "$mem_channels"
+        
+        local mem_slots_detail=$(get_memory_slots_detail 2>/dev/null)
+        if [ -n "$mem_slots_detail" ]; then
+            print_memory_slots_detail "$report_file" "" "$mem_slots_detail"
         fi
-    done < <(get_disk_info_detailed 2>/dev/null)
-    printf -- "\n" >> "$report_file"
-    
-    # Print Disk Usage Info (df -h)
-    printf -- "[Disk Usage Information]\n" >> "$report_file"
-    printf -- "--------------------------------------------------------------------------------\n" >> "$report_file"
-    printf -- "%-25s %-12s %-12s %-12s %-8s %-20s\n" "FILESYSTEM" "SIZE" "USED" "AVAIL" "USE%" "MOUNTED ON" >> "$report_file"
-    printf -- "--------------------------------------------------------------------------------\n" >> "$report_file"
-    while IFS='|' read -r fs size used avail pct mount; do
-        if [ -n "$fs" ] && [ "$fs" != "N/A" ]; then
-            printf -- "%-25s %-12s %-12s %-12s %-8s %-20s\n" "$fs" "$size" "$used" "$avail" "$pct" "$mount" >> "$report_file"
-        fi
-    done < <(get_disk_usage_info 2>/dev/null)
-    printf -- "\n" >> "$report_file"
-    
-    # Print Inode Info
-    printf -- "[Inode Information]\n" >> "$report_file"
-    printf -- "--------------------------------------------------------------------------------\n" >> "$report_file"
-    printf -- "%-25s %-12s %-12s %-12s %-8s %-20s\n" "FILESYSTEM" "INODES" "USED" "AVAIL" "USE%" "MOUNTED ON" >> "$report_file"
-    printf -- "--------------------------------------------------------------------------------\n" >> "$report_file"
-    while IFS='|' read -r fs inodes used avail pct mount; do
-        if [ -n "$fs" ] && [ "$fs" != "N/A" ]; then
-            printf -- "%-25s %-12s %-12s %-12s %-8s %-20s\n" "$fs" "$inodes" "$used" "$avail" "$pct" "$mount" >> "$report_file"
-        fi
-    done < <(get_inode_info 2>/dev/null)
-    printf -- "\n" >> "$report_file"
-    
-    # Print Network Info
-    printf -- "[Network Information]\n" >> "$report_file"
-    printf -- "--------------------------------------------------------------------------------\n" >> "$report_file"
-    printf -- "%-18s %s\n" "Interface Count:" "$net_count" >> "$report_file"
-    printf -- "%-18s %s\n" "Bond Interfaces:" "$net_bond" >> "$report_file"
-    printf -- "%-18s\n" "Interfaces:" >> "$report_file"
-    while IFS= read -r iface_line; do
-        if [ -n "$iface_line" ]; then
-            printf -- "  %s\n" "$iface_line" >> "$report_file"
-        fi
-    done < <(get_network_info 2>/dev/null | grep -v "^$")
-    printf -- "\n" >> "$report_file"
+        
+        local disk_lines=()
+        while IFS= read -r line; do
+            disk_lines+=("$line")
+        done < <(get_disk_info_detailed 2>/dev/null)
+        print_disk_info_section "$report_file" "" "${disk_lines[@]}"
+        
+        local disk_usage_lines=()
+        while IFS= read -r line; do
+            disk_usage_lines+=("$line")
+        done < <(get_disk_usage_info 2>/dev/null)
+        print_disk_usage_section "$report_file" "" "${disk_usage_lines[@]}"
+        
+        local inode_lines=()
+        while IFS= read -r line; do
+            inode_lines+=("$line")
+        done < <(get_inode_info 2>/dev/null)
+        print_inode_section "$report_file" "" "${inode_lines[@]}"
+        
+        local network_lines=()
+        while IFS= read -r line; do
+            if [ -n "$line" ]; then
+                network_lines+=("$line")
+            fi
+        done < <(get_network_info 2>/dev/null | grep -v "^$")
+        print_network_section "$report_file" "" "$net_count" "$net_bond" "${network_lines[@]}"
+    fi
     
     echo "$report_file"
 }
+
+# ================================================================================
+# End of Unified Hardware Report Functions
+# ================================================================================
 
 # Get network interface information
 get_network_info() {
@@ -1937,8 +2191,9 @@ check_ssh() {
                 echo "  - $ip: using password authentication (skip passwordless check)"
             else
                 has_passwordless_auth=true
+                local ssh_port="${SSH_PORT:-$SSH_PORT_DEFAULT}"
                 # Test SSH connection with BatchMode=yes to avoid password prompt
-                if ! ssh -o BatchMode=yes -o ConnectTimeout=5 "$ip" "echo 2>/dev/null" > /dev/null 2>&1; then
+                if ! ssh -p "$ssh_port" -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "$ip" "echo 2>/dev/null" > /dev/null 2>&1; then
                     ssh_failed+=($ip)
                 fi
             fi
@@ -3952,221 +4207,18 @@ generate_report() {
     
     # Add Hardware Information
     if [ "${REPORT_HARDWARE_INFO:-true}" = "true" ]; then
+        local hardware_temp_file="$OUTPUT_DIR/hardware_temp_${TIMESTAMP}.log"
+        
         if [ ${#target_servers[@]} -gt 0 ]; then
-            printf -- "================================================================================\n" >> "$report_file"
-            printf -- "                    Hardware Information Report\n" >> "$report_file"
-            printf -- "================================================================================\n" >> "$report_file"
-            printf -- "\n" >> "$report_file"
-            
-            local node_idx=1
-            local local_ip=$(get_machine_ip)
-            for ip in "${target_servers[@]}"; do
-                printf -- "=============================================================================\n" >> "$report_file"
-                printf -- "  Node %d: %s\n" "$node_idx" "$ip" >> "$report_file"
-                printf -- "=============================================================================\n" >> "$report_file"
-                printf -- "\n" >> "$report_file"
-                
-                local is_local="false"
-                if [ "$ip" = "$local_ip" ]; then
-                    is_local="true"
-                fi
-                
-                local node_info=$(get_node_hardware_info "$ip" "$is_local")
-                
-                local cpu_arch="N/A"
-                local machine_type="N/A"
-                local os_info="N/A"
-                local kernel_version="N/A"
-                local uptime="N/A"
-                local cpu_model="N/A"
-                local cpu_physical_cores="N/A"
-                local cpu_logical_cores="N/A"
-                local cpu_freq="N/A"
-                local mem_total="N/A"
-                local mem_available="N/A"
-                local mem_type="N/A"
-                local mem_freq="N/A"
-                local mem_channels="N/A"
-                local mem_slots_detail=""
-                local net_bond="N/A"
-                local net_count="N/A"
-                local in_disk="false"
-                local in_network="false"
-                local in_slots="false"
-                local in_inode="false"
-                local in_disk_usage="false"
-                local disk_lines=()
-                local network_lines=()
-                local inode_lines=()
-                local disk_usage_lines=()
-                
-                while IFS= read -r line; do
-                    if [ "$line" = "--- Disk Info ---" ]; then
-                        in_disk="true"
-                        in_network="false"
-                        in_slots="false"
-                        in_inode="false"
-                        in_disk_usage="false"
-                    elif [ "$line" = "--- Disk Usage ---" ]; then
-                        in_disk="false"
-                        in_network="false"
-                        in_slots="false"
-                        in_inode="false"
-                        in_disk_usage="true"
-                    elif [ "$line" = "--- Inode Info ---" ]; then
-                        in_disk="false"
-                        in_network="false"
-                        in_slots="false"
-                        in_inode="true"
-                        in_disk_usage="false"
-                    elif [ "$line" = "--- Network Info ---" ]; then
-                        in_disk="false"
-                        in_network="true"
-                        in_slots="false"
-                        in_inode="false"
-                        in_disk_usage="false"
-                    elif [ "$line" = "--- Memory Slots Detail ---" ]; then
-                        in_disk="false"
-                        in_network="false"
-                        in_slots="true"
-                        in_inode="false"
-                        in_disk_usage="false"
-                    elif [ "$in_disk" = "true" ] && [ -n "$line" ]; then
-                        disk_lines+=("$line")
-                    elif [ "$in_disk_usage" = "true" ] && [ -n "$line" ]; then
-                        disk_usage_lines+=("$line")
-                    elif [ "$in_inode" = "true" ] && [ -n "$line" ]; then
-                        inode_lines+=("$line")
-                    elif [ "$in_network" = "true" ] && [ -n "$line" ]; then
-                        network_lines+=("$line")
-                    elif [ "$in_slots" = "true" ] && [ -n "$line" ]; then
-                        mem_slots_detail="$mem_slots_detail$line"$'\n'
-                    elif [[ "$line" == CPU_ARCH:* ]]; then
-                        cpu_arch="${line#CPU_ARCH: }"
-                    elif [[ "$line" == MACHINE_TYPE:* ]]; then
-                        machine_type="${line#MACHINE_TYPE: }"
-                    elif [[ "$line" == OS_INFO:* ]]; then
-                        os_info="${line#OS_INFO: }"
-                    elif [[ "$line" == KERNEL_VERSION:* ]]; then
-                        kernel_version="${line#KERNEL_VERSION: }"
-                    elif [[ "$line" == UPTIME:* ]]; then
-                        uptime="${line#UPTIME: }"
-                    elif [[ "$line" == CPU_MODEL:* ]]; then
-                        cpu_model="${line#CPU_MODEL: }"
-                    elif [[ "$line" == CPU_PHYSICAL_CORES:* ]]; then
-                        cpu_physical_cores="${line#CPU_PHYSICAL_CORES: }"
-                    elif [[ "$line" == CPU_LOGICAL_CORES:* ]]; then
-                        cpu_logical_cores="${line#CPU_LOGICAL_CORES: }"
-                    elif [[ "$line" == CPU_FREQ:* ]]; then
-                        cpu_freq="${line#CPU_FREQ: }"
-                    elif [[ "$line" == MEM_TOTAL:* ]]; then
-                        mem_total="${line#MEM_TOTAL: }"
-                    elif [[ "$line" == MEM_AVAILABLE:* ]]; then
-                        mem_available="${line#MEM_AVAILABLE: }"
-                    elif [[ "$line" == MEM_TYPE:* ]]; then
-                        mem_type="${line#MEM_TYPE: }"
-                    elif [[ "$line" == MEM_FREQ:* ]]; then
-                        mem_freq="${line#MEM_FREQ: }"
-                    elif [[ "$line" == MEM_CHANNELS:* ]]; then
-                        mem_channels="${line#MEM_CHANNELS: }"
-                    elif [[ "$line" == NET_BOND:* ]]; then
-                        net_bond="${line#NET_BOND: }"
-                    elif [[ "$line" == NET_INTERFACE_COUNT:* ]]; then
-                        net_count="${line#NET_INTERFACE_COUNT: }"
-                    fi
-                done <<< "$node_info"
-                
-                printf -- "  [Hardware Information]\n" >> "$report_file"
-                printf -- "  --------------------------------------------------------------------------------\n" >> "$report_file"
-                printf -- "  %-18s %s\n" "CPU Architecture:" "$cpu_arch" >> "$report_file"
-                printf -- "  %-18s %s\n" "Machine Type:" "$machine_type" >> "$report_file"
-                printf -- "  %-18s %s\n" "OS Version:" "$os_info" >> "$report_file"
-                printf -- "  %-18s %s\n" "Kernel Version:" "$kernel_version" >> "$report_file"
-                printf -- "  %-18s %s\n" "System Uptime:" "$uptime" >> "$report_file"
-                printf -- "  %-18s %s\n" "CPU Model:" "$cpu_model" >> "$report_file"
-                printf -- "  %-18s %s\n" "Physical Cores:" "$cpu_physical_cores" >> "$report_file"
-                printf -- "  %-18s %s\n" "Logical Cores:" "$cpu_logical_cores" >> "$report_file"
-                printf -- "  %-18s %s GHz\n" "CPU Frequency:" "$cpu_freq" >> "$report_file"
-                printf -- "  %-18s %s MB\n" "Memory Total:" "$mem_total" >> "$report_file"
-                printf -- "  %-18s %s MB\n" "Memory Available:" "$mem_available" >> "$report_file"
-                printf -- "  %-18s %s\n" "Memory Type:" "$mem_type" >> "$report_file"
-                printf -- "  %-18s %s\n" "Memory Frequency:" "$mem_freq" >> "$report_file"
-                printf -- "  %-18s %s\n" "Memory Channels:" "$mem_channels" >> "$report_file"
-                printf -- "\n" >> "$report_file"
-                
-                printf -- "  [Memory Slots Detail]\n" >> "$report_file"
-                printf -- "  --------------------------------------------------------------------------------\n" >> "$report_file"
-                printf -- "%s" "$mem_slots_detail" >> "$report_file"
-                printf -- "\n" >> "$report_file"
-                
-                if [ ${#disk_lines[@]} -gt 0 ]; then
-                    printf -- "  [Disk Information]\n" >> "$report_file"
-                    printf -- "  --------------------------------------------------------------------------------\n" >> "$report_file"
-                    printf -- "  %-20s %-10s %-8s %-12s %-20s %-6s %-10s %-18s %-10s %-10s\n" "NAME" "SIZE" "TYPE" "FS" "MOUNTPOINT" "TYPE" "VENDOR" "MODEL" "SCHEDULER" "WCACHE" >> "$report_file"
-                    printf -- "  --------------------------------------------------------------------------------\n" >> "$report_file"
-                    for disk_line in "${disk_lines[@]}"; do
-                        if [ -n "$disk_line" ] && [ "$disk_line" != "N/A" ]; then
-                            IFS='|' read -r name size type fstype mountpoint disk_type vendor model scheduler wcache <<< "$disk_line"
-                            if [ "$type" = "part" ] || [ "$type" = "lvm" ] || [ "$type" = "rom" ]; then
-                                [ "$disk_type" = "Unknown" ] && disk_type="-"
-                                [ "$vendor" = "N/A" ] && vendor="-"
-                                [ "$model" = "N/A" ] && model="-"
-                                [ "$scheduler" = "N/A" ] && scheduler="-"
-                                [ "$wcache" = "N/A" ] && wcache="-"
-                            fi
-                            printf -- "  %-20s %-10s %-8s %-12s %-20s %-6s %-10s %-18s %-10s %-10s\n" "$name" "$size" "$type" "$fstype" "$mountpoint" "$disk_type" "$vendor" "$model" "$scheduler" "$wcache" >> "$report_file"
-                        fi
-                    done
-                    printf -- "\n" >> "$report_file"
-                fi
-                
-                if [ ${#disk_usage_lines[@]} -gt 0 ]; then
-                    printf -- "  [Disk Usage Information]\n" >> "$report_file"
-                    printf -- "  --------------------------------------------------------------------------------\n" >> "$report_file"
-                    printf -- "  %-25s %-12s %-12s %-12s %-8s %-20s\n" "FILESYSTEM" "SIZE" "USED" "AVAIL" "USE%" "MOUNTED ON" >> "$report_file"
-                    printf -- "  --------------------------------------------------------------------------------\n" >> "$report_file"
-                    for disk_usage_line in "${disk_usage_lines[@]}"; do
-                        if [ -n "$disk_usage_line" ] && [ "$disk_usage_line" != "N/A" ]; then
-                            IFS='|' read -r fs size used avail pct mount <<< "$disk_usage_line"
-                            printf -- "  %-25s %-12s %-12s %-12s %-8s %-20s\n" "$fs" "$size" "$used" "$avail" "$pct" "$mount" >> "$report_file"
-                        fi
-                    done
-                    printf -- "\n" >> "$report_file"
-                fi
-                
-                if [ ${#inode_lines[@]} -gt 0 ]; then
-                    printf -- "  [Inode Information]\n" >> "$report_file"
-                    printf -- "  --------------------------------------------------------------------------------\n" >> "$report_file"
-                    printf -- "  %-25s %-12s %-12s %-12s %-8s %-20s\n" "FILESYSTEM" "INODES" "USED" "AVAIL" "USE%" "MOUNTED ON" >> "$report_file"
-                    printf -- "  --------------------------------------------------------------------------------\n" >> "$report_file"
-                    for inode_line in "${inode_lines[@]}"; do
-                        if [ -n "$inode_line" ] && [ "$inode_line" != "N/A" ]; then
-                            IFS='|' read -r fs inodes used avail pct mount <<< "$inode_line"
-                            printf -- "  %-25s %-12s %-12s %-12s %-8s %-20s\n" "$fs" "$inodes" "$used" "$avail" "$pct" "$mount" >> "$report_file"
-                        fi
-                    done
-                    printf -- "\n" >> "$report_file"
-                fi
-                
-                if [ ${#network_lines[@]} -gt 0 ] || [ "$net_count" != "N/A" ] || [ "$net_bond" != "N/A" ]; then
-                    printf -- "  [Network Information]\n" >> "$report_file"
-                    printf -- "  --------------------------------------------------------------------------------\n" >> "$report_file"
-                    printf -- "  %-18s %s\n" "Interface Count:" "$net_count" >> "$report_file"
-                    printf -- "  %-18s %s\n" "Bond Interfaces:" "$net_bond" >> "$report_file"
-                    printf -- "  %-18s\n" "Interfaces:" >> "$report_file"
-                    for iface_line in "${network_lines[@]}"; do
-                        if [ -n "$iface_line" ]; then
-                            printf -- "    %s\n" "$iface_line" >> "$report_file"
-                        fi
-                    done
-                    printf -- "\n" >> "$report_file"
-                fi
-                
-                node_idx=$((node_idx + 1))
-            done
+            generate_hardware_report_unified "$hardware_temp_file" "${target_servers[@]}"
         else
-            generate_hardware_report "$report_file"
+            generate_hardware_report_unified "$hardware_temp_file"
         fi
+        
+        printf -- "\n" >> "$report_file"
+        cat "$hardware_temp_file" >> "$report_file"
+        rm -f "$hardware_temp_file"
+        
         printf -- "\n" >> "$report_file"
     fi
     
@@ -5473,220 +5525,9 @@ main() {
         local report_file="$OUTPUT_DIR/hardware_report_${TIMESTAMP}.log"
         
         if [ ${#target_servers[@]} -gt 0 ]; then
-            printf -- "================================================================================\n" > "$report_file"
-            printf -- "                    Hardware Information Report\n" >> "$report_file"
-            printf -- "================================================================================\n" >> "$report_file"
-            printf -- "\n" >> "$report_file"
-            
-            local node_idx=1
-            local local_ip=$(get_machine_ip)
-            for ip in "${target_servers[@]}"; do
-                printf -- "=============================================================================\n" >> "$report_file"
-                printf -- "  Node %d: %s\n" "$node_idx" "$ip" >> "$report_file"
-                printf -- "=============================================================================\n" >> "$report_file"
-                printf -- "\n" >> "$report_file"
-                
-                local is_local="false"
-                if [ "$ip" = "$local_ip" ]; then
-                    is_local="true"
-                fi
-                
-                local node_info=$(get_node_hardware_info "$ip" "$is_local")
-                
-                local cpu_arch="N/A"
-                local machine_type="N/A"
-                local os_info="N/A"
-                local kernel_version="N/A"
-                local uptime="N/A"
-                local cpu_model="N/A"
-                local cpu_physical_cores="N/A"
-                local cpu_logical_cores="N/A"
-                local cpu_freq="N/A"
-                local mem_total="N/A"
-                local mem_available="N/A"
-                local mem_type="N/A"
-                local mem_freq="N/A"
-                local mem_channels="N/A"
-                local mem_slots_detail=""
-                local net_bond="N/A"
-                local net_count="N/A"
-                local in_disk="false"
-                local in_network="false"
-                local in_slots="false"
-                local in_inode="false"
-                local in_disk_usage="false"
-                local disk_lines=()
-                local network_lines=()
-                local inode_lines=()
-                local disk_usage_lines=()
-                
-                while IFS= read -r line; do
-                    if [ "$line" = "--- Disk Info ---" ]; then
-                        in_disk="true"
-                        in_network="false"
-                        in_slots="false"
-                        in_inode="false"
-                        in_disk_usage="false"
-                    elif [ "$line" = "--- Disk Usage ---" ]; then
-                        in_disk="false"
-                        in_network="false"
-                        in_slots="false"
-                        in_inode="false"
-                        in_disk_usage="true"
-                    elif [ "$line" = "--- Inode Info ---" ]; then
-                        in_disk="false"
-                        in_network="false"
-                        in_slots="false"
-                        in_inode="true"
-                        in_disk_usage="false"
-                    elif [ "$line" = "--- Network Info ---" ]; then
-                        in_disk="false"
-                        in_network="true"
-                        in_slots="false"
-                        in_inode="false"
-                        in_disk_usage="false"
-                    elif [ "$line" = "--- Memory Slots Detail ---" ]; then
-                        in_disk="false"
-                        in_network="false"
-                        in_slots="true"
-                        in_inode="false"
-                        in_disk_usage="false"
-                    elif [ "$in_disk" = "true" ] && [ -n "$line" ]; then
-                        disk_lines+=("$line")
-                    elif [ "$in_disk_usage" = "true" ] && [ -n "$line" ]; then
-                        disk_usage_lines+=("$line")
-                    elif [ "$in_inode" = "true" ] && [ -n "$line" ]; then
-                        inode_lines+=("$line")
-                    elif [ "$in_network" = "true" ] && [ -n "$line" ]; then
-                        network_lines+=("$line")
-                    elif [ "$in_slots" = "true" ] && [ -n "$line" ]; then
-                        mem_slots_detail="$mem_slots_detail$line"$'\n'
-                    elif [[ "$line" == CPU_ARCH:* ]]; then
-                        cpu_arch="${line#CPU_ARCH: }"
-                    elif [[ "$line" == MACHINE_TYPE:* ]]; then
-                        machine_type="${line#MACHINE_TYPE: }"
-                    elif [[ "$line" == OS_INFO:* ]]; then
-                        os_info="${line#OS_INFO: }"
-                    elif [[ "$line" == KERNEL_VERSION:* ]]; then
-                        kernel_version="${line#KERNEL_VERSION: }"
-                    elif [[ "$line" == UPTIME:* ]]; then
-                        uptime="${line#UPTIME: }"
-                    elif [[ "$line" == CPU_MODEL:* ]]; then
-                        cpu_model="${line#CPU_MODEL: }"
-                    elif [[ "$line" == CPU_PHYSICAL_CORES:* ]]; then
-                        cpu_physical_cores="${line#CPU_PHYSICAL_CORES: }"
-                    elif [[ "$line" == CPU_LOGICAL_CORES:* ]]; then
-                        cpu_logical_cores="${line#CPU_LOGICAL_CORES: }"
-                    elif [[ "$line" == CPU_FREQ:* ]]; then
-                        cpu_freq="${line#CPU_FREQ: }"
-                    elif [[ "$line" == MEM_TOTAL:* ]]; then
-                        mem_total="${line#MEM_TOTAL: }"
-                    elif [[ "$line" == MEM_AVAILABLE:* ]]; then
-                        mem_available="${line#MEM_AVAILABLE: }"
-                    elif [[ "$line" == MEM_TYPE:* ]]; then
-                        mem_type="${line#MEM_TYPE: }"
-                    elif [[ "$line" == MEM_FREQ:* ]]; then
-                        mem_freq="${line#MEM_FREQ: }"
-                    elif [[ "$line" == MEM_CHANNELS:* ]]; then
-                        mem_channels="${line#MEM_CHANNELS: }"
-                    elif [[ "$line" == NET_BOND:* ]]; then
-                        net_bond="${line#NET_BOND: }"
-                    elif [[ "$line" == NET_INTERFACE_COUNT:* ]]; then
-                        net_count="${line#NET_INTERFACE_COUNT: }"
-                    fi
-                done <<< "$node_info"
-                
-                printf -- "  [Hardware Information]\n" >> "$report_file"
-                printf -- "  --------------------------------------------------------------------------------\n" >> "$report_file"
-                printf -- "  %-18s %s\n" "CPU Architecture:" "$cpu_arch" >> "$report_file"
-                printf -- "  %-18s %s\n" "Machine Type:" "$machine_type" >> "$report_file"
-                printf -- "  %-18s %s\n" "OS Version:" "$os_info" >> "$report_file"
-                printf -- "  %-18s %s\n" "Kernel Version:" "$kernel_version" >> "$report_file"
-                printf -- "  %-18s %s\n" "System Uptime:" "$uptime" >> "$report_file"
-                printf -- "  %-18s %s\n" "CPU Model:" "$cpu_model" >> "$report_file"
-                printf -- "  %-18s %s\n" "Physical Cores:" "$cpu_physical_cores" >> "$report_file"
-                printf -- "  %-18s %s\n" "Logical Cores:" "$cpu_logical_cores" >> "$report_file"
-                printf -- "  %-18s %s GHz\n" "CPU Frequency:" "$cpu_freq" >> "$report_file"
-                printf -- "  %-18s %s MB\n" "Memory Total:" "$mem_total" >> "$report_file"
-                printf -- "  %-18s %s MB\n" "Memory Available:" "$mem_available" >> "$report_file"
-                printf -- "  %-18s %s\n" "Memory Type:" "$mem_type" >> "$report_file"
-                printf -- "  %-18s %s\n" "Memory Frequency:" "$mem_freq" >> "$report_file"
-                printf -- "  %-18s %s\n" "Memory Channels:" "$mem_channels" >> "$report_file"
-                printf -- "\n" >> "$report_file"
-                
-                printf -- "  [Memory Slots Detail]\n" >> "$report_file"
-                printf -- "  --------------------------------------------------------------------------------\n" >> "$report_file"
-                printf -- "%s" "$mem_slots_detail" >> "$report_file"
-                printf -- "\n" >> "$report_file"
-                
-                if [ ${#disk_lines[@]} -gt 0 ]; then
-                    printf -- "  [Disk Information]\n" >> "$report_file"
-                    printf -- "  --------------------------------------------------------------------------------\n" >> "$report_file"
-                    printf -- "  %-20s %-10s %-8s %-12s %-20s %-6s %-10s %-18s %-10s %-10s\n" "NAME" "SIZE" "TYPE" "FS" "MOUNTPOINT" "TYPE" "VENDOR" "MODEL" "SCHEDULER" "WCACHE" >> "$report_file"
-                    printf -- "  --------------------------------------------------------------------------------\n" >> "$report_file"
-                    for disk_line in "${disk_lines[@]}"; do
-                        if [ -n "$disk_line" ] && [ "$disk_line" != "N/A" ]; then
-                            IFS='|' read -r name size type fstype mountpoint disk_type vendor model scheduler wcache <<< "$disk_line"
-                            # 对于分区(part/lvm)，显示为-而不是N/A
-                            if [ "$type" = "part" ] || [ "$type" = "lvm" ] || [ "$type" = "rom" ]; then
-                                [ "$disk_type" = "Unknown" ] && disk_type="-"
-                                [ "$vendor" = "N/A" ] && vendor="-"
-                                [ "$model" = "N/A" ] && model="-"
-                                [ "$scheduler" = "N/A" ] && scheduler="-"
-                                [ "$wcache" = "N/A" ] && wcache="-"
-                            fi
-                            printf -- "  %-20s %-10s %-8s %-12s %-20s %-6s %-10s %-18s %-10s %-10s\n" "$name" "$size" "$type" "$fstype" "$mountpoint" "$disk_type" "$vendor" "$model" "$scheduler" "$wcache" >> "$report_file"
-                        fi
-                    done
-                    printf -- "\n" >> "$report_file"
-                fi
-                
-                if [ ${#disk_usage_lines[@]} -gt 0 ]; then
-                    printf -- "  [Disk Usage Information]\n" >> "$report_file"
-                    printf -- "  --------------------------------------------------------------------------------\n" >> "$report_file"
-                    printf -- "  %-25s %-12s %-12s %-12s %-8s %-20s\n" "FILESYSTEM" "SIZE" "USED" "AVAIL" "USE%" "MOUNTED ON" >> "$report_file"
-                    printf -- "  --------------------------------------------------------------------------------\n" >> "$report_file"
-                    for disk_usage_line in "${disk_usage_lines[@]}"; do
-                        if [ -n "$disk_usage_line" ] && [ "$disk_usage_line" != "N/A" ]; then
-                            IFS='|' read -r fs size used avail pct mount <<< "$disk_usage_line"
-                            printf -- "  %-25s %-12s %-12s %-12s %-8s %-20s\n" "$fs" "$size" "$used" "$avail" "$pct" "$mount" >> "$report_file"
-                        fi
-                    done
-                    printf -- "\n" >> "$report_file"
-                fi
-                
-                if [ ${#inode_lines[@]} -gt 0 ]; then
-                    printf -- "  [Inode Information]\n" >> "$report_file"
-                    printf -- "  --------------------------------------------------------------------------------\n" >> "$report_file"
-                    printf -- "  %-25s %-12s %-12s %-12s %-8s %-20s\n" "FILESYSTEM" "INODES" "USED" "AVAIL" "USE%" "MOUNTED ON" >> "$report_file"
-                    printf -- "  --------------------------------------------------------------------------------\n" >> "$report_file"
-                    for inode_line in "${inode_lines[@]}"; do
-                        if [ -n "$inode_line" ] && [ "$inode_line" != "N/A" ]; then
-                            IFS='|' read -r fs inodes used avail pct mount <<< "$inode_line"
-                            printf -- "  %-25s %-12s %-12s %-12s %-8s %-20s\n" "$fs" "$inodes" "$used" "$avail" "$pct" "$mount" >> "$report_file"
-                        fi
-                    done
-                    printf -- "\n" >> "$report_file"
-                fi
-                
-                if [ ${#network_lines[@]} -gt 0 ] || [ "$net_count" != "N/A" ] || [ "$net_bond" != "N/A" ]; then
-                    printf -- "  [Network Information]\n" >> "$report_file"
-                    printf -- "  --------------------------------------------------------------------------------\n" >> "$report_file"
-                    printf -- "  %-18s %s\n" "Interface Count:" "$net_count" >> "$report_file"
-                    printf -- "  %-18s %s\n" "Bond Interfaces:" "$net_bond" >> "$report_file"
-                    printf -- "  %-18s\n" "Interfaces:" >> "$report_file"
-                    for iface_line in "${network_lines[@]}"; do
-                        if [ -n "$iface_line" ]; then
-                            printf -- "    %s\n" "$iface_line" >> "$report_file"
-                        fi
-                    done
-                    printf -- "\n" >> "$report_file"
-                fi
-                
-                node_idx=$((node_idx + 1))
-            done
+            generate_hardware_report_unified "$report_file" "${target_servers[@]}"
         else
-            generate_hardware_report "$report_file"
+            generate_hardware_report_unified "$report_file"
         fi
         
         cat "$report_file"
