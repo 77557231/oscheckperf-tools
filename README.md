@@ -1,23 +1,41 @@
 中文 | [English](#english)
 
-# 系统性能基准测试工具
+# oscheckperf - 系统性能基准测试工具
 
-一个系统级性能基准测试工具，支持全面的 CPU、内存、IO、网络、线程、互斥锁性能测试，帮助评估服务器硬件性能边界。适用于 Vastbase、openGauss、PostgreSQL、MySQL 等数据库及各类应用场景的上线前性能检查，助力发现系统潜在性能问题。
+**oscheckperf** 是一款专为数据库场景设计的系统级性能基准测试工具，提供一站式的服务器硬件性能评估能力。通过自动化测试 CPU、内存、磁盘 IO、网络吞吐、线程调度、互斥锁六大核心维度，帮助用户快速评估服务器性能边界，识别潜在瓶颈。
 
-## 特性
+**核心价值**：
+- 助力数据库（Vastbase、openGauss、PostgreSQL、MySQL）上线前性能验证
+- 支持集群网络性能评估，优化分布式架构设计
+- 生成专业性能报告，便于性能趋势分析和问题定位
+- 保障测试安全性，保护生产环境稳定
 
-- ✅ **一键执行**：自动化完成 CPU/内存/IO/网络/线程/锁测试，无需手动配置
-- ✅ **最小依赖**：基础模式仅需 sysbench，其他工具（fio、iperf3）为可选
-- ✅ **多工具支持**：IO 测试支持 sysbench 和 fio，可根据需要选择
-- ✅ **多服务器支持**：网络压测支持多 IP 配置（支持免密和密码认证），可测试集群网络性能
-- ✅ **密码认证**：支持服务器列表中配置用户名和密码，无需 SSH 免密登录
-- ✅ **配置文件支持**：支持通过配置文件管理所有参数，便于批量配置和版本控制
-- ✅ **详细报告**：生成结构化测试报告，包含系统信息、测试配置和详细指标
-- ✅ **远程分发**：自动编译和分发 sysbench、sshpass 到远程服务器，支持跨架构部署
-- ✅ **多种网络模式**：支持串行、并行和矩阵网络测试模式
-- ✅ **结果分析**：生成多服务器对比报告，便于性能分析和问题定位
-- ✅ **安全增强**：路径安全验证、磁盘空间检查、进程管理优化，保护生产环境
-- ✅ **调试模式**：支持 `--debug` 和 `--dry-run` 模式，便于问题定位和命令预览
+## 核心特性
+
+### 🚀 全面测试能力
+- **一站式性能评估**：覆盖 CPU、内存、磁盘 IO、网络吞吐、线程调度、互斥锁六大核心维度
+- **双引擎 IO 测试**：同时支持 sysbench 和 fio，满足不同场景下的 IO 性能评估需求
+- **矩阵网络测试**：支持串行、并行、全矩阵三种网络测试模式，全面评估集群网络性能
+
+### 📦 智能部署能力
+- **自动依赖分发**：自动编译并分发 sysbench、sshpass 到远程服务器，支持跨架构部署
+- **灵活认证方式**：同时支持 SSH 免密登录和密码认证，适应不同运维场景
+- **配置文件管理**：支持通过 parameter.conf 集中管理所有参数，便于批量配置和版本控制
+
+### 📊 专业报告分析
+- **结构化报告生成**：自动生成包含系统信息、测试配置、详细指标的专业性能报告
+- **多维度对比分析**：支持多服务器对比报告，快速定位性能差异和瓶颈
+- **丰富指标输出**：涵盖 IOPS、吞吐量、延迟（P95/P99）、公平性等关键性能指标
+
+### 🔒 安全保障机制
+- **路径安全验证**：自动检测并阻止使用 tmpfs 等非真实磁盘路径进行 IO 测试
+- **资源预检查**：测试前自动检查磁盘空间、依赖工具、权限等，避免测试失败
+- **进程管理优化**：自动清理残留进程，保护生产环境稳定性
+
+### 🛠️ 易用性设计
+- **一键自动化测试**：单命令启动全流程测试，无需复杂配置
+- **调试与预览**：支持 `--debug` 调试模式和 `--dry-run` 命令预览模式
+- **灵活参数控制**：支持命令行参数、环境变量、配置文件三种参数传递方式
 
 ## 项目结构
 
@@ -48,7 +66,7 @@ $HOME/oscheckperf/
 
 | 目录         | 用途                                                     | 默认路径                        |
 | ---------- | ------------------------------------------------------ | --------------------------- |
-| `output/`  | 最终报告和日志（original_data*, data*, report_benchmark*） | `./output`（当前目录）            |
+| `output/`  | 最终报告和日志（original_data_*, data_*, report_benchmark_*） | `./output`（当前目录）            |
 | `tmp/`     | 临时文件（网络测试结果、fio JSON、sysbench 输出）                      | `$HOME/oscheckperf/tmp`     |
 | `io_test/` | IO测试数据文件（sysbench/fio 创建的测试文件）                         | `$HOME/oscheckperf/io_test` |
 
@@ -85,110 +103,74 @@ export BASE_DIR=/custom/path/to/oscheckperf
 
 ### 1. 安装依赖
 
-#### 方式一：原生命令安装
-
-**基础依赖（必选）**：
-
 ```bash
 # CentOS/RHEL
-sudo yum install -y sysbench
+sudo yum install -y sysbench iperf3 jq
 
 # Ubuntu/Debian
-sudo apt-get install -y sysbench
+sudo apt-get install -y sysbench iperf3 jq
 ```
 
-**完整依赖（推荐）**：
+**可选依赖**：
 
 ```bash
-# CentOS/RHEL
-sudo yum install -y sysbench fio iperf3 jq
+# fio（专业IO测试工具，推荐安装）
+sudo yum install -y fio        # CentOS/RHEL
+sudo apt-get install -y fio    # Ubuntu/Debian
 
-# Ubuntu/Debian
-sudo apt-get install -y sysbench fio iperf3 jq
+# sshpass（密码认证支持）
+sudo yum install -y sshpass    # CentOS/RHEL
+sudo apt-get install -y sshpass # Ubuntu/Debian
 ```
 
-#### 方式二：oscheckperf 自动安装
-
-本工具支持自动编译和分发 sysbench、sshpass 到远程服务器，降低最小额外安装影响。
-
-**单机安装**：
+**自动安装依赖**：
 
 ```bash
-# 安装所有组件（sysbench + sshpass + oscheckperf）
+# 使用 -i 参数自动下载并编译安装 sysbench（需要联网）
 ./oscheckperf -i
 
-# 安装指定组件
-./oscheckperf -i sysbench    # 仅安装 sysbench
-./oscheckperf -i sshpass     # 仅安装 sshpass
-./oscheckperf -i all         # 安装所有组件（默认）
+# 自动编译并分发到远程服务器（需要 root 权限）
+./oscheckperf -i -f server_list
 ```
-
-**多机器安装**：
-
-```bash
-# 从服务器列表文件安装
-./oscheckperf -i -f all-servers
-
-# 直接指定 IP 列表安装
-./oscheckperf -i -f "192.168.1.101 192.168.1.102 192.168.1.103"
-```
-
-**优势**：
-- 无需在远程服务器上安装编译工具和依赖
-- 统一的 sysbench 版本，确保测试结果的一致性
-- 降低对远程服务器的影响，无需修改系统配置
-- 自动配置环境变量，使用方便
 
 ### 2. 运行测试
-
-#### 方式一：不使用配置文件（直接运行）
-
-**基本用法**：
 
 ```bash
 # 运行所有测试（默认）
 ./oscheckperf
-```
 
-**命令行参数覆盖**：
+# 运行指定测试
+./oscheckperf cpu           # 仅 CPU 测试
+./oscheckperf mem           # 仅内存测试
+./oscheckperf io            # 仅 IO 测试
+./oscheckperf network       # 仅网络测试
+./oscheckperf threads       # 仅线程测试
+./oscheckperf mutex         # 仅互斥锁测试
 
-```bash
-# 覆盖测试时长
+# 指定测试时长（默认 30 秒）
 ./oscheckperf DURATION=60
 
-# 覆盖 CPU 最大素数
-./oscheckperf CPU_MAX_PRIME=10000
+# 使用 fio 进行 IO 测试（默认 sysbench）
+./oscheckperf io IO_TOOL=fio
 
-# 禁用特定测试
-./oscheckperf MEMORY_ENABLED=false NETWORK_ENABLED=false
+# 跳过某些测试
+./oscheckperf NETWORK_ENABLED=false
 
-# 使用 fio 进行 IO 测试
-./oscheckperf IO_TOOL=fio
+# 使用配置文件
+./oscheckperf -c parameter.conf
+
+# 干运行模式（预览命令，不执行）
+./oscheckperf --dry-run
 ```
 
-**运行特定测试（子命令）**：
+**子命令说明**：
 
 ```bash
-# 运行 CPU 测试
-./oscheckperf cpu
-
-# 运行内存测试
-./oscheckperf mem
-
-# 运行 IO 测试
-./oscheckperf io
-
-# 运行网络测试（矩阵模式）
-./oscheckperf network -f all-servers NETWORK_MODE=matrix
-
-# 运行线程测试
-./oscheckperf thread
-
-# 运行互斥锁测试
-./oscheckperf mutex
-
 # 运行系统检查（依赖项、权限、磁盘空间、网络）
 ./oscheckperf check
+
+# 仅显示硬件信息报告（CPU、内存、磁盘、网络）
+./oscheckperf hardware
 
 # 运行所有测试（默认）
 ./oscheckperf all
@@ -197,70 +179,25 @@ sudo apt-get install -y sysbench fio iperf3 jq
 **子命令与参数组合使用**：
 
 ```bash
-# 运行 CPU 测试并指定参数
-./oscheckperf cpu DURATION=20 CPU_MAX_PRIME=10000
+# 指定子命令和参数
+./oscheckperf io DURATION=60 IO_TOOL=fio
 
-# 运行 IO 测试并使用 fio
-./oscheckperf io IO_TOOL=fio FIO_DURATION=30
+# 网络测试指定服务器列表
+./oscheckperf network -f server_list
 
-# 运行网络测试并指定服务器列表
-./oscheckperf network -f "192.168.1.101 192.168.1.102" NETWORK_MODE=parallel
-```
-
-#### 方式二：使用配置文件
-
-**创建配置文件**（`parameter.conf`）：
-
-```bash
-# 通用参数
-DURATION=60              # 测试时长（秒）
-OUTPUT_DIR=./output      # 输出目录
-IO_TOOL=sysbench         # IO测试工具（sysbench/fio）
-SSH_PORT=22              # SSH连接端口
-REPORT_HARDWARE_INFO=true  # 在报告中包含硬件信息
-
-# 测试模块开关
-CPU_ENABLED=true         # 启用CPU测试
-MEMORY_ENABLED=true      # 启用内存测试
-IO_ENABLED=true          # 启用IO测试
-NETWORK_ENABLED=true     # 启用网络测试
-THREADS_ENABLED=true     # 启用线程测试
-MUTEX_ENABLED=true       # 启用互斥锁测试
-
-# CPU测试参数
-CPU_THREADS=0            # CPU线程数，0=自动
-CPU_MAX_PRIME=20000      # CPU测试最大素数
-
-# IO测试参数
-IO_TOTAL_SIZE=1G         # IO测试文件总大小
-IO_PATH=$HOME/oscheckperf/io_test  # IO测试路径
-
-# 网络测试参数
-NETWORK_MODE=matrix      # 网络测试模式（serial/parallel/matrix）
-NETWORK_PARALLEL=1       # 并行连接数
-```
-
-**使用配置文件运行**：
-
-```bash
-# 使用配置文件运行测试
-./oscheckperf -p parameter.conf
-
-# 命令行参数会覆盖配置文件中的值
-./oscheckperf -p parameter.conf DURATION=30 IO_TOOL=fio
+# 检查模式配合调试
+./oscheckperf check --debug
 ```
 
 ### 3. 服务器认证方式
 
 #### 方式一：SSH 免密登录（推荐）
 
-**配置步骤**：
-
 ```bash
-# 生成 SSH 密钥（如果还没有）
+# 在本地生成密钥对（如果没有）
 ssh-keygen -t rsa -b 4096
 
-# 将公钥分发到目标服务器
+# 将公钥分发到所有目标服务器
 ssh-copy-id root@192.168.1.101
 ssh-copy-id root@192.168.1.102
 ```
@@ -268,7 +205,7 @@ ssh-copy-id root@192.168.1.102
 **服务器列表文件格式**：
 
 ```bash
-# all-servers 文件内容
+# server_list 文件内容
 192.168.1.101
 192.168.1.102
 192.168.1.103
@@ -277,7 +214,7 @@ ssh-copy-id root@192.168.1.102
 **运行测试**：
 
 ```bash
-./oscheckperf network -f all-servers
+./oscheckperf network -f server_list
 ```
 
 #### 方式二：密码认证（非免密）
@@ -289,13 +226,13 @@ ssh-copy-id root@192.168.1.102
 sudo yum install -y sshpass
 
 # Ubuntu/Debian
-sudo apt-get install -y sshpass
+apt-get install -y sshpass
 ```
 
 **服务器列表文件格式**：
 
 ```bash
-# all-servers 文件内容（格式：IP:用户名:密码）
+# server_list 文件内容（格式：IP:username:password）
 192.168.1.101:root:password123
 192.168.1.102:admin:myp@ssword
 192.168.1.103:user:secret456
@@ -304,59 +241,54 @@ sudo apt-get install -y sshpass
 **运行测试**：
 
 ```bash
-./oscheckperf network -f all-servers
+./oscheckperf network -f server_list
 ```
 
 **注意事项**：
-
 - 密码认证需要安装 `sshpass` 工具
-- 服务器列表中的密码会以明文形式存储，请妥善保管
+- 服务器列表中的密码以明文存储，请妥善保管
 - 支持混合模式：服务器列表中可以同时包含免密和密码认证的服务器
 
 ### 4. 自定义 SSH 端口
 
-**方式一：命令行参数**
-
 ```bash
-# 指定SSH端口为2222
-./oscheckperf -f servers.txt SSH_PORT=2222
+# 方法一：在服务器列表中指定端口
+echo "192.168.1.101:2222" > server_list
 
-# 网络测试指定SSH端口
-./oscheckperf network -f servers.txt SSH_PORT=2222
-```
-
-**方式二：配置文件**
-
-在 `parameter.conf` 中添加：
-
-```bash
-SSH_PORT=2222
-```
-
-**方式三：环境变量**
-
-```bash
+# 方法二：使用环境变量
 export SSH_PORT=2222
-./oscheckperf -f servers.txt
-```
+./oscheckperf network -f server_list
 
-**优先级**：命令行参数 > 配置文件 > 环境变量 > 默认值（22）
+# 方法三：使用参数
+./oscheckperf network -f server_list SSH_PORT=2222
+```
 
 ### 5. 干运行模式（预览命令）
 
 ```bash
-# 使用 --dry-run 参数预览将要执行的命令
+# 预览所有测试命令
 ./oscheckperf --dry-run
 
-# 配合其他参数使用
-./oscheckperf io --dry-run IO_TOOL=fio FIO_PROFILES="read write"
+# 预览指定测试命令
+./oscheckperf io --dry-run
+
+# 预览网络测试命令
+./oscheckperf network -f server_list --dry-run
 ```
 
 ### 6. 查看报告
 
+测试完成后，报告默认保存在 `./output` 目录：
+
 ```bash
-ls -lh output/
+# 查看最终性能报告
 cat output/report_benchmark_*.log
+
+# 查看解析后的测试数据
+cat output/data_*_all_results.log
+
+# 查看原始测试数据
+cat output/original_data_*_all_results.log
 ```
 
 ## 输出指标说明
@@ -366,28 +298,44 @@ cat output/report_benchmark_*.log
 - **events/sec**：每秒执行事件数（越高越好）
 - **avg latency**：平均延迟（越低越好）
 - **P95/P99 latency**：95/99 百分位延迟（越低越好）
-- **Fairness (events)**：线程公平性指标，表示各线程间事件分布的均衡程度（格式为 avg/stddev，stddev 越小表示分布越均匀）
+- **Max latency**：最大延迟（越低越好）
+- **Fairness (events)**：线程事件公平性，表示各线程间事件分布的均衡程度（格式为 avg/stddev，stddev 越小表示分布越均匀）
+- **Fairness (execution time)**：线程执行时间公平性
 
 ### 内存测试
 
+- **Total operations**：总操作数
 - **operations/sec**：每秒内存操作数（越高越好）
 - **throughput**：内存吞吐量 MB/s（越高越好）
 - **avg latency**：平均延迟（越低越好）
 - **P95 latency**：95 百分位延迟（越低越好）
 
-### IO 测试
+### IO 测试（sysbench）
 
-- **IOPS**：每秒 IO 操作数（越高越好）
-- **Bandwidth**：吞吐量 MB/s（越高越好）
-- **Latency**：延迟（越低越好）
-- **fsyncs/s**：每秒 fsync 操作数（仅 sysbench，衡量同步写入性能）
-- **Min/Max/P95/P99 latency**：最小/最大/95/99 百分位延迟（仅 fio）
-- **Device utilization**：设备利用率（仅 fio）
-- **CPU user/system**：CPU 用户态/系统态利用率（仅 fio）
-- **bw_min/bw_max**：最小/最大带宽（仅 fio，反映带宽稳定性）
-- **slat/clat**：提交延迟/完成延迟（仅 fio，slat 指 IO 提交到设备的时间，clat 指设备处理完成的时间）
-- **ctx/majf/minf**：上下文切换/主要页错误/次要页错误（仅 fio，反映系统资源使用情况）
-- **iodepth_level**：IO 队列深度级别（仅 fio，反映 IO 并发程度）
+- **Read IOPS**：每秒读操作数（越高越好）
+- **Write IOPS**：每秒写操作数（越高越好）
+- **Total IOPS**：每秒总 IO 操作数（越高越好）
+- **fsyncs/s**：每秒 fsync 操作数（衡量同步写入性能）
+- **Read BW**：读吞吐量 MB/s（越高越好）
+- **Write BW**：写吞吐量 MB/s（越高越好）
+- **Total BW**：总吞吐量 MB/s（越高越好）
+- **avg latency**：平均延迟（越低越好）
+- **Min/Max latency**：最小/最大延迟（越低越好）
+- **P95/P99 latency**：95/99 百分位延迟（越低越好）
+- **Threads fairness**：线程公平性（events/execution time）
+
+### IO 测试（fio）
+
+- **Read/Write IOPS**：每秒读/写操作数（越高越好）
+- **Read/Write BW**：读/写吞吐量 MB/s（越高越好）
+- **avg latency**：平均延迟（越低越好）
+- **Min/Max/P95/P99 latency**：最小/最大/95/99 百分位延迟（越低越好）
+- **Device utilization**：设备利用率（%）
+- **CPU user/system**：CPU 用户态/系统态利用率（%）
+- **bw_min/bw_max**：最小/最大带宽（反映带宽稳定性）
+- **slat/clat**：提交延迟/完成延迟（slat 指 IO 提交到设备的时间，clat 指设备处理完成的时间）
+- **ctx/majf/minf**：上下文切换/主要页错误/次要页错误（反映系统资源使用情况）
+- **iodepth_level**：IO 队列深度级别（反映 IO 并发程度）
 
 ### IO 压测详细说明
 
@@ -399,12 +347,10 @@ Sysbench 的 fileio 测试分为三个阶段：
    - 在 `IO_PATH` 指定的目录中创建测试文件
    - 默认文件大小为 1G（可通过 `IO_TOTAL_SIZE` 调整）
    - 默认创建 1 个文件（可通过 `SYSBENCH_FILE_NUM` 调整）
-
 2. **run 阶段**：执行实际压测
    - `DURATION` 参数仅控制此阶段的执行时间
    - 对 prepare 阶段创建的文件进行随机读写操作
    - 测试模式默认为 `rndrw`（随机读写），可通过 `SYSBENCH_PROFILES` 调整
-
 3. **cleanup 阶段**：自动清理测试文件
    - 删除 prepare 阶段创建的所有测试文件
    - 测试目录本身不会被删除
@@ -455,11 +401,27 @@ FIO 测试采用不同的工作方式：
 
 ##### Threads 参数
 
-| 参数              | 默认值              | 说明                                    |
-| --------------- | ---------------- | ------------------------------------- |
-| `THREADS_NUM`   | `auto (cores*4)` | 线程数（未设置时自动根据 CPU 核心数计算，公式：cores*4） |
-| `THREADS_YIELDS`| `100`            | 每个线程的 yield 次数                           |
-| `THREADS_LOCKS` | `4`              | 锁数量                                    |
+| 参数               | 默认值              | 说明                                  |
+| ---------------- | ---------------- | ----------------------------------- |
+| `THREADS_NUM`    | `auto (cores*4)` | 线程数（未设置时自动根据 CPU 核心数计算，公式：cores*4） |
+| `THREADS_YIELDS` | `100`            | 每个线程的 yield 次数                      |
+| `THREADS_LOCKS`  | `4`              | 锁数量                                 |
+
+##### Memory 参数
+
+| 参数                  | 默认值    | 说明                      |
+| ------------------- | ------ | ----------------------- |
+| `MEMORY_THREADS`    | `0`    | 内存测试线程数，0=自动（与CPU核心数一致） |
+| `MEMORY_BLOCK_SIZE` | `8K`   | 内存测试块大小                 |
+| `MEMORY_TOTAL_SIZE` | `20G`  | 内存测试总大小（测试数据量）          |
+| `MEMORY_OPER`       | `read` | 内存操作类型（read/write）      |
+
+##### Mutex 参数
+
+| 参数              | 默认值    | 说明            |
+| --------------- | ------ | ------------- |
+| `MUTEX_THREADS` | `0`    | 互斥锁测试线程数，0=自动 |
+| `MUTEX_NUM`     | `1024` | 互斥锁数量         |
 
 ##### 通用参数
 
@@ -495,7 +457,7 @@ FIO 测试采用不同的工作方式：
 - **Bandwidth (MB/s)**：网络带宽（越高越好）
 - **Retrans**：TCP 重传次数（越少越好）
 - **RTT(ms)**：往返时间（格式：平均值 (Min: 最小值, Max: 最大值)）
-- **CPU(%)**：发送端/接收端 CPU 利用率（格式：发送端CPU%/接收端CPU%）
+- **CPU(%)**：发送端/接收端 CPU 利用率（格式：senderCPU%/receiverCPU%）
 
 ### 线程测试
 
@@ -510,13 +472,114 @@ FIO 测试采用不同的工作方式：
 
 ## 依赖工具说明
 
-| 工具       | 必选 | 用途               | 安装命令                      |
-| -------- | -- | ---------------- | ------------------------- |
-| sysbench | 是  | CPU/内存/IO/线程/锁测试 | `yum install -y sysbench` |
-| fio      | 可选 | 专业 IO 压测         | `yum install -y fio`      |
-| iperf3   | 可选 | 网络吞吐测试           | `yum install -y iperf3`   |
-| jq       | 推荐 | JSON 结果解析        | `yum install -y jq`       |
-| sshpass  | 可选 | 密码认证支持           | `yum install -y sshpass`  |
+| 工具       | 必选 | 用途               |
+| -------- | -- | ---------------- |
+| sysbench | 是  | CPU/内存/IO/线程/锁测试 |
+| fio      | 可选 | 专业 IO 压测         |
+| iperf3   | 可选 | 网络吞吐测试           |
+| jq       | 推荐 | JSON 结果解析        |
+| sshpass  | 可选 | 密码认证支持           |
+
+## 执行流程
+
+工具的执行流程如下：
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    oscheckperf 执行流程                      │
+├─────────────────────────────────────────────────────────────┤
+│  1. 参数解析 (parse_args)                                   │
+│     └─ 命令行参数 → 配置文件 → 默认值                        │
+│                                                             │
+│  2. 系统检查 (check_all)                                    │
+│     ├─ 参数验证 (validate_all_parameters)                   │
+│     ├─ 依赖检查 (check_dependencies)                        │
+│     ├─ 权限检查 (check_permissions)                         │
+│     ├─ 磁盘空间检查 (check_disk_space)                      │
+│     ├─ 网络连通性检查 (check_network)                       │
+│     ├─ SSH 连接检查 (check_ssh)                            │
+│     └─ 残留进程清理 (cleanup_residual_processes)            │
+│                                                             │
+│  3. 测试执行 (run_all_selected_tests)                       │
+│     ├─ CPU 测试 (run_cpu_test)                             │
+│     ├─ Memory 测试 (run_memory_test)                       │
+│     ├─ IO 测试 (run_io_test → sysbench/fio)                │
+│     ├─ Network 测试 (run_network_test)                     │
+│     ├─ Threads 测试 (run_threads_test)                     │
+│     └─ Mutex 测试 (run_mutex_test)                         │
+│                                                             │
+│  4. 结果处理                                                │
+│     ├─ 原始数据保存 (original_data_*.log)                   │
+│     ├─ 解析结果保存 (data_*.log)                           │
+│     └─ 报告生成 (report_benchmark_*.log)                   │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### 输出文件说明
+
+| 文件类型 | 路径 | 说明 | 用途 |
+|----------|------|------|------|
+| **原始测试数据** | `output/original_data_*.log` | 所有测试的完整原始输出 | 问题排查、追溯 |
+| **解析结果** | `output/data_*.log` | 结构化的测试结果 | 数据处理、二次分析 |
+| **最终报告** | `output/report_benchmark_*.log` | 格式化的性能报告 | 直接查看、分享 |
+| **sysbench 输出** | `tmp/vb_fileio_*.txt` | sysbench 文本输出 | 调试、详细分析 |
+| **fio 配置** | `tmp/fio_*.fio` | fio 配置文件 | 调试配置 |
+| **fio JSON** | `tmp/fio_*_result_*.json` | fio JSON 结果 | 程序解析 |
+| **网络 JSON** | `tmp/network_*.json` | 网络测试结果 | 程序解析 |
+
+## 实用场景示例
+
+### 生产环境测试
+
+```bash
+# 生产环境完整测试（60秒，fio IO测试）
+./oscheckperf DURATION=60 IO_TOOL=fio IO_TOTAL_SIZE=10G
+
+# 快速验证测试（短时间）
+./oscheckperf DURATION=10
+
+# 仅运行关键测试（CPU、内存、IO）
+./oscheckperf NETWORK_ENABLED=false THREADS_ENABLED=false MUTEX_ENABLED=false
+```
+
+### 数据库场景测试
+
+```bash
+# Vastbase/openGauss 数据库场景（高IOPS要求）
+./oscheckperf io IO_TOOL=fio FIO_PROFILES="randrw read" FIO_NUMJOBS=8 FIO_IODEPTH=64
+
+# MySQL 场景（混合读写）
+./oscheckperf io IO_TOOL=sysbench SYSBENCH_PROFILES="rndrw"
+
+# PostgreSQL 场景（高吞吐量）
+./oscheckperf io IO_TOOL=fio FIO_PROFILES="randrw" FIO_BS=32K FIO_NUMJOBS=16
+```
+
+### 多服务器网络测试
+
+```bash
+# 矩阵模式测试所有服务器间网络
+./oscheckperf network -f all-servers NETWORK_MODE=matrix NETWORK_PARALLEL=4
+
+# 并行模式同时测试
+./oscheckperf network -f all-servers NETWORK_MODE=parallel
+
+# 串行模式逐个测试
+./oscheckperf network -f all-servers NETWORK_MODE=serial
+```
+
+### 硬件信息检查
+
+```bash
+# 仅查看硬件信息
+./oscheckperf hardware
+
+# 检查系统环境（依赖、权限、磁盘、网络）
+./oscheckperf check
+
+# 检查并启用调试模式
+./oscheckperf check --debug
+```
 
 ## 常见问题
 
@@ -559,41 +622,95 @@ FIO 测试采用不同的工作方式：
 
 ## 最佳实践
 
-1. **测试环境**：在独立测试环境运行，避免影响生产业务
-2. **测试时长**：生产环境建议使用较长的测试时长（如 60 秒以上）
-3. **IO 测试路径**：使用实际业务数据所在的磁盘分区，结果更具参考价值
-4. **历史对比**：定期运行测试，保存报告用于历史趋势分析
-5. **多机测试**：网络压测前配置好 SSH 免密登录或准备密码认证配置
-6. **结果解读**：重点关注 P95/P99 延迟，而非仅看平均值
-7. **参数调整**：根据服务器配置调整测试参数，如线程数应与 CPU 核心数匹配
+### 测试策略
+
+1. **基准测试**：部署新服务器后立即运行，建立性能基准线
+2. **定期测试**：每周/每月定期运行，监控性能变化趋势
+3. **变更后测试**：系统变更（内核升级、硬件更换、配置调整）后运行
+4. **对比分析**：使用多服务器对比报告功能分析性能差异
+5. **测试环境**：在独立测试环境运行，避免影响生产业务
+6. **测试时长**：生产环境建议使用较长的测试时长（如 60 秒以上）
+
+### 参数调优建议
+
+```bash
+# 根据 CPU 核心数调整线程数
+# CPU_THREADS=0 表示自动（建议值）
+# THREADS_NUM 默认值为 cores*4
+
+# 对于高 IOPS 场景（如 SSD）
+./oscheckperf io IO_TOOL=fio FIO_NUMJOBS=8 FIO_IODEPTH=64
+
+# 对于高带宽场景（如 RAID）
+./oscheckperf io IO_TOOL=fio FIO_BS=128K FIO_NUMJOBS=4
+
+# 数据库场景推荐（混合读写，16K 块大小）
+./oscheckperf DURATION=120 IO_TOOL=fio FIO_PROFILES="randrw" FIO_BS=16K
+
+# 内存密集型场景
+./oscheckperf mem MEMORY_TOTAL_SIZE=50G MEMORY_BLOCK_SIZE=16K
+
+# CPU 密集型场景
+./oscheckperf cpu CPU_MAX_PRIME=50000
+```
+
+### 结果解读
+
+1. **重点关注 P95/P99 延迟**：而非仅看平均值，尾部延迟更能反映真实用户体验
+2. **IO 测试路径**：使用实际业务数据所在的磁盘分区，结果更具参考价值
+3. **网络测试**：关注带宽、重传次数和 RTT，反映网络稳定性
+4. **线程公平性**：stddev 越小表示各线程负载分布越均匀
+
+### 运行建议
+
+1. **多机测试**：网络压测前配置好 SSH 免密登录或准备密码认证配置
+2. **资源监控**：测试期间可配合 vmstat、iostat、mpstat 等工具监控系统资源
+3. **结果保存**：定期保存报告用于历史趋势分析和问题追溯
 
 ## 许可证
 
 本项目采用 GNU General Public License v3.0 许可证。
 
----
+***
 
 ## English
 
-# Database System Benchmark Tool
+# oscheckperf - System Performance Benchmark Tool
 
-A system-level performance benchmarking tool designed for Vastbase, openGauss, and PostgreSQL databases, supporting comprehensive performance testing to help evaluate server hardware performance boundaries.
+**oscheckperf** is a system-level performance benchmarking tool specifically designed for database scenarios, providing one-stop server hardware performance evaluation capabilities. By automatically testing six core dimensions - CPU, Memory, Disk IO, Network Throughput, Thread Scheduling, and Mutex Lock - it helps users quickly assess server performance boundaries and identify potential bottlenecks.
 
-## Features
+**Core Value**:
+- Facilitates pre-deployment performance validation for databases (Vastbase, openGauss, PostgreSQL, MySQL)
+- Supports cluster network performance evaluation for optimizing distributed architecture design
+- Generates professional performance reports for trend analysis and issue identification
+- Ensures testing safety and protects production environment stability
 
-- ✅ **One-Click Execution**: Automated CPU/Memory/IO/Network/Threads/Mutex testing
-- ✅ **Flexible Parameters**: Control all test parameters through command line arguments
-- ✅ **Configuration File Support**: Manage all parameters through configuration files for batch configuration and version control
-- ✅ **Minimal Dependencies**: Basic mode only requires sysbench
-- ✅ **Multi-Tool Support**: IO testing supports both sysbench and fio
-- ✅ **Multi-Server Support**: Network testing supports multiple IP configurations (supports passwordless and password authentication)
-- ✅ **Password Authentication**: Support username and password configuration in server list, no SSH passwordless login required
-- ✅ **Detailed Reports**: Generate structured test reports
-- ✅ **Remote Distribution**: Automatically compile and distribute sysbench, sshpass to remote servers, supports cross-architecture deployment
-- ✅ **Multiple Network Modes**: Supports serial, parallel and matrix network test modes
-- ✅ **Result Analysis**: Generate multi-server comparison reports for performance analysis and problem location
-- ✅ **Security Enhancement**: Path validation, disk space check, process management optimization, protecting production environment
-- ✅ **Debug Modes**: Support `--debug` and `--dry-run` modes for troubleshooting and command preview
+## Core Features
+
+### 🚀 Comprehensive Testing Capabilities
+- **One-stop Performance Evaluation**: Covers six core dimensions - CPU, Memory, Disk IO, Network Throughput, Thread Scheduling, and Mutex Lock
+- **Dual-Engine IO Testing**: Supports both sysbench and fio for comprehensive IO performance evaluation
+- **Matrix Network Testing**: Three network testing modes - serial, parallel, and full matrix for complete cluster network assessment
+
+### 📦 Intelligent Deployment
+- **Automatic Dependency Distribution**: Automatically compiles and distributes sysbench, sshpass to remote servers, supports cross-architecture deployment
+- **Flexible Authentication**: Supports both SSH passwordless login and password authentication for different operation scenarios
+- **Configuration File Management**: Centralized parameter management via parameter.conf for batch configuration and version control
+
+### 📊 Professional Report Analysis
+- **Structured Report Generation**: Automatically generates professional performance reports with system info, test configuration, and detailed metrics
+- **Multi-dimensional Comparison**: Supports multi-server comparison reports for quick performance difference and bottleneck identification
+- **Rich Metrics Output**: Covers IOPS, Throughput, Latency (P95/P99), Fairness and other key performance indicators
+
+### 🔒 Security Assurance
+- **Path Security Validation**: Automatically detects and blocks IO testing on non-physical disk paths like tmpfs
+- **Resource Pre-check**: Automatically verifies disk space, dependencies, permissions before testing to prevent failures
+- **Process Management**: Automatically cleans up residual processes to protect production environment stability
+
+### 🛠️ User-friendly Design
+- **One-click Automated Testing**: Single command to start full workflow testing without complex configuration
+- **Debug & Preview**: Supports `--debug` mode and `--dry-run` command preview mode
+- **Flexible Parameter Control**: Three parameter passing methods - command line, environment variables, and configuration files
 
 ## Project Structure
 
@@ -616,30 +733,30 @@ $HOME/oscheckperf/
 │   └── fio_test_file.*       # Test files created by fio (retained)
 ├── tools/
 │   └── skill.md              # Development documentation
-├── README.md                 # Documentation (Chinese/English)
-└── parameter.conf            # Configuration file template
+├── parameter.conf            # Configuration file template
+└── README.md                 # Documentation (Chinese/English)
 ```
 
 ### Directory Structure Description
 
 | Directory | Purpose | Default Path |
 |-----------|---------|--------------|
-| `output/` | Final reports and logs (original_data*, data*, report_benchmark*) | `./output` (current directory) |
+| `output/` | Final reports and logs (original_data_*, data_*, report_benchmark_*) | `./output` (current directory) |
 | `tmp/` | Temporary files (network test results, fio JSON, sysbench output) | `$HOME/oscheckperf/tmp` |
 | `io_test/` | IO test data files (test files created by sysbench/fio) | `$HOME/oscheckperf/io_test` |
 
 ### File Type Description
 
-| File Type | Location | Description |
-|-----------|----------|-------------|
-| **Raw test data** | `./output/original_data_*` | Summary of all raw test outputs |
-| **Parsed results** | `./output/data_*` | Parsed structured test results |
-| **Final report** | `./output/report_benchmark_*` | Formatted performance report |
-| **sysbench output** | `$HOME/oscheckperf/tmp/vb_fileio_*.txt` | sysbench text output (temporary) |
-| **fio config** | `$HOME/oscheckperf/tmp/fio_*.fio` | fio configuration files (temporary) |
-| **fio JSON** | `$HOME/oscheckperf/tmp/fio_*_result_*.json` | fio JSON results (temporary) |
-| **Network JSON** | `$HOME/oscheckperf/tmp/network_*.json` | Network test results (temporary) |
-| **IO test files** | `$HOME/oscheckperf/io_test/` | Test files created by sysbench/fio |
+| File Type | Location | Description | Usage |
+|-----------|----------|-------------|-------|
+| **Raw test data** | `./output/original_data_*` | Summary of all raw test output | Troubleshooting, traceability |
+| **Parsed results** | `./output/data_*` | Structured parsed test results | Data processing, secondary analysis |
+| **Final report** | `./output/report_benchmark_*` | Formatted performance report | Direct viewing, sharing |
+| **sysbench output** | `$HOME/oscheckperf/tmp/vb_fileio_*.txt` | sysbench text output (temporary) | Debugging, detailed analysis |
+| **fio config** | `$HOME/oscheckperf/tmp/fio_*.fio` | fio configuration files (temporary) | Debugging configuration |
+| **fio JSON** | `$HOME/oscheckperf/tmp/fio_*_result_*.json` | fio JSON results (temporary) | Program parsing |
+| **Network JSON** | `$HOME/oscheckperf/tmp/network_*.json` | Network test results (temporary) | Program parsing |
+| **IO test files** | `$HOME/oscheckperf/io_test/` | Test files created by sysbench/fio | Testing purpose |
 
 ### Path Configuration
 
@@ -652,135 +769,110 @@ export BASE_DIR=/custom/path/to/oscheckperf
 ```
 
 **Environment Variable Priority**:
-- `BASE_DIR` > Default `$HOME/oscheckperf`
-- `IO_PATH` > Default `$BASE_DIR/io_test`  
-- `OUTPUT_DIR` > Default `./output`
+
+- `BASE_DIR` > Default value `$HOME/oscheckperf`
+- `IO_PATH` > Default value `$BASE_DIR/io_test`
+- `OUTPUT_DIR` > Default value `./output`
 
 ## Quick Start
 
 ### 1. Install Dependencies
 
-#### Basic Dependencies (Required)
 ```bash
 # CentOS/RHEL
-sudo yum install -y sysbench
+sudo yum install -y sysbench iperf3 jq
 
 # Ubuntu/Debian
-sudo apt-get install -y sysbench
+sudo apt-get install -y sysbench iperf3 jq
 ```
 
-#### Full Dependencies (Recommended)
-```bash
-# CentOS/RHEL
-sudo yum install -y sysbench fio iperf3 jq
+**Optional Dependencies**:
 
-# Ubuntu/Debian
-sudo apt-get install -y sysbench fio iperf3 jq
+```bash
+# fio (professional IO testing tool, recommended)
+sudo yum install -y fio        # CentOS/RHEL
+sudo apt-get install -y fio    # Ubuntu/Debian
+
+# sshpass (password authentication support)
+sudo yum install -y sshpass    # CentOS/RHEL
+sudo apt-get install -y sshpass # Ubuntu/Debian
 ```
 
-#### Automatic Installation (Recommended)
+**Automatic Dependency Installation**:
 
-Single machine installation:
 ```bash
+# Use -i flag to automatically download and compile sysbench (requires internet)
 ./oscheckperf -i
+
+# Automatically compile and distribute to remote servers (requires root)
+./oscheckperf -i -f server_list
 ```
 
-Multi-machine installation:
+### 2. Run Tests
+
 ```bash
-./oscheckperf -i -f all-servers
-```
-
-### 2. Supported Databases
-
-- ✅ **Vastbase**: Huawei enterprise-grade database
-- ✅ **openGauss**: Open source relational database
-- ✅ **PostgreSQL**: Open source object-relational database
-- ✅ **MySQL**: Open source relational database
-
-### 3. Run Tests
-
-#### Basic Usage
-```bash
+# Run all tests (default)
 ./oscheckperf
-```
 
-#### Command line parameter override
+# Run specific test
+./oscheckperf cpu           # CPU test only
+./oscheckperf mem           # Memory test only
+./oscheckperf io            # IO test only
+./oscheckperf network       # Network test only
+./oscheckperf threads       # Threads test only
+./oscheckperf mutex         # Mutex test only
 
-```bash
-# Override test duration
+# Specify test duration (default 30 seconds)
 ./oscheckperf DURATION=60
 
-# Override CPU max prime
-./oscheckperf CPU_MAX_PRIME=10000
+# Use fio for IO test (default sysbench)
+./oscheckperf io IO_TOOL=fio
 
-# Disable specific tests
-./oscheckperf MEMORY_ENABLED=false NETWORK_ENABLED=false
+# Skip certain tests
+./oscheckperf NETWORK_ENABLED=false
 
-# Use fio for IO test
-./oscheckperf IO_TOOL=fio
+# Use configuration file
+./oscheckperf -c parameter.conf
+
+# Dry-run mode (preview commands without execution)
+./oscheckperf --dry-run
 ```
 
-#### Run specific test (subcommand)
+**Subcommands**:
 
 ```bash
-# Run CPU test
-./oscheckperf cpu
-
-# Run memory test
-./oscheckperf mem
-
-# Run IO test
-./oscheckperf io
-
-# Run network test (matrix mode)
-./oscheckperf network -f all-servers NETWORK_MODE=matrix
-
-# Run threads test
-./oscheckperf thread
-
-# Run mutex test
-./oscheckperf mutex
-
 # Run system checks (dependencies, permissions, disk space, network)
 ./oscheckperf check
+
+# Show hardware information report (CPU, memory, disk, network)
+./oscheckperf hardware
 
 # Run all tests (default)
 ./oscheckperf all
 ```
 
-#### Combine subcommand with parameters
+**Combine Subcommands with Parameters**:
 
 ```bash
-# Run CPU test with specific parameters
-./oscheckperf cpu DURATION=20 CPU_MAX_PRIME=10000
+# Specify subcommand with parameters
+./oscheckperf io DURATION=60 IO_TOOL=fio
 
-# Run IO test with fio
-./oscheckperf io IO_TOOL=fio FIO_DURATION=30
+# Network test with server list
+./oscheckperf network -f server_list
 
-# Run network test with server list
-./oscheckperf network -f "192.168.1.101 192.168.1.102" NETWORK_MODE=parallel
+# Check mode with debug
+./oscheckperf check --debug
 ```
 
-#### Dry Run Mode (Preview Commands)
-```bash
-# Use --dry-run to preview commands that will be executed
-./oscheckperf --dry-run
-
-# Combine with other parameters
-./oscheckperf io --dry-run IO_TOOL=fio FIO_PROFILES="read write"
-```
-
-### 4. Server Authentication Methods
+### 3. Server Authentication Methods
 
 #### Method 1: SSH Passwordless Login (Recommended)
 
-**Configuration Steps**:
-
 ```bash
-# Generate SSH key (if not exists)
+# Generate key pair locally (if not exists)
 ssh-keygen -t rsa -b 4096
 
-# Distribute public key to target servers
+# Distribute public key to all target servers
 ssh-copy-id root@192.168.1.101
 ssh-copy-id root@192.168.1.102
 ```
@@ -788,7 +880,7 @@ ssh-copy-id root@192.168.1.102
 **Server List File Format**:
 
 ```bash
-# all-servers file content
+# server_list file content
 192.168.1.101
 192.168.1.102
 192.168.1.103
@@ -797,7 +889,456 @@ ssh-copy-id root@192.168.1.102
 **Run Test**:
 
 ```bash
-./oscheckperf network -f all-servers
+./oscheckperf network -f server_list
 ```
 
-#### Method 2: Password Authentication (Non-passwordless
+#### Method 2: Password Authentication (Non-passwordless)
+
+**Install Dependencies**:
+
+```bash
+# CentOS/RHEL
+sudo yum install -y sshpass
+
+# Ubuntu/Debian
+apt-get install -y sshpass
+```
+
+**Server List File Format**:
+
+```bash
+# server_list file content (format: IP:username:password)
+192.168.1.101:root:password123
+192.168.1.102:admin:myp@ssword
+192.168.1.103:user:secret456
+```
+
+**Run Test**:
+
+```bash
+./oscheckperf network -f server_list
+```
+
+**Notes**:
+- Password authentication requires `sshpass` tool
+- Passwords in server list are stored in plain text, please keep them secure
+- Mixed mode is supported: server list can contain both passwordless and password authenticated servers
+
+### 4. Custom SSH Port
+
+```bash
+# Method 1: Specify port in server list
+echo "192.168.1.101:2222" > server_list
+
+# Method 2: Use environment variable
+export SSH_PORT=2222
+./oscheckperf network -f server_list
+
+# Method 3: Use parameter
+./oscheckperf network -f server_list SSH_PORT=2222
+```
+
+### 5. Dry-run Mode (Preview Commands)
+
+```bash
+# Preview all test commands
+./oscheckperf --dry-run
+
+# Preview specific test commands
+./oscheckperf io --dry-run
+
+# Preview network test commands
+./oscheckperf network -f server_list --dry-run
+```
+
+### 6. View Reports
+
+After testing, reports are saved in `./output` directory by default:
+
+```bash
+# View final performance report
+cat output/report_benchmark_*.log
+
+# View parsed test data
+cat output/data_*_all_results.log
+
+# View raw test data
+cat output/original_data_*_all_results.log
+```
+
+## Output Metrics
+
+### CPU Test
+
+- **events/sec**: Events per second (higher is better)
+- **avg latency**: Average latency in ms (lower is better)
+- **P95/P99 latency**: 95th/99th percentile latency in ms (lower is better)
+- **Max latency**: Maximum latency in ms (lower is better)
+- **Fairness (events)**: Thread events fairness (avg/stddev format, lower stddev means better distribution)
+- **Fairness (execution time)**: Thread execution time fairness
+
+### Memory Test
+
+- **Total operations**: Total number of operations
+- **operations/sec**: Memory operations per second (higher is better)
+- **throughput**: Memory throughput in MB/s (higher is better)
+- **avg latency**: Average latency in ms (lower is better)
+- **P95 latency**: 95th percentile latency in ms (lower is better)
+
+### IO Test (sysbench)
+
+- **Read/Write IOPS**: Read/write operations per second (higher is better)
+- **Total IOPS**: Total IO operations per second (higher is better)
+- **fsyncs/s**: Fsync operations per second (measures synchronous write performance)
+- **Read/Write BW**: Read/write bandwidth in MB/s (higher is better)
+- **Total BW**: Total bandwidth in MB/s (higher is better)
+- **avg latency**: Average latency in ms (lower is better)
+- **Min/Max/P95/P99 latency**: Latency percentiles in ms (lower is better)
+- **Threads fairness**: Thread fairness (events/execution time)
+
+### IO Test (fio)
+
+- **Read/Write IOPS**: Read/write operations per second (higher is better)
+- **Read/Write BW**: Read/write bandwidth in MB/s (higher is better)
+- **avg latency**: Average latency in ms (lower is better)
+- **Min/Max/P95/P99 latency**: Latency percentiles in ms (lower is better)
+- **Device utilization**: Device utilization (%)
+- **CPU user/system**: CPU user/system utilization (%)
+- **bw_min/bw_max**: Minimum/maximum bandwidth (reflects bandwidth stability)
+- **slat/clat**: Submit latency/Completion latency (slat is time to submit IO to device, clat is time for device to complete)
+- **ctx/majf/minf**: Context switches/Major page faults/Minor page faults (reflects system resource usage)
+- **iodepth_level**: IO queue depth level (reflects IO concurrency)
+
+### IO Benchmark Detailed Description
+
+#### Sysbench fileio Workflow
+
+Sysbench fileio test consists of three phases:
+
+1. **Prepare phase**: Create test files
+   - Create test files in the directory specified by `IO_PATH`
+   - Default file size is 1G (adjustable via `IO_TOTAL_SIZE`)
+   - Default creates 1 file (adjustable via `SYSBENCH_FILE_NUM`)
+2. **Run phase**: Execute actual benchmark
+   - `DURATION` parameter only controls the execution time of this phase
+   - Perform random read/write operations on files created in prepare phase
+   - Default test mode is `rndrw` (random read/write), adjustable via `SYSBENCH_PROFILES`
+3. **Cleanup phase**: Automatically clean up test files
+   - Delete all test files created in prepare phase
+   - The test directory itself is not deleted
+
+#### FIO Workflow
+
+FIO testing uses a different approach:
+
+1. **Configuration generation**: Generate `.fio` configuration file based on parameters
+2. **Test execution**: FIO automatically creates test files during runtime
+3. **File handling**: FIO does not automatically delete files after testing; the script preserves result files
+
+#### Important Notes
+
+**IO_PATH parameter**:
+
+- Default test path is `$HOME/oscheckperf/io_test`
+- **Do NOT use `/tmp` directory**: On some servers, `/tmp` is tmpfs (memory filesystem), which would result in inaccurate test results (testing memory instead of disk)
+- It is recommended to use the disk partition where actual business data resides for more relevant results
+- Ensure sufficient available space on the target partition (at least larger than `IO_TOTAL_SIZE`)
+
+**Common Parameters**:
+
+##### sysbench Parameters
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `SYSBENCH_PROFILES` | `rndrw` | sysbench test modes, space-separated (seqwr/seqrewr/seqrd/rndrd/rndwr/rndrw) |
+| `SYSBENCH_FILE_NUM` | `4` | Number of sysbench test files |
+| `SYSBENCH_BLOCK_SIZE` | `16K` | sysbench block size |
+| `SYSBENCH_IO_MODE` | `sync` | sysbench IO mode (sync/async) |
+| `SYSBENCH_EXTRA_FLAGS` | `direct` | sysbench extra flags (direct/sync) |
+| `SYSBENCH_THREADS` | `4` | sysbench threads |
+| `SYSBENCH_DURATION` | `DURATION` | sysbench IO test duration |
+
+##### fio Parameters
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `FIO_PROFILES` | `randrw` | fio test modes, space-separated (read/write/randread/randwrite/rw/randrw/trim/randtrim/trimwrite) |
+| `FIO_BS` | `16K` | fio block size (optimized for database scenarios) |
+| `FIO_IODEPTH` | `32` | fio I/O depth |
+| `FIO_NUMJOBS` | `4` | fio worker threads |
+| `FIO_DIRECT` | `1` | fio direct I/O mode |
+| `FIO_FILE_NUM` | `4` | Number of fio test files (simulating multi-data file scenarios) |
+| `FIO_IOENGINE` | `libaio` | fio IO engine (libaio/sync/posixaio) |
+| `FIO_DURATION` | `DURATION` | fio test duration |
+
+##### Threads Parameters
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `THREADS_NUM` | `auto (cores*4)` | Number of threads (auto-calculated based on CPU cores when not set, formula: cores*4) |
+| `THREADS_YIELDS` | `100` | Number of yields per thread |
+| `THREADS_LOCKS` | `4` | Number of locks |
+
+##### Memory Parameters
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `MEMORY_THREADS` | `0` | Memory test threads, 0=auto (same as CPU cores) |
+| `MEMORY_BLOCK_SIZE` | `8K` | Memory test block size |
+| `MEMORY_TOTAL_SIZE` | `20G` | Total memory test size |
+| `MEMORY_OPER` | `read` | Memory operation type (read/write) |
+
+##### Mutex Parameters
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `MUTEX_THREADS` | `0` | Mutex test threads, 0=auto |
+| `MUTEX_NUM` | `1024` | Number of mutex locks |
+
+##### Common Parameters
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `IO_PATH` | `$HOME/oscheckperf/io_test` | Test file directory (alternative to IO_TEST_PATH) |
+| `IO_TOTAL_SIZE` | `1G` | Total test file size (common for sysbench and fio) |
+| `IO_TOOL` | `sysbench` | IO test tool (sysbench/fio) |
+
+##### Parameter Description
+
+**FIO_FILE_NUM**:
+
+- Sets the number of test files, default is 4
+- When `FIO_FILE_NUM` is configured, each file size = `IO_TOTAL_SIZE / FIO_FILE_NUM`
+- Example: `IO_TOTAL_SIZE=1G`, `FIO_FILE_NUM=4` → 256M per file
+
+**Examples**:
+
+```bash
+# Use sysbench for random read/write test
+./oscheckperf io DURATION=60 IO_TOTAL_SIZE=2G
+
+# Use fio for sequential read test
+./oscheckperf io IO_TOOL=fio FIO_PROFILES=read FIO_DURATION=60
+
+# Specify test path
+./oscheckperf io IO_PATH=/data/test
+```
+
+### Network Test
+
+- **Bandwidth (MB/s)**: Network bandwidth (higher is better)
+- **Retrans**: TCP retransmit count (lower is better)
+- **RTT(ms)**: Round Trip Time (format: average (Min: min, Max: max))
+- **CPU(%)**: Sender/receiver CPU utilization (format: senderCPU%/receiverCPU%)
+
+### Threads Test
+
+- **events/sec**: Thread events per second (higher is better)
+- **latency**: Thread scheduling latency (lower is better)
+
+### Mutex Test
+
+- **transactions**: Number of transactions (higher is better)
+- **TPS**: Transactions per second (higher is better)
+- **latency**: Lock wait latency (lower is better)
+
+## Dependencies Description
+
+| Tool | Required | Purpose |
+|------|----------|---------|
+| sysbench | Yes | CPU/Memory/IO/Threads/Lock testing |
+| fio | Optional | Professional IO benchmarking |
+| iperf3 | Optional | Network throughput testing |
+| jq | Recommended | JSON result parsing |
+| sshpass | Optional | Password authentication support |
+
+## Execution Flow
+
+The execution flow of oscheckperf:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    oscheckperf Execution Flow               │
+├─────────────────────────────────────────────────────────────┤
+│  1. Parameter Parsing (parse_args)                          │
+│     └─ Command line → Config file → Default values          │
+│                                                             │
+│  2. System Checks (check_all)                               │
+│     ├─ Parameter validation                                 │
+│     ├─ Dependency check                                    │
+│     ├─ Permission check                                    │
+│     ├─ Disk space check                                    │
+│     ├─ Network connectivity check                          │
+│     ├─ SSH connectivity check                              │
+│     └─ Residual process cleanup                            │
+│                                                             │
+│  3. Test Execution (run_all_selected_tests)                │
+│     ├─ CPU test                                            │
+│     ├─ Memory test                                         │
+│     ├─ IO test (sysbench/fio)                              │
+│     ├─ Network test                                        │
+│     ├─ Threads test                                        │
+│     └─ Mutex test                                          │
+│                                                             │
+│  4. Result Processing                                      │
+│     ├─ Raw data saving (original_data_*.log)               │
+│     ├─ Parsed results saving (data_*.log)                  │
+│     └─ Report generation (report_benchmark_*.log)          │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Output Files Description
+
+| File Type | Path | Description | Usage |
+|-----------|------|-------------|-------|
+| **Raw test data** | `output/original_data_*.log` | Complete raw output of all tests | Troubleshooting, traceability |
+| **Parsed results** | `output/data_*.log` | Structured test results | Data processing, secondary analysis |
+| **Final report** | `output/report_benchmark_*.log` | Formatted performance report | Direct viewing, sharing |
+| **sysbench output** | `tmp/vb_fileio_*.txt` | sysbench text output | Debugging, detailed analysis |
+| **fio config** | `tmp/fio_*.fio` | fio configuration files | Debugging configuration |
+| **fio JSON** | `tmp/fio_*_result_*.json` | fio JSON results | Program parsing |
+| **Network JSON** | `tmp/network_*.json` | Network test results | Program parsing |
+
+## Practical Usage Examples
+
+### Production Environment Testing
+
+```bash
+# Complete production test (60 seconds, fio IO test)
+./oscheckperf DURATION=60 IO_TOOL=fio IO_TOTAL_SIZE=10G
+
+# Quick validation test (short duration)
+./oscheckperf DURATION=10
+
+# Run only critical tests (CPU, Memory, IO)
+./oscheckperf NETWORK_ENABLED=false THREADS_ENABLED=false MUTEX_ENABLED=false
+```
+
+### Database Scenario Testing
+
+```bash
+# Vastbase/openGauss scenario (high IOPS requirement)
+./oscheckperf io IO_TOOL=fio FIO_PROFILES="randrw read" FIO_NUMJOBS=8 FIO_IODEPTH=64
+
+# MySQL scenario (mixed read/write)
+./oscheckperf io IO_TOOL=sysbench SYSBENCH_PROFILES="rndrw"
+
+# PostgreSQL scenario (high throughput)
+./oscheckperf io IO_TOOL=fio FIO_PROFILES="randrw" FIO_BS=32K FIO_NUMJOBS=16
+```
+
+### Multi-server Network Testing
+
+```bash
+# Matrix mode - test all server pairs
+./oscheckperf network -f all-servers NETWORK_MODE=matrix NETWORK_PARALLEL=4
+
+# Parallel mode - test all clients simultaneously
+./oscheckperf network -f all-servers NETWORK_MODE=parallel
+
+# Serial mode - test clients sequentially
+./oscheckperf network -f all-servers NETWORK_MODE=serial
+```
+
+### Hardware Information Check
+
+```bash
+# Show hardware information only
+./oscheckperf hardware
+
+# Run system checks
+./oscheckperf check
+
+# Run checks with debug mode
+./oscheckperf check --debug
+```
+
+## FAQ
+
+### Q1: Does testing require root privileges?
+
+**A**: Most tests do not require root privileges. The script supports running as a regular user, but `sudo` is recommended for:
+
+- fio direct IO mode (enabled by default): requires bypassing OS cache for real disk testing
+- Installing dependency packages
+- It is recommended to run `./oscheckperf check` to verify system environment before testing
+
+### Q2: Will testing delete data?
+
+**A**: Test files are only written to the specified directory (default `$HOME/oscheckperf/io_test`) and can be automatically cleaned after testing
+
+### Q3: How to customize IO test path?
+
+**A**: Use the `IO_PATH` parameter: `./oscheckperf io IO_PATH=/data`
+
+### Q4: What is the difference between NETWORK_MODE and NETWORK_PARALLEL?
+
+**A**:
+
+- **NETWORK_MODE**: Controls how multiple client tests are executed
+  - `serial`: Execute client tests one by one, wait for one to complete before starting the next
+  - `parallel`: Execute all client tests simultaneously
+  - `matrix`: Execute full matrix cross-testing (test between every pair of servers)
+- **NETWORK_PARALLEL**: Controls the number of parallel connections for each iperf3 test, effective in all modes
+  - Example: `NETWORK_PARALLEL=4` means each test uses 4 parallel connections
+
+**Examples**:
+
+```bash
+# Serial execution with 4 parallel connections per test
+./oscheckperf network -f all-servers NETWORK_MODE=serial NETWORK_PARALLEL=4
+
+# Parallel execution with 4 parallel connections per test
+./oscheckperf network -f all-servers NETWORK_MODE=parallel NETWORK_PARALLEL=4
+```
+
+## Best Practices
+
+### Testing Strategy
+
+1. **Baseline Testing**: Run immediately after deploying new servers to establish performance baseline
+2. **Periodic Testing**: Run weekly/monthly to monitor performance trends
+3. **Post-Change Testing**: Run after system changes (kernel upgrade, hardware change, configuration adjustment)
+4. **Comparison Analysis**: Use multi-server comparison reports to analyze performance differences
+5. **Test Environment**: Run in isolated test environment to avoid impacting production
+6. **Test Duration**: Use longer duration (60+ seconds) for production environments
+
+### Parameter Tuning Recommendations
+
+```bash
+# Adjust threads based on CPU cores
+# CPU_THREADS=0 means auto (recommended)
+# THREADS_NUM defaults to cores*4
+
+# For high IOPS scenarios (e.g., SSD)
+./oscheckperf io IO_TOOL=fio FIO_NUMJOBS=8 FIO_IODEPTH=64
+
+# For high bandwidth scenarios (e.g., RAID)
+./oscheckperf io IO_TOOL=fio FIO_BS=128K FIO_NUMJOBS=4
+
+# Database scenario recommendation (mixed read/write, 16K block size)
+./oscheckperf DURATION=120 IO_TOOL=fio FIO_PROFILES="randrw" FIO_BS=16K
+
+# Memory-intensive scenarios
+./oscheckperf mem MEMORY_TOTAL_SIZE=50G MEMORY_BLOCK_SIZE=16K
+
+# CPU-intensive scenarios
+./oscheckperf cpu CPU_MAX_PRIME=50000
+```
+
+### Result Interpretation
+
+1. **Focus on P95/P99 latency**: Tail latency better reflects real user experience than average
+2. **IO test path**: Use disk partition where actual business data resides for more relevant results
+3. **Network test**: Focus on bandwidth, retransmit count, and RTT for network stability
+4. **Thread fairness**: Lower stddev indicates better load distribution across threads
+
+### Running Recommendations
+
+1. **Multi-server testing**: Configure SSH passwordless login or prepare password authentication before network testing
+2. **Resource monitoring**: Use vmstat, iostat, mpstat during testing to monitor system resources
+3. **Result preservation**: Save reports regularly for historical trend analysis and issue tracking
+
+## License
+
+This project is licensed under the GNU General Public License v3.0.

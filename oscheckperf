@@ -1,7 +1,7 @@
 #!/bin/bash
 #--------------------------------------------------------------------------------
 #-- File name:   oscheckperf
-#-- Version:     v0.8.11
+#-- Version:     v0.8.12
 #-- Purpose:     Database System Benchmark Tool
 #-- Author:      Wanping Pan 
 #-- Description: One-click system benchmarking tool, supports configuration via config file or command line parameters
@@ -11,6 +11,451 @@
 # This ensures report generation happens regardless of individual test failures
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# ================================================================================
+# Generic Result Parsing Framework
+# ================================================================================
+
+# Generic test result parser for report generation
+# Usage: parse_test_results <input_file> <output_file> <test_type> <start_pattern> <end_patterns> <output_format> <headers> <field_specs>
+# Field specs format: "field_name|pattern|extract_method|default_value[;field_name|pattern|extract_method|default_value...]"
+# Extract methods: last_field, awk_1, awk_nf, grep_p, custom_awk:expression
+parse_test_results() {
+    local input_file="$1"
+    local output_file="$2"
+    local test_type="$3"
+    local start_pattern="$4"
+    local end_patterns="$5"
+    local output_format="$6"
+    local headers="$7"
+    local field_specs="$8"
+    
+    if [ ! -f "$input_file" ]; then
+        echo "  Test not executed" >> "$output_file"
+        return
+    fi
+    
+    if ! grep -qE "$start_pattern" "$input_file" 2>/dev/null; then
+        echo "  Test not executed" >> "$output_file"
+        return
+    fi
+    
+    echo "  ${test_type} Test Results" >> "$output_file"
+    echo "  ------------------------------------------------------------------------------------------" >> "$output_file"
+    printf "  %s\n" "$headers" >> "$output_file"
+    echo "  ------------------------------------------------------------------------------------------" >> "$output_file"
+    
+    local in_section=false
+    local current_server_ip=""
+    local last_testing_ip=""
+    
+    declare -A field_values
+    
+    IFS=';' read -ra fields <<< "$field_specs"
+    for field in "${fields[@]}"; do
+        IFS='|' read -r field_name pattern extract_method default_val <<< "$field"
+        field_values["$field_name"]="$default_val"
+    done
+    
+    while IFS= read -r line; do
+        if [[ "$line" =~ "Testing server" ]]; then
+            last_testing_ip=$(echo "$line" | grep -oP 'Testing server [0-9]+/[0-9]+: \K[0-9.]+' || echo "")
+            if [ "$in_section" = true ] && [ -n "$current_server_ip" ]; then
+                printf "  $output_format\n" "${field_values[@]}" >> "$output_file"
+            fi
+            in_section=false
+            current_server_ip=""
+            for field in "${fields[@]}"; do
+                IFS='|' read -r field_name pattern extract_method default_val <<< "$field"
+                field_values["$field_name"]="$default_val"
+            done
+        elif [[ "$line" =~ $start_pattern ]]; then
+            if [ "$in_section" = true ] && [ -n "$current_server_ip" ]; then
+                printf "  $output_format\n" "${field_values[@]}" >> "$output_file"
+            fi
+            in_section=true
+            current_server_ip=$(echo "$line" | grep -oP 'Server: \K[0-9.]+' || echo "$last_testing_ip" || echo "N/A")
+            field_values["server_ip"]="$current_server_ip"
+            for field in "${fields[@]}"; do
+                IFS='|' read -r field_name pattern extract_method default_val <<< "$field"
+                if [ "$field_name" != "server_ip" ]; then
+                    field_values["$field_name"]="$default_val"
+                fi
+            done
+        elif [[ "$line" =~ ($end_patterns) ]]; then
+            if [ "$in_section" = true ] && [ -n "$current_server_ip" ]; then
+                printf "  $output_format\n" "${field_values[@]}" >> "$output_file"
+            fi
+            in_section=false
+            current_server_ip=""
+            for field in "${fields[@]}"; do
+                IFS='|' read -r field_name pattern extract_method default_val <<< "$field"
+                field_values["$field_name"]="$default_val"
+            done
+        elif [ "$in_section" = true ]; then
+            for field in "${fields[@]}"; do
+                IFS='|' read -r field_name pattern extract_method default_val <<< "$field"
+                if [ "$field_name" = "server_ip" ]; then
+                    continue
+                fi
+                if [[ "$line" =~ $pattern ]]; then
+                    case "$extract_method" in
+                        "last_field")
+                            field_values["$field_name"]=$(echo "$line" | awk '{print $NF}' | tr -d ',')
+                            ;;
+                        "awk_1")
+                            field_values["$field_name"]=$(echo "$line" | awk '{print $1}')
+                            ;;
+                        "awk_nf_minus_1")
+                            field_values["$field_name"]=$(echo "$line" | awk '{print $(NF-1)}')
+                            ;;
+                        "grep_p")
+                            field_values["$field_name"]=$(echo "$line" | grep -oP "$pattern" | awk '{print $NF}')
+                            ;;
+                        "custom_awk:events_per_sec")
+                            field_values["$field_name"]=$(echo "$line" | awk -F'[()]' '{print $2}' | awk '{print $1}')
+                            ;;
+                        "custom_awk:total_operations")
+                            field_values["$field_name"]=$(echo "$line" | awk '{print $NF}')
+                            ;;
+                        "custom_awk:total_time")
+                            field_values["$field_name"]=$(echo "$line" | awk '{print $NF}' | tr -d 's')
+                            ;;
+                        "custom_awk:fairness")
+                            field_values["$field_name"]=$(echo "$line" | awk '{print $NF}')
+                            ;;
+                        "custom_awk:fairness_threads")
+                            field_values["$field_name"]=$(echo "$line" | awk '{print $3}')
+                            ;;
+                        *)
+                            field_values["$field_name"]=$(echo "$line" | awk '{print $NF}' | tr -d ',')
+                            ;;
+                    esac
+                fi
+            done
+        fi
+    done < "$input_file"
+    
+    if [ "$in_section" = true ] && [ -n "$current_server_ip" ]; then
+        printf "  $output_format\n" "${field_values[@]}" >> "$output_file"
+    fi
+}
+
+# Calculate EPS (Events Per Second) from events and time
+calc_eps() {
+    local events="$1"
+    local time="$2"
+    if [ -n "$events" ] && [ -n "$time" ] && [ "$time" != "0" ]; then
+        awk "BEGIN {printf \"%.2f\", $events / $time}" 2>/dev/null || echo "N/A"
+    else
+        echo "N/A"
+    fi
+}
+
+# ================================================================================
+# Report Parsing Functions using Generic Framework
+# ================================================================================
+
+parse_cpu_report() {
+    local input_file="$1"
+    local output_file="$2"
+    
+    if [ ! -f "$input_file" ]; then
+        echo "  Test not executed" >> "$output_file"
+        return
+    fi
+    
+    if ! grep -q "CPU TEST RESULTS" "$input_file" 2>/dev/null; then
+        echo "  Test not executed" >> "$output_file"
+        return
+    fi
+    
+    echo "  CPU Test Results" >> "$output_file"
+    echo "  ------------------------------------------------------------------------------------------" >> "$output_file"
+    printf "  %-16s %-12s %-14s %-14s %-14s %-16s\n" "Server IP" "Events/sec" "Avg Lat(ms)" "P95 Lat(ms)" "Max Lat(ms)" "Fairness" >> "$output_file"
+    echo "  ------------------------------------------------------------------------------------------" >> "$output_file"
+    
+    local in_section=false
+    local current_server_ip=""
+    local current_eps=""
+    local current_avg_lat=""
+    local current_p95_lat=""
+    local current_max_lat=""
+    local current_fairness=""
+    
+    while IFS= read -r line; do
+        if [[ "$line" =~ "CPU TEST RESULTS" ]]; then
+            if [ "$in_section" = true ] && [ -n "$current_server_ip" ]; then
+                printf "  %-16s %-12s %-14s %-14s %-14s %-16s\n" "$current_server_ip" "${current_eps:-N/A}" "${current_avg_lat:-N/A}" "${current_p95_lat:-N/A}" "${current_max_lat:-N/A}" "${current_fairness:-N/A}" >> "$output_file"
+            fi
+            in_section=true
+            current_server_ip=$(echo "$line" | grep -oP 'Server: \K[0-9.]+' || echo "N/A")
+            current_eps=""
+            current_avg_lat=""
+            current_p95_lat=""
+            current_max_lat=""
+            current_fairness=""
+        elif [[ "$line" =~ "MEMORY TEST RESULTS" || "$line" =~ "SYSBENCH FILEIO TEST RESULTS" || "$line" =~ "THREADS TEST RESULTS" || "$line" =~ "MUTEX TEST RESULTS" || "$line" =~ "NETWORK TEST RESULTS" ]]; then
+            if [ "$in_section" = true ] && [ -n "$current_server_ip" ]; then
+                printf "  %-16s %-12s %-14s %-14s %-14s %-16s\n" "$current_server_ip" "${current_eps:-N/A}" "${current_avg_lat:-N/A}" "${current_p95_lat:-N/A}" "${current_max_lat:-N/A}" "${current_fairness:-N/A}" >> "$output_file"
+            fi
+            in_section=false
+        elif [ "$in_section" = true ]; then
+            if [[ "$line" =~ "events per second:" ]]; then
+                current_eps=$(echo "$line" | awk '{print $NF}')
+            elif [[ "$line" =~ "avg:" ]] && [[ "$line" =~ [0-9] ]] && [[ ! "$line" =~ "events \(avg/stddev\):" ]] && [[ ! "$line" =~ "execution time" ]]; then
+                current_avg_lat=$(echo "$line" | awk '{print $NF}')
+            elif [[ "$line" =~ "95th percentile:" ]]; then
+                current_p95_lat=$(echo "$line" | awk '{print $NF}')
+            elif [[ "$line" =~ "max:" ]] && [[ "$line" =~ [0-9] ]] && [[ ! "$line" =~ "execution time" ]]; then
+                current_max_lat=$(echo "$line" | awk '{print $NF}' | tr -d ',')
+            elif echo "$line" | grep -q "events.*avg/stddev"; then
+                current_fairness=$(echo "$line" | awk '{print $NF}')
+            fi
+        fi
+    done < "$input_file"
+    
+    if [ "$in_section" = true ] && [ -n "$current_server_ip" ]; then
+        printf "  %-16s %-12s %-14s %-14s %-14s %-16s\n" "$current_server_ip" "${current_eps:-N/A}" "${current_avg_lat:-N/A}" "${current_p95_lat:-N/A}" "${current_max_lat:-N/A}" "${current_fairness:-N/A}" >> "$output_file"
+    fi
+}
+
+parse_memory_report() {
+    local input_file="$1"
+    local output_file="$2"
+    
+    if [ ! -f "$input_file" ]; then
+        echo "  Test not executed" >> "$output_file"
+        return
+    fi
+    
+    if ! grep -q "MEMORY TEST RESULTS" "$input_file" 2>/dev/null; then
+        echo "  Test not executed" >> "$output_file"
+        return
+    fi
+    
+    echo "  Memory Test Results" >> "$output_file"
+    echo "  ---------------------------------------------------------------------------------------" >> "$output_file"
+    printf "  %-18s %-15s %-15s %-18s %-20s\n" "Server IP" "Ops/sec" "MiB/sec" "Avg Latency (ms)" "Fairness (events)" >> "$output_file"
+    echo "  ---------------------------------------------------------------------------------------" >> "$output_file"
+    
+    local in_section=false
+    local current_server_ip=""
+    local current_ops_sec=""
+    local current_mib_sec=""
+    local current_mem_avg_lat=""
+    local current_mem_fairness=""
+    
+    while IFS= read -r line; do
+        if [[ "$line" =~ "MEMORY TEST RESULTS" ]]; then
+            if [ "$in_section" = true ] && [ -n "$current_server_ip" ]; then
+                printf "  %-18s %-15s %-15s %-18s %-20s\n" "$current_server_ip" "${current_ops_sec:-N/A}" "${current_mib_sec:-N/A}" "${current_mem_avg_lat:-N/A}" "${current_mem_fairness:-N/A}" >> "$output_file"
+            fi
+            in_section=true
+            current_server_ip=$(echo "$line" | grep -oP 'Server: \K[0-9.]+' || echo "N/A")
+            current_ops_sec=""
+            current_mib_sec=""
+            current_mem_avg_lat=""
+            current_mem_fairness=""
+        elif [[ "$line" =~ "SYSBENCH FILEIO TEST RESULTS" || "$line" =~ "THREADS TEST RESULTS" || "$line" =~ "MUTEX TEST RESULTS" || "$line" =~ "NETWORK TEST RESULTS" ]]; then
+            if [ "$in_section" = true ] && [ -n "$current_server_ip" ]; then
+                printf "  %-18s %-15s %-15s %-18s %-20s\n" "$current_server_ip" "${current_ops_sec:-N/A}" "${current_mib_sec:-N/A}" "${current_mem_avg_lat:-N/A}" "${current_mem_fairness:-N/A}" >> "$output_file"
+            fi
+            in_section=false
+        elif [ "$in_section" = true ]; then
+            if [[ "$line" =~ "Total operations:" ]]; then
+                current_ops_sec=$(echo "$line" | awk -F'[()]' '{print $2}' | awk '{print $1}')
+            elif [[ "$line" =~ "MiB transferred" ]]; then
+                current_mib_sec=$(echo "$line" | awk -F'[()]' '{print $2}' | awk '{print $1}')
+            elif [[ "$line" =~ "avg:" ]] && [[ ! "$line" =~ "events \(avg/stddev\):" ]]; then
+                current_mem_avg_lat=$(echo "$line" | awk '{print $NF}' | tr -d ',')
+            elif echo "$line" | grep -q "events.*avg/stddev"; then
+                current_mem_fairness=$(echo "$line" | awk '{print $NF}')
+            fi
+        fi
+    done < "$input_file"
+    
+    if [ "$in_section" = true ] && [ -n "$current_server_ip" ]; then
+        printf "  %-18s %-15s %-15s %-18s %-20s\n" "$current_server_ip" "${current_ops_sec:-N/A}" "${current_mib_sec:-N/A}" "${current_mem_avg_lat:-N/A}" "${current_mem_fairness:-N/A}" >> "$output_file"
+    fi
+}
+
+parse_threads_report() {
+    local input_file="$1"
+    local output_file="$2"
+    
+    if [ ! -f "$input_file" ]; then
+        echo "  Test not executed" >> "$output_file"
+        return
+    fi
+    
+    if ! grep -q -E "Threads test summary:|THREADS TEST RESULTS" "$input_file" 2>/dev/null; then
+        echo "  Test not executed" >> "$output_file"
+        return
+    fi
+    
+    echo "  Threads Test Results" >> "$output_file"
+    echo "  ------------------------------------------------------------------------------------------" >> "$output_file"
+    printf "  %-18s %-15s %-18s %-18s %-20s\n" "Server IP" "Events/sec" "Avg Latency (ms)" "P95 Latency (ms)" "Fairness (events)" >> "$output_file"
+    echo "  ------------------------------------------------------------------------------------------" >> "$output_file"
+    
+    local in_section=false
+    local current_server_ip=""
+    local current_events=""
+    local current_time=""
+    local current_eps=""
+    local current_threads_avg_lat=""
+    local current_threads_p95_lat=""
+    local current_threads_fairness=""
+    local last_testing_ip=""
+    
+    while IFS= read -r line; do
+        if [[ "$line" =~ "THREADS TEST RESULTS" ]]; then
+            if [ "$in_section" = true ] && [ -n "$current_server_ip" ]; then
+                current_eps=$(calc_eps "$current_events" "$current_time")
+                printf "  %-18s %-15s %-18s %-18s %-20s\n" "$current_server_ip" "${current_eps:-N/A}" "${current_threads_avg_lat:-N/A}" "${current_threads_p95_lat:-N/A}" "${current_threads_fairness:-N/A}" >> "$output_file"
+            fi
+            in_section=true
+            current_server_ip=$(echo "$line" | grep -oP 'Server: \K[0-9.]+' || echo "N/A")
+            last_testing_ip="$current_server_ip"
+            current_events=""
+            current_time=""
+            current_eps=""
+            current_threads_avg_lat=""
+            current_threads_p95_lat=""
+            current_threads_fairness=""
+        elif [[ "$line" =~ "Testing server" ]]; then
+            last_testing_ip=$(echo "$line" | grep -oP 'Testing server [0-9]+/[0-9]+: \K[0-9.]+' || echo "")
+            if [ "$in_section" = true ] && [ -n "$current_server_ip" ]; then
+                current_eps=$(calc_eps "$current_events" "$current_time")
+                printf "  %-18s %-15s %-18s %-18s %-20s\n" "$current_server_ip" "${current_eps:-N/A}" "${current_threads_avg_lat:-N/A}" "${current_threads_p95_lat:-N/A}" "${current_threads_fairness:-N/A}" >> "$output_file"
+            fi
+            in_section=false
+            current_server_ip=""
+            current_events=""
+            current_time=""
+            current_eps=""
+            current_threads_avg_lat=""
+            current_threads_p95_lat=""
+            current_threads_fairness=""
+        elif [[ "$line" =~ "Threads test summary:" ]]; then
+            in_section=true
+            current_server_ip="${last_testing_ip:-N/A}"
+            current_events=""
+            current_time=""
+            current_eps=""
+            current_threads_avg_lat=""
+            current_threads_p95_lat=""
+            current_threads_fairness=""
+        elif [ "$in_section" = true ] && [[ "$line" =~ "TEST RESULTS" ]] && [[ ! "$line" =~ "THREADS TEST RESULTS" ]] && [[ ! "$line" =~ "Threads test summary:" ]]; then
+            if [ -n "$current_server_ip" ]; then
+                current_eps=$(calc_eps "$current_events" "$current_time")
+                printf "  %-18s %-15s %-18s %-18s %-20s\n" "$current_server_ip" "${current_eps:-N/A}" "${current_threads_avg_lat:-N/A}" "${current_threads_p95_lat:-N/A}" "${current_threads_fairness:-N/A}" >> "$output_file"
+            fi
+            in_section=false
+            current_server_ip=""
+        elif [ "$in_section" = true ]; then
+            if [[ "$line" =~ "total number of events:" ]]; then
+                current_events=$(echo "$line" | awk '{print $NF}')
+            elif [[ "$line" =~ "total time:" ]]; then
+                current_time=$(echo "$line" | awk '{print $NF}' | tr -d 's')
+            elif [[ "$line" =~ "avg:" ]] && [[ ! "$line" =~ "events" ]]; then
+                current_threads_avg_lat=$(echo "$line" | awk '{print $NF}' | tr -d ',')
+            elif [[ "$line" =~ "95th percentile" ]]; then
+                current_threads_p95_lat=$(echo "$line" | awk '{print $NF}')
+            elif echo "$line" | grep -q "events.*avg/stddev"; then
+                current_threads_fairness=$(echo "$line" | awk '{print $3}')
+            fi
+        fi
+    done < "$input_file"
+    
+    if [ "$in_section" = true ] && [ -n "$current_server_ip" ]; then
+        current_eps=$(calc_eps "$current_events" "$current_time")
+        printf "  %-18s %-15s %-18s %-18s %-20s\n" "$current_server_ip" "${current_eps:-N/A}" "${current_threads_avg_lat:-N/A}" "${current_threads_p95_lat:-N/A}" "${current_threads_fairness:-N/A}" >> "$output_file"
+    fi
+}
+
+parse_mutex_report() {
+    local input_file="$1"
+    local output_file="$2"
+    
+    if [ ! -f "$input_file" ]; then
+        echo "  Test not executed" >> "$output_file"
+        return
+    fi
+    
+    if ! grep -q -E "Mutex test summary:|MUTEX TEST RESULTS" "$input_file" 2>/dev/null; then
+        echo "  Test not executed" >> "$output_file"
+        return
+    fi
+    
+    echo "  Mutex Test Results" >> "$output_file"
+    echo "  ------------------------------------------------------------------------------------------" >> "$output_file"
+    printf "  %-18s %-15s %-15s %-18s %-20s\n" "Server IP" "Transactions" "TPS" "Avg Latency (ms)" "Fairness (events)" >> "$output_file"
+    echo "  ------------------------------------------------------------------------------------------" >> "$output_file"
+    
+    local in_section=false
+    local current_server_ip=""
+    local current_events=""
+    local current_time=""
+    local current_tps=""
+    local current_mutex_avg_lat=""
+    local current_mutex_fairness=""
+    local last_testing_ip=""
+    
+    while IFS= read -r line; do
+        if [[ "$line" =~ "Testing server" ]]; then
+            last_testing_ip=$(echo "$line" | grep -oP 'Testing server [0-9]+/[0-9]+: \K[0-9.]+' || echo "")
+            if [ "$in_section" = true ] && [ -n "$current_server_ip" ]; then
+                current_tps=$(calc_eps "$current_events" "$current_time")
+                printf "  %-18s %-15s %-15s %-18s %-20s\n" "$current_server_ip" "${current_events:-N/A}" "${current_tps:-N/A}" "${current_mutex_avg_lat:-N/A}" "${current_mutex_fairness:-N/A}" >> "$output_file"
+            fi
+            in_section=false
+            current_server_ip=""
+        elif [[ "$line" =~ "MUTEX TEST RESULTS" ]]; then
+            if [ "$in_section" = true ] && [ -n "$current_server_ip" ]; then
+                current_tps=$(calc_eps "$current_events" "$current_time")
+                printf "  %-18s %-15s %-15s %-18s %-20s\n" "$current_server_ip" "${current_events:-N/A}" "${current_tps:-N/A}" "${current_mutex_avg_lat:-N/A}" "${current_mutex_fairness:-N/A}" >> "$output_file"
+            fi
+            in_section=true
+            current_server_ip=$(echo "$line" | grep -oP 'Server: \K[0-9.]+' || echo "N/A")
+            current_events=""
+            current_time=""
+            current_tps=""
+            current_mutex_avg_lat=""
+            current_mutex_fairness=""
+        elif [[ "$line" =~ "Mutex test summary:" ]]; then
+            in_section=true
+            current_server_ip="${last_testing_ip:-N/A}"
+            current_events=""
+            current_time=""
+            current_tps=""
+            current_mutex_avg_lat=""
+            current_mutex_fairness=""
+        elif [ "$in_section" = true ] && [[ "$line" =~ "TEST RESULTS" ]] && [[ ! "$line" =~ "MUTEX TEST RESULTS" ]] && [[ ! "$line" =~ "Mutex test summary:" ]]; then
+            if [ -n "$current_server_ip" ]; then
+                current_tps=$(calc_eps "$current_events" "$current_time")
+                printf "  %-18s %-15s %-15s %-18s %-20s\n" "$current_server_ip" "${current_events:-N/A}" "${current_tps:-N/A}" "${current_mutex_avg_lat:-N/A}" "${current_mutex_fairness:-N/A}" >> "$output_file"
+            fi
+            in_section=false
+        elif [ "$in_section" = true ]; then
+            if [[ "$line" =~ "total number of events:" ]]; then
+                current_events=$(echo "$line" | awk '{print $NF}')
+            elif [[ "$line" =~ "total time:" ]]; then
+                current_time=$(echo "$line" | awk '{print $NF}' | tr -d 's')
+            elif [[ "$line" =~ "avg:" ]] && [[ ! "$line" =~ "events" ]]; then
+                current_mutex_avg_lat=$(echo "$line" | awk '{print $NF}' | tr -d ',')
+            elif echo "$line" | grep -q "events.*avg/stddev"; then
+                current_mutex_fairness=$(echo "$line" | awk '{print $3}')
+            fi
+        fi
+    done < "$input_file"
+    
+    if [ "$in_section" = true ] && [ -n "$current_server_ip" ]; then
+        current_tps=$(calc_eps "$current_events" "$current_time")
+        printf "  %-18s %-15s %-15s %-18s %-20s\n" "$current_server_ip" "${current_events:-N/A}" "${current_tps:-N/A}" "${current_mutex_avg_lat:-N/A}" "${current_mutex_fairness:-N/A}" >> "$output_file"
+    fi
+}
 
 # ================================================================================
 # Path Constants - Centralized path management
@@ -54,6 +499,20 @@ NETWORK_PORT_DEFAULT=25201
 
 # SSH configuration defaults
 SSH_PORT_DEFAULT=22
+
+# Get SSH port with validation
+# Returns: Valid SSH port number (1-65535)
+get_ssh_port() {
+    local port="${SSH_PORT:-$SSH_PORT_DEFAULT}"
+    
+    # Validate port is a number between 1 and 65535
+    if ! [[ "$port" =~ ^[1-9][0-9]{0,4}$ ]] || [ "$port" -lt 1 ] || [ "$port" -gt 65535 ]; then
+        echo "Error: Invalid SSH port '$port'. Port must be between 1 and 65535" >&2
+        exit 1
+    fi
+    
+    echo "$port"
+}
 # ================================================================================
 
 # Default parameters
@@ -119,13 +578,27 @@ is_password_auth() {
     return 1
 }
 
+# Set SSHPASS environment variable for a server
+# Parameters: ip
+# Side effect: exports SSHPASS environment variable
+set_ssh_password() {
+    local ip="$1"
+    if is_password_auth "$ip"; then
+        local password="${SERVER_PASSWORDS[$ip]}"
+        if [ -n "$password" ]; then
+            printf -v SSHPASS '%s' "$password"
+            export SSHPASS
+        fi
+    fi
+}
+
 # Build authentication prefix for SSH/SCP commands
 # Parameters: ip, cmd_type (ssh/scp)
 # Returns: Command prefix with proper authentication
 build_auth_prefix() {
     local ip="$1"
     local cmd_type="$2"
-    local ssh_port="${SSH_PORT:-$SSH_PORT_DEFAULT}"
+    local ssh_port=$(get_ssh_port)
     local pass_arg=""
     local host_arg=""
     local port_opt=""
@@ -142,7 +615,10 @@ build_auth_prefix() {
                 echo "  Ubuntu/Debian: sudo apt-get install -y sshpass"
                 exit 1
             fi
-            pass_arg="sshpass -p '${password//\'/\'\\\'\'}' "
+            pass_arg="sshpass -e "
+        elif [ -z "$password" ]; then
+            echo "Error: Password not provided for server $ip with username '$username'"
+            exit 1
         fi
         
         host_arg="$username@$ip"
@@ -161,13 +637,17 @@ build_auth_prefix() {
 
 # Get SSH command prefix for a server
 # Returns: SSH command prefix (with or without sshpass)
+# Side effect: sets SSHPASS environment variable if password auth is used
 get_ssh_command() {
+    set_ssh_password "$1"
     build_auth_prefix "$1" "ssh"
 }
 
 # Get SCP command prefix for a server
 # Returns: SCP command prefix (with or without sshpass)
+# Side effect: sets SSHPASS environment variable if password auth is used
 get_scp_command() {
+    set_ssh_password "$1"
     build_auth_prefix "$1" "scp"
 }
 
@@ -200,33 +680,12 @@ load_config_file() {
     done < "$config_file"
 }
 
-# Execute SSH command with proper authentication
-# Usage: exec_ssh <server_ip> <command> [extra_ssh_options]
-exec_ssh() {
+# Execute SSH command with optional timeout
+# Usage: exec_ssh_cmd <server_ip> <command> [timeout_seconds] [extra_options]
+exec_ssh_cmd() {
     local server="$1"
     local cmd="$2"
-    local extra_opts="${3:-}"
-    
-    local ssh_cmd=$(get_ssh_command "$server")
-    if [ -n "$extra_opts" ]; then
-        # Insert extra options after ssh command but before host
-        ssh_cmd=$(echo "$ssh_cmd" | sed "s/ssh /ssh $extra_opts /")
-    fi
-    
-    if [ "$DRY_RUN" = "true" ]; then
-        echo "[DRY RUN] $ssh_cmd '$cmd'"
-        return 0
-    fi
-    
-    eval "$ssh_cmd '$cmd'"
-}
-
-# Execute SSH command with timeout
-# Usage: exec_ssh_with_timeout <server_ip> <timeout_seconds> <command> [extra_ssh_options]
-exec_ssh_with_timeout() {
-    local server="$1"
-    local timeout="$2"
-    local cmd="$3"
+    local timeout="${3:-}"
     local extra_opts="${4:-}"
     
     local ssh_cmd=$(get_ssh_command "$server")
@@ -235,11 +694,31 @@ exec_ssh_with_timeout() {
     fi
     
     if [ "$DRY_RUN" = "true" ]; then
-        echo "[DRY RUN] timeout --signal=KILL $timeout $ssh_cmd '$cmd'"
+        if [ -n "$timeout" ]; then
+            echo "[DRY RUN] timeout --signal=KILL $timeout $ssh_cmd '$cmd'"
+        else
+            echo "[DRY RUN] $ssh_cmd '$cmd'"
+        fi
         return 0
     fi
     
-    eval "timeout --signal=KILL $timeout $ssh_cmd '$cmd'"
+    if [ -n "$timeout" ]; then
+        eval "timeout --signal=KILL $timeout $ssh_cmd '$cmd'"
+    else
+        eval "$ssh_cmd '$cmd'"
+    fi
+}
+
+# Execute SSH command with proper authentication (backward compatible)
+# Usage: exec_ssh <server_ip> <command> [extra_ssh_options]
+exec_ssh() {
+    exec_ssh_cmd "$1" "$2" "" "$3"
+}
+
+# Execute SSH command with timeout (backward compatible)
+# Usage: exec_ssh_with_timeout <server_ip> <timeout_seconds> <command> [extra_ssh_options]
+exec_ssh_with_timeout() {
+    exec_ssh_cmd "$1" "$3" "$2" "$4"
 }
 
 # Report formatting constants
@@ -299,7 +778,7 @@ parse_args() {
                 exit 0
                 ;;
             --version)
-                echo "Version: 0.8.11"
+                echo "Version: 0.8.12"
                 exit 0
                 ;;
             --dry-run)
@@ -2191,7 +2670,7 @@ check_ssh() {
                 echo "  - $ip: using password authentication (skip passwordless check)"
             else
                 has_passwordless_auth=true
-                local ssh_port="${SSH_PORT:-$SSH_PORT_DEFAULT}"
+                local ssh_port=$(get_ssh_port)
                 # Test SSH connection with BatchMode=yes to avoid password prompt
                 if ! ssh -p "$ssh_port" -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "$ip" "echo 2>/dev/null" > /dev/null 2>&1; then
                     ssh_failed+=($ip)
@@ -2984,6 +3463,11 @@ run_network_test() {
         return 0
     fi
     
+    # Automatically use target_servers if NETWORK_CLIENT_IP is not set
+    if [ -z "$network_client_ip" ] && [ ${#target_servers[@]} -gt 0 ]; then
+        network_client_ip="${target_servers[*]}"
+    fi
+    
     # Skip network test if no client IPs are configured (single machine test has no meaning)
     if [ -z "$network_client_ip" ]; then
         echo "=== Network Performance Test ==="
@@ -3101,6 +3585,7 @@ run_serial_network_test() {
             fi
             
             # Check if iperf3 is installed on client
+            set_ssh_password "$client"
             local client_ssh=$(get_ssh_command "$client")
             if ! eval "$client_ssh 'command -v iperf3 > /dev/null 2>&1'" > /dev/null 2>&1; then
                 echo "  ⚠ iperf3 not installed on client $client"
@@ -3240,6 +3725,7 @@ run_matrix_network_test() {
         
         # Start iperf3 server on destination
         echo "  Starting iperf3 server on $dst..."
+        set_ssh_password "$dst"
         local dst_ssh=$(get_ssh_command "$dst")
         
         if [ "$DRY_RUN" = true ]; then
@@ -3282,6 +3768,7 @@ run_matrix_network_test() {
                 fi
             else
                 # Run via SSH
+                set_ssh_password "$src"
                 local src_ssh=$(get_ssh_command "$src")
                 if eval "timeout --signal=KILL $client_timeout $src_ssh 'iperf3 -c \"$dst\" -p \"$port\" -t \"$duration\" -P \"$parallel\" -J'" > "$client_output_file" 2>&1; then
                     # Generate text format from JSON
@@ -3392,6 +3879,7 @@ run_parallel_network_test() {
     
     # Start iperf3 server on the first host
     echo "  Starting iperf3 server on $server_ip..."
+    set_ssh_password "$server_ip"
     local server_ssh=$(get_ssh_command "$server_ip")
     
     if [ "$DRY_RUN" = true ]; then
@@ -3418,6 +3906,7 @@ run_parallel_network_test() {
         local client_text_output="$TMP_DIR/network_parallel_${client_idx}_${TIMESTAMP}_text.log"
         
         if [ "$DRY_RUN" = true ]; then
+            set_ssh_password "$client_ip"
             local client_ssh=$(get_ssh_command "$client_ip")
             echo "[DRY RUN] $client_ssh 'iperf3 -c $server_ip -p $port -t $duration -P $parallel -J'"
             echo "[DRY RUN] $client_ssh 'iperf3 -c $server_ip -p $port -t $duration -P $parallel 2>&1 | grep -v ^$'"
@@ -3427,6 +3916,7 @@ run_parallel_network_test() {
             # Run iperf3 client sequentially with timeout
             # Calculate timeout: duration + 15s buffer
             local client_timeout=$((duration + 15))
+            set_ssh_password "$client_ip"
             local client_ssh=$(get_ssh_command "$client_ip")
             eval "timeout --signal=KILL $client_timeout $client_ssh 'iperf3 -c $server_ip -p $port -t $duration -P $parallel -J'" > "$client_output_file" 2>&1
             local exit_status=$?
@@ -4176,6 +4666,7 @@ generate_report() {
                 local local_mem=$(get_memory_size_mb 2>/dev/null || echo "N/A")
                 server_list_display="${server_list_display}\n  - $ip (local): CPU Cores: ${local_cpu}, Memory Size: ${local_mem} MB"
             else
+                set_ssh_password "$ip"
                 local remote_ssh=$(get_ssh_command "$ip")
                 local remote_cpu=$(eval "$remote_ssh 'nproc 2>/dev/null || grep -c ^processor /proc/cpuinfo 2>/dev/null || echo N/A'" 2>/dev/null || echo "N/A")
                 local remote_mem=$(eval "$remote_ssh 'awk \"/MemTotal/ {printf \\\"%.0f\\\", \\\$2/1024}\" /proc/meminfo 2>/dev/null || echo N/A'" 2>/dev/null || echo "N/A")
@@ -4240,6 +4731,7 @@ generate_report() {
         for server in "${target_servers[@]}"; do
             if [ "$server" != "$local_ip" ]; then
                 if [ "${CPU_THREADS:-0}" = "0" ]; then
+                    set_ssh_password "$server"
                     local remote_ssh=$(get_ssh_command "$server")
                     local remote_cpu=$(eval "$remote_ssh 'nproc 2>/dev/null || grep -c ^processor /proc/cpuinfo 2>/dev/null || echo N/A'" 2>/dev/null || echo "N/A")
                     printf -- "    %s: auto (%s)\n" "$server" "${remote_cpu:-N/A}" >> "$report_file"
@@ -4299,6 +4791,7 @@ generate_report() {
         if [ ${#target_servers[@]} -gt 0 ]; then
             for server in "${target_servers[@]}"; do
                 if [ "$server" != "$local_ip" ]; then
+                    set_ssh_password "$server"
                     local remote_ssh=$(get_ssh_command "$server")
                     local remote_cpu=$(eval "$remote_ssh 'nproc 2>/dev/null || grep -c ^processor /proc/cpuinfo 2>/dev/null || echo N/A'" 2>/dev/null || echo "N/A")
                     if [ "$remote_cpu" = "N/A" ] || [ -z "$remote_cpu" ]; then
@@ -4323,6 +4816,7 @@ generate_report() {
         if [ ${#target_servers[@]} -gt 0 ]; then
             for server in "${target_servers[@]}"; do
                 if [ "$server" != "$local_ip" ]; then
+                    set_ssh_password "$server"
                     local remote_ssh=$(get_ssh_command "$server")
                     local remote_cpu=$(eval "$remote_ssh 'nproc 2>/dev/null || grep -c ^processor /proc/cpuinfo 2>/dev/null || echo N/A'" 2>/dev/null || echo "N/A")
                     printf -- "    %s: auto (%s)\n" "$server" "${remote_cpu:-N/A}" >> "$report_file"
@@ -4337,131 +4831,14 @@ generate_report() {
     printf -- "\n" >> "$report_file"
     printf -- "[CPU Test]\n" >> "$report_file"
 
-    # Parse CPU results from combined file
-    if [ -f "$combined_file" ]; then
-        # Check if CPU test results exist
-        if grep -q "CPU TEST RESULTS" "$combined_file" 2>/dev/null; then
-            # Count CPU test sections (one per server)
-            local cpu_section_count=$(grep -c "CPU TEST RESULTS" "$combined_file" 2>/dev/null)
-            
-            # Show comparison table
-            echo "  CPU Test Results" >> "$report_file"
-            echo "  ------------------------------------------------------------------------------------------" >> "$report_file"
-            printf "  %-16s %-12s %-14s %-14s %-14s %-16s\n" "Server IP" "Events/sec" "Avg Lat(ms)" "P95 Lat(ms)" "Max Lat(ms)" "Fairness" >> "$report_file"
-            echo "  ------------------------------------------------------------------------------------------" >> "$report_file"
-
-            local in_cpu_section=false
-            local current_server_ip=""
-            local current_eps=""
-            local current_avg_lat=""
-            local current_p95_lat=""
-            local current_max_lat=""
-            local current_fairness=""
-
-            while IFS= read -r line; do
-                if [[ "$line" =~ "CPU TEST RESULTS" ]]; then
-                    if [ "$in_cpu_section" = true ] && [ -n "$current_server_ip" ]; then
-                        printf "  %-16s %-12s %-14s %-14s %-14s %-16s\n" "$current_server_ip" "${current_eps:-N/A}" "${current_avg_lat:-N/A}" "${current_p95_lat:-N/A}" "${current_max_lat:-N/A}" "${current_fairness:-N/A}" >> "$report_file"
-                    fi
-                    in_cpu_section=true
-                    current_server_ip=$(echo "$line" | grep -oP 'Server: \K[0-9.]+' || echo "N/A")
-                    current_eps=""
-                    current_avg_lat=""
-                    current_p95_lat=""
-                    current_max_lat=""
-                    current_fairness=""
-                elif [[ "$line" =~ "MEMORY TEST RESULTS" || "$line" =~ "SYSBENCH FILEIO TEST RESULTS" || "$line" =~ "THREADS TEST RESULTS" || "$line" =~ "MUTEX TEST RESULTS" || "$line" =~ "NETWORK TEST RESULTS" ]]; then
-                    # End of CPU section when encountering next test type
-                    if [ "$in_cpu_section" = true ] && [ -n "$current_server_ip" ]; then
-                        printf "  %-16s %-12s %-14s %-14s %-14s %-16s\n" "$current_server_ip" "${current_eps:-N/A}" "${current_avg_lat:-N/A}" "${current_p95_lat:-N/A}" "${current_max_lat:-N/A}" "${current_fairness:-N/A}" >> "$report_file"
-                    fi
-                    in_cpu_section=false
-                elif [ "$in_cpu_section" = true ]; then
-                    if [[ "$line" =~ "events per second:" ]]; then
-                        current_eps=$(echo "$line" | awk '{print $NF}')
-                    elif [[ "$line" =~ "avg:" ]] && [[ "$line" =~ [0-9] ]] && [[ ! "$line" =~ "events (avg/stddev):" ]] && [[ ! "$line" =~ "execution time" ]]; then
-                        current_avg_lat=$(echo "$line" | awk '{print $NF}')
-                    elif [[ "$line" =~ "95th percentile:" ]]; then
-                        current_p95_lat=$(echo "$line" | awk '{print $NF}')
-                    elif [[ "$line" =~ "max:" ]] && [[ "$line" =~ [0-9] ]] && [[ ! "$line" =~ "execution time" ]]; then
-                        current_max_lat=$(echo "$line" | awk '{print $NF}' | tr -d ',')
-                    elif echo "$line" | grep -q "events.*avg/stddev"; then
-                        current_fairness=$(echo "$line" | awk '{print $NF}')
-                    fi
-                fi
-            done < "$combined_file"
-
-            if [ "$in_cpu_section" = true ] && [ -n "$current_server_ip" ]; then
-                printf "  %-16s %-12s %-14s %-14s %-14s %-16s\n" "$current_server_ip" "${current_eps:-N/A}" "${current_avg_lat:-N/A}" "${current_p95_lat:-N/A}" "${current_max_lat:-N/A}" "${current_fairness:-N/A}" >> "$report_file"
-            fi
-        else
-            echo "  Test not executed" >> "$report_file"
-        fi
-    else
-        echo "  Test not executed" >> "$report_file"
-    fi
+    parse_cpu_report "$combined_file" "$report_file"
 
     cat >> "$report_file" << EOF
 
 [Memory Test]
 EOF
 
-    if [ -f "$combined_file" ]; then
-        if grep -q "MEMORY TEST RESULTS" "$combined_file" 2>/dev/null; then
-            local mem_section_count=$(grep -c "MEMORY TEST RESULTS" "$combined_file" 2>/dev/null)
-
-            # Show comparison table
-            echo "  Memory Test Results" >> "$report_file"
-            echo "  ---------------------------------------------------------------------------------------" >> "$report_file"
-            printf "  %-18s %-15s %-15s %-18s %-20s\n" "Server IP" "Ops/sec" "MiB/sec" "Avg Latency (ms)" "Fairness (events)" >> "$report_file"
-            echo "  ---------------------------------------------------------------------------------------" >> "$report_file"
-
-            local in_mem_section=false
-            local current_server_ip=""
-            local current_ops_sec=""
-            local current_mib_sec=""
-            local current_mem_avg_lat=""
-            local current_mem_fairness=""
-
-            while IFS= read -r line; do
-                if [[ "$line" =~ "MEMORY TEST RESULTS" ]]; then
-                    if [ "$in_mem_section" = true ] && [ -n "$current_server_ip" ]; then
-                        printf "  %-18s %-15s %-15s %-18s %-20s\n" "$current_server_ip" "${current_ops_sec:-N/A}" "${current_mib_sec:-N/A}" "${current_mem_avg_lat:-N/A}" "${current_mem_fairness:-N/A}" >> "$report_file"
-                    fi
-                    in_mem_section=true
-                    current_server_ip=$(echo "$line" | grep -oP 'Server: \K[0-9.]+' || echo "N/A")
-                    current_ops_sec=""
-                    current_mib_sec=""
-                    current_mem_avg_lat=""
-                    current_mem_fairness=""
-                elif [[ "$line" =~ "SYSBENCH FILEIO TEST RESULTS" || "$line" =~ "THREADS TEST RESULTS" || "$line" =~ "MUTEX TEST RESULTS" || "$line" =~ "NETWORK TEST RESULTS" ]]; then
-                    # End of Memory section when encountering next test type
-                    if [ "$in_mem_section" = true ] && [ -n "$current_server_ip" ]; then
-                        printf "  %-18s %-15s %-15s %-18s %-20s\n" "$current_server_ip" "${current_ops_sec:-N/A}" "${current_mib_sec:-N/A}" "${current_mem_avg_lat:-N/A}" "${current_mem_fairness:-N/A}" >> "$report_file"
-                    fi
-                    in_mem_section=false
-                elif [ "$in_mem_section" = true ]; then
-                    if [[ "$line" =~ "Total operations:" ]]; then
-                        current_ops_sec=$(echo "$line" | awk -F'[()]' '{print $2}' | awk '{print $1}')
-                    elif [[ "$line" =~ "MiB transferred" ]]; then
-                        current_mib_sec=$(echo "$line" | awk -F'[()]' '{print $2}' | awk '{print $1}')
-                    elif [[ "$line" =~ "avg:" ]] && [[ ! "$line" =~ "events (avg/stddev):" ]]; then
-                        current_mem_avg_lat=$(echo "$line" | awk '{print $NF}' | tr -d ',')
-                    elif echo "$line" | grep -q "events.*avg/stddev"; then
-                        current_mem_fairness=$(echo "$line" | awk '{print $NF}')
-                    fi
-                fi
-            done < "$combined_file"
-
-            if [ "$in_mem_section" = true ] && [ -n "$current_server_ip" ]; then
-                printf "  %-18s %-15s %-15s %-18s %-20s\n" "$current_server_ip" "${current_ops_sec:-N/A}" "${current_mib_sec:-N/A}" "${current_mem_avg_lat:-N/A}" "${current_mem_fairness:-N/A}" >> "$report_file"
-            fi
-        else
-            echo "  Test not executed" >> "$report_file"
-        fi
-    else
-        echo "  Test not executed" >> "$report_file"
-    fi
+    parse_memory_report "$combined_file" "$report_file"
 
     cat >> "$report_file" << EOF
 
@@ -4878,218 +5255,14 @@ EOF
 [Threads Test]
 EOF
 
-    if [ -f "$combined_file" ]; then
-        # Check if Threads test results exist (both local and remote formats)
-        if grep -q "Threads test summary:\|THREADS TEST RESULTS" "$combined_file" 2>/dev/null; then
-            # Count Threads test sections (one per server)
-            local threads_section_count=$(($(grep -c "Threads test summary:" "$combined_file" 2>/dev/null) + $(grep -c "THREADS TEST RESULTS" "$combined_file" 2>/dev/null)))
-
-            # Show comparison table
-            echo "  Threads Test Results" >> "$report_file"
-            echo "  ------------------------------------------------------------------------------------------" >> "$report_file"
-            printf "  %-18s %-15s %-18s %-18s %-20s\n" "Server IP" "Events/sec" "Avg Latency (ms)" "P95 Latency (ms)" "Fairness (events)" >> "$report_file"
-            echo "  ------------------------------------------------------------------------------------------" >> "$report_file"
-                
-                local server_idx=0
-                local in_threads_section=false
-                local current_server_ip=""
-                local current_events=""
-                local current_time=""
-                local current_eps=""
-                local current_threads_avg_lat=""
-                local current_threads_p95_lat=""
-                local current_threads_fairness=""
-                local last_testing_ip=""
-                
-                while IFS= read -r line; do
-                    if [[ "$line" =~ "THREADS TEST RESULTS" ]]; then
-                        if [ "$in_threads_section" = true ] && [ -n "$current_server_ip" ]; then
-                            if [ -n "$current_events" ] && [ -n "$current_time" ] && [ "$current_time" != "0" ]; then
-                                current_eps=$(awk "BEGIN {printf \"%.2f\", $current_events / $current_time}" 2>/dev/null || echo "N/A")
-                            else
-                                current_eps="N/A"
-                            fi
-                            printf "  %-18s %-15s %-18s %-18s %-20s\n" "$current_server_ip" "${current_eps:-N/A}" "${current_threads_avg_lat:-N/A}" "${current_threads_p95_lat:-N/A}" "${current_threads_fairness:-N/A}" >> "$report_file"
-                        fi
-                        in_threads_section=true
-                        current_server_ip=$(echo "$line" | grep -oP 'Server: \K[0-9.]+' || echo "N/A")
-                        last_testing_ip="$current_server_ip"
-                        current_events=""
-                        current_time=""
-                        current_eps=""
-                        current_threads_avg_lat=""
-                        current_threads_p95_lat=""
-                        current_threads_fairness=""
-                        server_idx=$((server_idx + 1))
-                    elif [[ "$line" =~ "Testing server" ]]; then
-                        last_testing_ip=$(echo "$line" | grep -oP 'Testing server [0-9]+/[0-9]+: \K[0-9.]+' || echo "")
-                        if [ "$in_threads_section" = true ] && [ -n "$current_server_ip" ]; then
-                            if [ -n "$current_events" ] && [ -n "$current_time" ] && [ "$current_time" != "0" ]; then
-                                current_eps=$(awk "BEGIN {printf \"%.2f\", $current_events / $current_time}" 2>/dev/null || echo "N/A")
-                            else
-                                current_eps="N/A"
-                            fi
-                            printf "  %-18s %-15s %-18s %-18s %-20s\n" "$current_server_ip" "${current_eps:-N/A}" "${current_threads_avg_lat:-N/A}" "${current_threads_p95_lat:-N/A}" "${current_threads_fairness:-N/A}" >> "$report_file"
-                        fi
-                        in_threads_section=false
-                        current_server_ip=""
-                        current_events=""
-                        current_time=""
-                        current_eps=""
-                        current_threads_avg_lat=""
-                        current_threads_p95_lat=""
-                        current_threads_fairness=""
-                    elif [[ "$line" =~ "Threads test summary:" ]]; then
-                        in_threads_section=true
-                        current_server_ip="${last_testing_ip:-N/A}"
-                        current_events=""
-                        current_time=""
-                        current_eps=""
-                        current_threads_avg_lat=""
-                        current_threads_p95_lat=""
-                        current_threads_fairness=""
-                    elif [ "$in_threads_section" = true ] && [[ "$line" =~ "TEST RESULTS" ]] && [[ ! "$line" =~ "THREADS TEST RESULTS" ]] && [[ ! "$line" =~ "Threads test summary:" ]]; then
-                        if [ -n "$current_server_ip" ]; then
-                            if [ -n "$current_events" ] && [ -n "$current_time" ] && [ "$current_time" != "0" ]; then
-                                current_eps=$(awk "BEGIN {printf \"%.2f\", $current_events / $current_time}" 2>/dev/null || echo "N/A")
-                            else
-                                current_eps="N/A"
-                            fi
-                            printf "  %-18s %-15s %-18s %-18s %-20s\n" "$current_server_ip" "${current_eps:-N/A}" "${current_threads_avg_lat:-N/A}" "${current_threads_p95_lat:-N/A}" "${current_threads_fairness:-N/A}" >> "$report_file"
-                        fi
-                        in_threads_section=false
-                        current_server_ip=""
-                    elif [ "$in_threads_section" = true ]; then
-                        if [[ "$line" =~ "total number of events:" ]]; then
-                            current_events=$(echo "$line" | awk '{print $NF}')
-                        elif [[ "$line" =~ "total time:" ]]; then
-                            current_time=$(echo "$line" | awk '{print $NF}' | tr -d 's')
-                        elif [[ "$line" =~ "avg:" ]] && [[ ! "$line" =~ "events" ]]; then
-                            current_threads_avg_lat=$(echo "$line" | awk '{print $NF}' | tr -d ',')
-                        elif [[ "$line" =~ "95th percentile" ]]; then
-                            current_threads_p95_lat=$(echo "$line" | awk '{print $NF}')
-                        elif echo "$line" | grep -q "events.*avg/stddev"; then
-                            current_threads_fairness=$(echo "$line" | awk '{print $3}')
-                        fi
-                    fi
-                done < "$combined_file"
-                
-                if [ "$in_threads_section" = true ] && [ -n "$current_server_ip" ]; then
-                    if [ -n "$current_events" ] && [ -n "$current_time" ] && [ "$current_time" != "0" ]; then
-                        current_eps=$(awk "BEGIN {printf \"%.2f\", $current_events / $current_time}" 2>/dev/null || echo "N/A")
-                    else
-                        current_eps="N/A"
-                    fi
-                    printf "  %-18s %-15s %-18s %-18s %-20s\n" "$current_server_ip" "${current_eps:-N/A}" "${current_threads_avg_lat:-N/A}" "${current_threads_p95_lat:-N/A}" "${current_threads_fairness:-N/A}" >> "$report_file"
-                fi
-        else
-            echo "  Test not executed" >> "$report_file"
-        fi
-    else
-        echo "  Test not executed" >> "$report_file"
-    fi
+    parse_threads_report "$combined_file" "$report_file"
 
     cat >> "$report_file" << EOF
 
 [Mutex Test]
 EOF
 
-    if [ -f "$combined_file" ]; then
-        # Check if Mutex test results exist (both local and remote formats)
-        if grep -q "Mutex test summary:\|MUTEX TEST RESULTS" "$combined_file" 2>/dev/null; then
-            # Count Mutex test sections (one per server)
-            local mutex_section_count=$(($(grep -c "Mutex test summary:" "$combined_file" 2>/dev/null) + $(grep -c "MUTEX TEST RESULTS" "$combined_file" 2>/dev/null)))
-
-            # Show comparison table
-            echo "  Mutex Test Results" >> "$report_file"
-            echo "  ------------------------------------------------------------------------------------------" >> "$report_file"
-            printf "  %-18s %-15s %-15s %-18s %-20s\n" "Server IP" "Transactions" "TPS" "Avg Latency (ms)" "Fairness (events)" >> "$report_file"
-            echo "  ------------------------------------------------------------------------------------------" >> "$report_file"
-                
-                local server_idx=0
-                local in_mutex_section=false
-                local current_server_ip=""
-                local current_events=""
-                local current_time=""
-                local current_tps=""
-                local current_mutex_avg_lat=""
-                local current_mutex_fairness=""
-                local last_testing_ip=""
-                
-                while IFS= read -r line; do
-                    if [[ "$line" =~ "Testing server" ]]; then
-                        last_testing_ip=$(echo "$line" | grep -oP 'Testing server [0-9]+/[0-9]+: \K[0-9.]+' || echo "")
-                        if [ "$in_mutex_section" = true ] && [ -n "$current_server_ip" ]; then
-                            if [ -n "$current_events" ] && [ -n "$current_time" ] && [ "$current_time" != "0" ]; then
-                                current_tps=$(awk "BEGIN {printf \"%.2f\", $current_events / $current_time}" 2>/dev/null || echo "N/A")
-                            else
-                                current_tps="N/A"
-                            fi
-                            printf "  %-18s %-15s %-15s %-18s %-20s\n" "$current_server_ip" "${current_events:-N/A}" "${current_tps:-N/A}" "${current_mutex_avg_lat:-N/A}" "${current_mutex_fairness:-N/A}" >> "$report_file"
-                        fi
-                        in_mutex_section=false
-                        current_server_ip=""
-                    elif [[ "$line" =~ "MUTEX TEST RESULTS" ]]; then
-                        if [ "$in_mutex_section" = true ] && [ -n "$current_server_ip" ]; then
-                            if [ -n "$current_events" ] && [ -n "$current_time" ] && [ "$current_time" != "0" ]; then
-                                current_tps=$(awk "BEGIN {printf \"%.2f\", $current_events / $current_time}" 2>/dev/null || echo "N/A")
-                            else
-                                current_tps="N/A"
-                            fi
-                            printf "  %-18s %-15s %-15s %-18s %-20s\n" "$current_server_ip" "${current_events:-N/A}" "${current_tps:-N/A}" "${current_mutex_avg_lat:-N/A}" "${current_mutex_fairness:-N/A}" >> "$report_file"
-                        fi
-                        in_mutex_section=true
-                        current_server_ip=$(echo "$line" | grep -oP 'Server: \K[0-9.]+' || echo "N/A")
-                        server_idx=$((server_idx + 1))
-                        current_events=""
-                        current_time=""
-                        current_tps=""
-                        current_mutex_fairness=""
-                        current_mutex_avg_lat=""
-                    elif [[ "$line" =~ "Mutex test summary:" ]]; then
-                        in_mutex_section=true
-                        current_server_ip="${last_testing_ip:-N/A}"
-                        current_events=""
-                        current_time=""
-                        current_tps=""
-                        current_mutex_avg_lat=""
-                        current_mutex_fairness=""
-                    elif [ "$in_mutex_section" = true ] && [[ "$line" =~ "TEST RESULTS" ]] && [[ ! "$line" =~ "MUTEX TEST RESULTS" ]] && [[ ! "$line" =~ "Mutex test summary:" ]]; then
-                        if [ -n "$current_server_ip" ]; then
-                            if [ -n "$current_events" ] && [ -n "$current_time" ] && [ "$current_time" != "0" ]; then
-                                current_tps=$(awk "BEGIN {printf \"%.2f\", $current_events / $current_time}" 2>/dev/null || echo "N/A")
-                            else
-                                current_tps="N/A"
-                            fi
-                            printf "  %-18s %-15s %-15s %-18s %-20s\n" "$current_server_ip" "${current_events:-N/A}" "${current_tps:-N/A}" "${current_mutex_avg_lat:-N/A}" "${current_mutex_fairness:-N/A}" >> "$report_file"
-                        fi
-                        in_mutex_section=false
-                        current_server_ip=""
-                    elif [ "$in_mutex_section" = true ]; then
-                        if [[ "$line" =~ "total number of events:" ]]; then
-                            current_events=$(echo "$line" | awk '{print $NF}')
-                        elif [[ "$line" =~ "total time:" ]]; then
-                            current_time=$(echo "$line" | awk '{print $NF}' | tr -d 's')
-                        elif [[ "$line" =~ "avg:" ]] && [[ ! "$line" =~ "events (avg/stddev):" ]]; then
-                            current_mutex_avg_lat=$(echo "$line" | awk '{print $NF}' | tr -d ',')
-                        elif echo "$line" | grep -q "events.*avg/stddev"; then
-                            current_mutex_fairness=$(echo "$line" | awk '{print $NF}')
-                        fi
-                    fi
-                done < "$combined_file"
-                
-                if [ "$in_mutex_section" = true ] && [ -n "$current_server_ip" ]; then
-                    if [ -n "$current_events" ] && [ -n "$current_time" ]; then
-                        current_tps=$(awk "BEGIN {printf \"%.2f\", $current_events / $current_time}")
-                    fi
-                    printf "  %-18s %-15s %-15s %-18s %-20s\n" "$current_server_ip" "${current_events:-N/A}" "${current_tps:-N/A}" "${current_mutex_avg_lat:-N/A}" "${current_mutex_fairness:-N/A}" >> "$report_file"
-                fi
-        else
-            echo "  Test not executed" >> "$report_file"
-        fi
-    else
-        echo "  Test not executed" >> "$report_file"
-    fi
+    parse_mutex_report "$combined_file" "$report_file"
 
     cat >> "$report_file" << EOF
 
@@ -5499,6 +5672,7 @@ main() {
                     else
                         # Remote server check
                         echo "  Executing remote checks on $target_ip..."
+                        set_ssh_password "$target_ip"
                         local check_ssh=$(get_ssh_command "$target_ip")
                         eval "$check_ssh '\$HOME/oscheckperf/oscheckperf --remote check'"
                     fi
@@ -5645,6 +5819,7 @@ main() {
                     
                     # Always use remote oscheckperf for consistent execution
                     # Check if remote oscheckperf exists, if not, skip this server
+                    set_ssh_password "$target_ip"
                     local ssh_cmd=$(get_ssh_command "$target_ip")
                     if eval "$ssh_cmd '[ -d ~/oscheckperf ]'" 2>/dev/null; then
                         # Use remote oscheckperf
@@ -5701,6 +5876,7 @@ main() {
                         fi
                         
                         local full_remote_command="cd ~/oscheckperf && TIMESTAMP=$TIMESTAMP ./oscheckperf $dry_run_flag $remote_command $remote_test_command NO_CHECKS=true REMOTE=true"
+                        set_ssh_password "$target_ip"
                         local ssh_cmd=$(get_ssh_command "$target_ip")
                         if [ "$DRY_RUN" = true ]; then
                             echo "[DRY RUN] Would execute remote command on $target_ip:"
@@ -5947,6 +6123,7 @@ distribute_to_server() {
     
     echo "  Distributing to $target_ip..."
     
+    set_ssh_password "$target_ip"
     local ssh_cmd=$(get_ssh_command "$target_ip")
     local scp_cmd=$(get_scp_command "$target_ip")
     
