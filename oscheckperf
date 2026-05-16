@@ -1,7 +1,7 @@
 #!/bin/bash
 #--------------------------------------------------------------------------------
 #-- File name:   oscheckperf
-#-- Version:     v0.8.12
+#-- Version:     v0.9.0
 #-- Purpose:     Database System Benchmark Tool
 #-- Author:      Wanping Pan 
 #-- Description: One-click system benchmarking tool, supports configuration via config file or command line parameters
@@ -778,7 +778,7 @@ parse_args() {
                 exit 0
                 ;;
             --version)
-                echo "Version: 0.8.12"
+                echo "Version: 0.9.0"
                 exit 0
                 ;;
             --dry-run)
@@ -969,7 +969,7 @@ show_help() {
     echo "  -o <output_dir>   Specify output directory path (default: $OUTPUT_DIR_DEFAULT)"
     echo "  -f <servers_file> Specify servers list file path (supports IP or IP:username:password)"
     echo "  -p <config_file>  Specify configuration file path (KEY=VALUE format)"
-    echo "  -i <component>    Install components: sysbench, sshpass, oscheckperf, all (default: all)"
+    echo "  -i <component>    Install components: sysbench, sshpass, fio, iperf3, jq, oscheckperf, all (default: all)"
     echo "  -h                Show this help message"
     echo "  --debug           Enable debug mode (show detailed logs)"
     echo "  --version         Show version information"
@@ -2529,22 +2529,22 @@ check_dependencies() {
     fi
     
     # Additional tools (optional, based on test types)
-    if check_command "fio" "Please run: sudo yum install -y fio"; then
+    if check_command "fio" "fio will be automatically distributed to remote servers"; then
         echo "  ✓ fio: Installed (required for IO tests)"
     else
-        echo "  ⚠ fio: Not installed (required for IO tests)"
+        echo "  ⚠ fio: Not installed (will be automatically distributed)"
     fi
     
-    if check_command "iperf3" "Please run: sudo yum install -y iperf3"; then
+    if check_command "iperf3" "iperf3 will be automatically distributed to remote servers"; then
         echo "  ✓ iperf3: Installed (required for network tests)"
     else
-        echo "  ⚠ iperf3: Not installed (required for network tests)"
+        echo "  ⚠ iperf3: Not installed (will be automatically distributed)"
     fi
     
-    if check_command "jq" "Please run: sudo yum install -y jq"; then
+    if check_command "jq" "jq will be automatically distributed to remote servers"; then
         echo "  ✓ jq: Installed (required for parsing fio JSON output)"
     else
-        echo "  ⚠ jq: Not installed (required for parsing fio JSON output)"
+        echo "  ⚠ jq: Not installed (will be automatically distributed)"
     fi
     
     echo "  Note: Install optional dependencies based on your testing needs"
@@ -5645,7 +5645,11 @@ main() {
     if [ -n "$INSTALL_TARGET" ]; then
         install_components "$INSTALL_TARGET"
         echo ""
-        echo "=== Installation completed successfully! ==="
+        if [ "$INSTALL_ERROR_COUNT" -eq 0 ]; then
+            echo "=== Installation completed successfully! ==="
+        else
+            echo "=== Installation completed with $INSTALL_ERROR_COUNT error(s)! ==="
+        fi
         exit 0
     fi
     
@@ -6073,12 +6077,33 @@ compile_package() {
     # Extract source
     run_command "tar -zxf $tarball" "/dev/null"
     
-    cd "$src_dir" || { echo "  ✗ Failed to enter $src_dir"; return 1; }
+    # Try to find actual extracted directory (handle different naming patterns)
+    local actual_src_dir=""
+    if [ -d "$src_dir" ]; then
+        actual_src_dir="$src_dir"
+    elif [ -d "${package_name}-${src_dir}" ]; then
+        actual_src_dir="${package_name}-${src_dir}"
+    elif [ -d "${src_dir}-${package_name}" ]; then
+        actual_src_dir="${src_dir}-${package_name}"
+    else
+        actual_src_dir=$(find . -maxdepth 1 -type d -name "*${src_dir}*" 2>/dev/null | head -1)
+    fi
+    
+    if [ -z "$actual_src_dir" ] || [ ! -d "$actual_src_dir" ]; then
+        echo "  ✗ Failed to find source directory for $package_name"
+        find . -maxdepth 1 -type d -name "*${src_dir}*" -exec rm -rf {} \; 2>/dev/null || true
+        return 1
+    fi
+    
+    cd "$actual_src_dir" || { echo "  ✗ Failed to enter $actual_src_dir"; return 1; }
     
     # Run autogen if needed
     if [ "$need_autogen" = "true" ]; then
         if [ -f "./autogen.sh" ]; then
             run_command "./autogen.sh" "/dev/null"
+        elif [ -f "./configure.ac" ]; then
+            echo "  ⚠ autogen.sh not found, trying autoreconf..."
+            run_command "autoreconf -i" "/dev/null"
         else
             echo "  ⚠ autogen.sh not found, skipping"
         fi
@@ -6086,14 +6111,14 @@ compile_package() {
     
     # Configure, make, install
     run_command "./configure $configure_args --prefix=$install_dir" "/dev/null"
-    run_command "make" "/dev/null"
+    run_command "make -j$(nproc)" "/dev/null"
     run_command "make install" "/dev/null"
     
     # Cleanup
     cd ..
-    run_command "rm -rf $src_dir" "/dev/null"
+    run_command "rm -rf $actual_src_dir" "/dev/null"
     
-    # Update PATH
+    # Update PATH globally
     export PATH="$PATH:$install_dir/bin"
     
     # Verify installation
@@ -6167,6 +6192,9 @@ distribute_to_server() {
             cp "$install_dir/oscheckperf" /tmp/oscheckperf-src/
             cp tools/sysbench-1.0.20.tar.gz /tmp/oscheckperf-src/tools/ 2>/dev/null || true
             cp tools/sshpass-1.09.tar.gz /tmp/oscheckperf-src/tools/ 2>/dev/null || true
+            cp tools/fio-3.40.tar.gz /tmp/oscheckperf-src/tools/ 2>/dev/null || true
+            cp tools/iperf-3.18.tar.gz /tmp/oscheckperf-src/tools/ 2>/dev/null || true
+            cp tools/jq-1.8.1.tar.gz /tmp/oscheckperf-src/tools/ 2>/dev/null || true
             
             local tar_file="/tmp/oscheckperf-src.tar.gz"
             tar -czf "$tar_file" -C /tmp oscheckperf-src
@@ -6214,13 +6242,14 @@ install_sysbench() {
     fi
     
     compile_package "sysbench" "tools/sysbench-1.0.20.tar.gz" "sysbench-1.0.20" "--without-mysql" "true"
+    local compile_result=$?
     
     # Configure bashrc
     if ! grep -q "oscheckperf/bin" ~/.bashrc; then
         run_command "echo 'export PATH=\$PATH:$install_dir/bin' >> ~/.bashrc" "/dev/null"
     fi
     
-    return 0
+    return $compile_result
 }
 
 # Compile and install sshpass
@@ -6265,6 +6294,125 @@ install_sshpass() {
     return 0
 }
 
+# Compile and install fio
+install_fio() {
+    local install_dir="$HOME/oscheckperf"
+    
+    if [ -d "$install_dir/bin" ] && [ -x "$install_dir/bin/fio" ]; then
+        echo "  ✓ fio already installed at $install_dir"
+        export PATH="$PATH:$install_dir/bin"
+        return 0
+    fi
+    
+    echo "[Step 1/2] Compiling fio..."
+    
+    echo "  Checking build dependencies..."
+    if ! command -v gcc &> /dev/null || ! command -v make &> /dev/null; then
+        echo "  Installing build dependencies..."
+        if command -v yum &> /dev/null; then
+            run_command "sudo yum install -y gcc gcc-c++ make" "/dev/null"
+        elif command -v apt-get &> /dev/null; then
+            run_command "sudo apt-get install -y gcc g++ make" "/dev/null"
+        else
+            echo "  ⚠ Could not install dependencies automatically"
+        fi
+    else
+        echo "  Build dependencies already installed"
+    fi
+    
+    compile_package "fio" "tools/fio-3.41.tar.gz" "fio-3.41" "" "false"
+    
+    if ! grep -q "oscheckperf/bin" ~/.bashrc; then
+        run_command "echo 'export PATH=\$PATH:$install_dir/bin' >> ~/.bashrc" "/dev/null"
+    fi
+    
+    if command -v fio &> /dev/null; then
+        echo "  ✓ fio version: $(fio --version | head -1)"
+    fi
+    
+    return 0
+}
+
+# Compile and install iperf3
+install_iperf3() {
+    local install_dir="$HOME/oscheckperf"
+    
+    if [ -d "$install_dir/bin" ] && [ -x "$install_dir/bin/iperf3" ]; then
+        echo "  ✓ iperf3 already installed at $install_dir"
+        export PATH="$PATH:$install_dir/bin"
+        return 0
+    fi
+    
+    echo "[Step 1/2] Compiling iperf3..."
+    
+    echo "  Checking build dependencies..."
+    if ! command -v gcc &> /dev/null || ! command -v make &> /dev/null || ! command -v automake &> /dev/null; then
+        echo "  Installing build dependencies..."
+        if command -v yum &> /dev/null; then
+            run_command "sudo yum install -y automake autoconf libtool gcc gcc-c++ make" "/dev/null"
+        elif command -v apt-get &> /dev/null; then
+            run_command "sudo apt-get install -y automake autoconf libtool gcc g++ make" "/dev/null"
+        else
+            echo "  ⚠ Could not install dependencies automatically"
+        fi
+    else
+        echo "  Build dependencies already installed"
+    fi
+    
+    compile_package "iperf3" "tools/iperf-3.18.tar.gz" "iperf-3.18" "" "false"
+    local compile_result=$?
+    
+    if ! grep -q "oscheckperf/bin" ~/.bashrc; then
+        run_command "echo 'export PATH=\$PATH:$install_dir/bin' >> ~/.bashrc" "/dev/null"
+    fi
+    
+    if command -v iperf3 &> /dev/null; then
+        echo "  ✓ iperf3 version: $(iperf3 --version | head -1)"
+    fi
+    
+    return $compile_result
+}
+
+# Compile and install jq
+install_jq() {
+    local install_dir="$HOME/oscheckperf"
+    
+    if [ -d "$install_dir/bin" ] && [ -x "$install_dir/bin/jq" ]; then
+        echo "  ✓ jq already installed at $install_dir"
+        export PATH="$PATH:$install_dir/bin"
+        return 0
+    fi
+    
+    echo "[Step 1/2] Compiling jq..."
+    
+    echo "  Checking build dependencies..."
+    if ! command -v gcc &> /dev/null || ! command -v make &> /dev/null || ! command -v automake &> /dev/null; then
+        echo "  Installing build dependencies..."
+        if command -v yum &> /dev/null; then
+            run_command "sudo yum install -y automake autoconf libtool gcc gcc-c++ make" "/dev/null"
+        elif command -v apt-get &> /dev/null; then
+            run_command "sudo apt-get install -y automake autoconf libtool gcc g++ make" "/dev/null"
+        else
+            echo "  ⚠ Could not install dependencies automatically"
+        fi
+    else
+        echo "  Build dependencies already installed"
+    fi
+    
+    compile_package "jq" "tools/jq-1.8.1.tar.gz" "jq-1.8.1" "--with-oniguruma=builtin" "false"
+    local compile_result=$?
+    
+    if ! grep -q "oscheckperf/bin" ~/.bashrc; then
+        run_command "echo 'export PATH=\$PATH:$install_dir/bin' >> ~/.bashrc" "/dev/null"
+    fi
+    
+    if command -v jq &> /dev/null; then
+        echo "  ✓ jq version: $(jq --version)"
+    fi
+    
+    return $compile_result
+}
+
 # Copy oscheckperf script to install directory
 install_oscheckperf_script() {
     local install_dir="$HOME/oscheckperf"
@@ -6288,12 +6436,16 @@ install_components() {
     local target="$1"
     local local_ip=$(get_machine_ip)
     local install_dir="$HOME/oscheckperf"
+    local error_count=0
     
     echo "=== Oscheckperf Installation and Distribution ==="
     
     # Determine what to install
     local install_sysbench=false
     local install_sshpass=false
+    local install_fio=false
+    local install_iperf3=false
+    local install_jq=false
     local install_script=false
     
     case "$target" in
@@ -6303,33 +6455,59 @@ install_components() {
         sshpass)
             install_sshpass=true
             ;;
+        fio)
+            install_fio=true
+            ;;
+        iperf3)
+            install_iperf3=true
+            ;;
+        jq)
+            install_jq=true
+            ;;
         oscheckperf)
             install_script=true
             ;;
         all)
             install_sysbench=true
             install_sshpass=true
+            install_fio=true
+            install_iperf3=true
+            install_jq=true
             install_script=true
             ;;
         *)
             echo "Error: Invalid installation target '$target'"
-            echo "Valid targets: sysbench, sshpass, oscheckperf, all"
+            echo "Valid targets: sysbench, sshpass, fio, iperf3, jq, oscheckperf, all"
             exit 1
             ;;
     esac
     
     # Local installation
     if [ "$install_sysbench" = "true" ]; then
-        install_sysbench
+        install_sysbench || error_count=$((error_count + 1))
     fi
     
     if [ "$install_sshpass" = "true" ]; then
-        install_sshpass
+        install_sshpass || error_count=$((error_count + 1))
+    fi
+    
+    if [ "$install_fio" = "true" ]; then
+        install_fio || error_count=$((error_count + 1))
+    fi
+    
+    if [ "$install_iperf3" = "true" ]; then
+        install_iperf3 || error_count=$((error_count + 1))
+    fi
+    
+    if [ "$install_jq" = "true" ]; then
+        install_jq || error_count=$((error_count + 1))
     fi
     
     if [ "$install_script" = "true" ]; then
-        install_oscheckperf_script
+        install_oscheckperf_script || error_count=$((error_count + 1))
     fi
+    
+    export INSTALL_ERROR_COUNT=$error_count
     
     # Distribute to remote servers
     if [ ${#target_servers[@]} -gt 0 ]; then
@@ -6349,6 +6527,15 @@ install_components() {
     fi
     if [ "$install_sshpass" = "true" ] && command -v sshpass &> /dev/null; then
         echo "  - sshpass: installed ($(sshpass -V 2>&1 | head -1))"
+    fi
+    if [ "$install_fio" = "true" ] && command -v fio &> /dev/null; then
+        echo "  - fio: installed ($(fio --version | head -1))"
+    fi
+    if [ "$install_iperf3" = "true" ] && command -v iperf3 &> /dev/null; then
+        echo "  - iperf3: installed ($(iperf3 --version | head -1))"
+    fi
+    if [ "$install_jq" = "true" ] && command -v jq &> /dev/null; then
+        echo "  - jq: installed ($(jq --version))"
     fi
     if [ "$install_script" = "true" ]; then
         echo "  - oscheckperf: installed"
