@@ -1,7 +1,7 @@
 #!/bin/bash
 #--------------------------------------------------------------------------------
 #-- File name:   oscheckperf
-#-- Version:     v0.9.0
+#-- Version:     v0.9.1
 #-- Purpose:     Database System Benchmark Tool
 #-- Author:      Wanping Pan 
 #-- Description: One-click system benchmarking tool, supports configuration via config file or command line parameters
@@ -778,7 +778,7 @@ parse_args() {
                 exit 0
                 ;;
             --version)
-                echo "Version: 0.9.0"
+                echo "Version: 0.9.1"
                 exit 0
                 ;;
             --dry-run)
@@ -1024,7 +1024,8 @@ show_help() {
     echo "Network test parameters:"
     echo "  NETWORK_MODE=serial|parallel|matrix  Network test mode (default: matrix)"
     echo "  NETWORK_PORT=<port>        Test port (default: $NETWORK_PORT_DEFAULT)"
-    echo "  NETWORK_PARALLEL=<number>  Parallel connections (default: 1)"
+    echo "  NETWORK_PARALLEL=<number>  Parallel connections per test (default: 1)"
+    echo "  Note: Matrix mode auto-enables batch parallel when hosts > 3"
     echo ""
     echo "Threads test parameters:"
     echo "  THREADS_NUM=<number>        Number of threads (default: auto, cpu_cores*4)"
@@ -1053,27 +1054,14 @@ show_help() {
     echo "    # 192.168.1.102:user:password    # password authentication"
     echo ""
     echo "  # Configuration file usage"
-    echo "  $0 -p config.ini"
-    echo "    # config.ini content:"
+    echo "  $0 -p parameter.conf"
+    echo "    # parameter.conf content:"
     echo "    # DURATION=60"
     echo "    # IO_TOOL=fio"
     echo "    # FIO_PROFILES=randrw"
     echo ""
     echo "  # Combine config file with command line parameters"
-    echo "  $0 -p config.ini DURATION=30"
-    echo ""
-    echo "Directory Structure:"
-    echo "  \$HOME/oscheckperf/"
-    echo "    ├── oscheckperf       # Main entry script"
-    echo "    ├── tmp/              # Temporary files (network test results, intermediate data)"
-    echo "    ├── io_test/          # IO test data files (sysbench/fio)"
-    echo "    └── output/           # Final reports and logs (original_data*, data*, report_benchmark*)"
-    echo ""
-    echo "Path Configuration (modify via BASE_DIR environment variable):"
-    echo "  BASE_DIR                Base directory (default: $HOME/oscheckperf)"
-    echo "  TMP_DIR                 Temp directory (default: \$BASE_DIR/tmp)"
-    echo "  IO_PATH                 IO test directory (default: \$BASE_DIR/io_test)"
-    echo "  OUTPUT_DIR              Output directory (default: ./output)"
+    echo "  $0 -p parameter.conf DURATION=30"
     echo ""
 }
 
@@ -3539,11 +3527,9 @@ run_serial_network_test() {
         # Actual run: start the server
         # Note: Residual processes are already cleaned up in check_all() phase
         run_command "iperf3 -s -p \"$port\" -D" "/dev/null"
-        sleep 2  # Wait for server to start
-        
-        # Verify server is running using pidof (more reliable than pgrep)
-        if ! pidof iperf3 > /dev/null; then
-            echo "⚠ Failed to start iperf3 server"
+        # Poll for local server port readiness instead of fixed sleep
+        if ! wait_for_iperf3_server "" "$port" "" 10; then
+            echo "Local server $port startup timeout after 10s"
             return 1
         fi
     fi
@@ -3654,8 +3640,377 @@ run_serial_network_test() {
 }
 
 
+# Partition all host pairs into batches with no shared nodes within each batch
+# Uses circle method for even N, modified circle method for odd N
+# Output: one batch per line, pairs separated by commas, each pair as "src|dst"
+partition_pairs_into_batches() {
+    local num_hosts=$1
+    shift
+    local host_ips=("$@")
+    
+    # For even N: use circle method (N-1 rounds, each with N/2 pairs)
+    # For odd N: use modified circle method (N rounds, each with (N-1)/2 pairs, one host rests per round)
+    
+    if [ $((num_hosts % 2)) -eq 0 ]; then
+        # Even N: standard circle method
+        # Algorithm: fix host 0, rotate remaining hosts in a circle
+        local m=$((num_hosts - 1))
+        for ((round=0; round<m; round++)); do
+            local arranged=()
+            arranged[0]=0
+            for ((pos=1; pos<=m; pos++)); do
+                arranged[$pos]=$(( (pos + round - 1) % m + 1 ))
+            done
+            
+            # Pair: (arr[0],arr[1]), (arr[2],arr[m]), (arr[3],arr[m-1]), ...
+            local batch_pairs=()
+            batch_pairs+=("${host_ips[${arranged[0]}]}|${host_ips[${arranged[1]}]}")
+            
+            local left=2
+            local right=$m
+            while [ $left -lt $right ]; do
+                local idx1=${arranged[$left]}
+                local idx2=${arranged[$right]}
+                if [ "$idx1" -lt "$idx2" ]; then
+                    batch_pairs+=("${host_ips[$idx1]}|${host_ips[$idx2]}")
+                else
+                    batch_pairs+=("${host_ips[$idx2]}|${host_ips[$idx1]}")
+                fi
+                left=$((left + 1))
+                right=$((right - 1))
+            done
+            
+            echo "$(IFS=,; echo "${batch_pairs[*]}")"
+        done
+    else
+        # Odd N: use dummy host + circle method
+        # Add a dummy host to make N+1 (even), use circle method, skip pairs with dummy
+        local even_n=$((num_hosts + 1))
+        local m=$((even_n - 1))
+        
+        for ((round=0; round<m; round++)); do
+            # Build arrangement for this round
+            local arranged=()
+            arranged[0]=0
+            for ((pos=1; pos<=m; pos++)); do
+                arranged[$pos]=$(( (pos + round - 1) % m + 1 ))
+            done
+            
+            # Pair hosts, skip any pair involving the dummy (index = num_hosts)
+            local batch_pairs=()
+            
+            # First pair
+            if [ "${arranged[0]}" -lt "$num_hosts" ] && [ "${arranged[1]}" -lt "$num_hosts" ]; then
+                local idx1=${arranged[0]}
+                local idx2=${arranged[1]}
+                if [ "$idx1" -lt "$idx2" ]; then
+                    batch_pairs+=("${host_ips[$idx1]}|${host_ips[$idx2]}")
+                else
+                    batch_pairs+=("${host_ips[$idx2]}|${host_ips[$idx1]}")
+                fi
+            fi
+            
+            # Remaining pairs
+            local left=2
+            local right=$m
+            while [ $left -lt $right ]; do
+                local idx1=${arranged[$left]}
+                local idx2=${arranged[$right]}
+                
+                # Only include if both are real hosts (not dummy)
+                if [ "$idx1" -lt "$num_hosts" ] && [ "$idx2" -lt "$num_hosts" ]; then
+                    if [ "$idx1" -lt "$idx2" ]; then
+                        batch_pairs+=("${host_ips[$idx1]}|${host_ips[$idx2]}")
+                    else
+                        batch_pairs+=("${host_ips[$idx2]}|${host_ips[$idx1]}")
+                    fi
+                fi
+                
+                left=$((left + 1))
+                right=$((right - 1))
+            done
+            
+            if [ ${#batch_pairs[@]} -gt 0 ]; then
+                echo "$(IFS=,; echo "${batch_pairs[*]}")"
+            fi
+        done
+    fi
+}
+
+
+# Run a single matrix test pair (server start -> client test -> server stop)
+run_single_matrix_pair() {
+    local src="$1"
+    local dst="$2"
+    local port="$3"
+    local duration="$4"
+    local parallel="$5"
+    local LOCAL_IP="$6"
+    local pair_idx="$7"
+    
+    local client_output_file="$TMP_DIR/network_matrix_${pair_idx}_${TIMESTAMP}.json"
+    local client_text_output="$TMP_DIR/network_matrix_${pair_idx}_${TIMESTAMP}_text.log"
+    local client_timeout=$((duration + 15))
+    local result="0"
+    
+    # Start iperf3 server on destination
+    set_ssh_password "$dst"
+    local dst_ssh=$(get_ssh_command "$dst")
+    
+    if [ "$DRY_RUN" = true ]; then
+        echo "[DRY RUN] $dst_ssh 'iperf3 -s -p $port -D'"
+    else
+        eval "$dst_ssh 'iperf3 -s -p $port -D'" > /dev/null 2>&1
+        
+        # Wait for remote server port to be ready
+        if ! wait_for_iperf3_server "$dst_ssh" "$port" "true" 15; then
+            echo "  ⚠ Server $dst:$port startup timeout after 15s"
+        fi
+    fi
+    
+    # Run iperf3 client from source
+    if [ "$DRY_RUN" = true ]; then
+        if [ "$src" = "$LOCAL_IP" ]; then
+            echo "[DRY RUN] timeout --signal=KILL $client_timeout iperf3 -c \"$dst\" -p \"$port\" -t \"$duration\" -P \"$parallel\" -J"
+        else
+            local src_ssh=$(get_ssh_command "$src")
+            echo "[DRY RUN] timeout --signal=KILL $client_timeout $src_ssh 'iperf3 -c \"$dst\" -p \"$port\" -t \"$duration\" -P \"$parallel\" -J'"
+        fi
+    else
+        if [ "$src" = "$LOCAL_IP" ]; then
+            # Run locally
+            if timeout --signal=KILL $client_timeout iperf3 -c "$dst" -p "$port" -t "$duration" -P "$parallel" -J > "$client_output_file" 2>&1; then
+                generate_iperf3_text_from_json "$client_output_file" "$client_text_output"
+            else
+                echo "  ⚠ Test failed: $src -> $dst"
+                eval "$dst_ssh 'pkill -f \"iperf3 -s -p $port\"'" > /dev/null 2>&1
+                echo "$src|$dst|0"
+                return
+            fi
+        else
+            # Run via SSH
+            set_ssh_password "$src"
+            local src_ssh=$(get_ssh_command "$src")
+            if eval "timeout --signal=KILL $client_timeout $src_ssh 'iperf3 -c \"$dst\" -p \"$port\" -t \"$duration\" -P \"$parallel\" -J'" > "$client_output_file" 2>&1; then
+                generate_iperf3_text_from_json "$client_output_file" "$client_text_output"
+            else
+                echo "  ⚠ Test failed: $src -> $dst"
+                eval "$dst_ssh 'pkill -f \"iperf3 -s -p $port\"'" > /dev/null 2>&1
+                echo "$src|$dst|0"
+                return
+            fi
+        fi
+        
+        # Parse result
+        if [ -f "$client_output_file" ]; then
+            local bandwidth=$(parse_iperf3_matrix_result "$client_output_file")
+            result="$bandwidth"
+            
+            # Display per-second throughput
+            display_per_second_throughput "$client_text_output" "$dst (from $src)"
+            
+            # Append to combined results file
+            append_to_original "NETWORK MATRIX TEST RESULTS ($src -> $dst)" "$client_text_output"
+            
+            echo "  ✓ Test completed: $src -> $dst = ${bandwidth} MB/s"
+        else
+            echo "  ⚠ Test failed: $src -> $dst (no output file)"
+        fi
+    fi
+    
+    # Stop iperf3 server on destination
+    if [ "$DRY_RUN" = true ]; then
+        echo "[DRY RUN] Would stop iperf3 server on $dst"
+        echo "[DRY RUN] $dst_ssh 'pkill -f \"iperf3 -s -p $port\"'"
+    else
+        nohup eval "$dst_ssh 'pkill -f \"iperf3 -s -p $port\" 2>/dev/null'" > /dev/null 2>&1 &
+        sleep 1
+    fi
+    
+    echo "$src|$dst|$result"
+}
+
+
+# Run a batch of matrix test pairs in parallel
+run_matrix_batch() {
+    local batch_idx="$1"
+    local base_port="$2"
+    local duration="$3"
+    local parallel="$4"
+    local LOCAL_IP="$5"
+    shift 5
+    local pairs=("$@")
+    
+    local batch_size=${#pairs[@]}
+    echo ""
+    echo "  [Batch $batch_idx] Running $batch_size pairs in parallel..."
+    
+    # Start all servers in parallel
+    local server_pids=()
+    local server_ports=()
+    local server_dsts=()
+    local pair_idx=0
+    
+    for pair in "${pairs[@]}"; do
+        IFS='|' read -r src dst <<< "$pair"
+        local port=$((base_port + pair_idx))
+        
+        echo "    Starting server on $dst with port $port..."
+        set_ssh_password "$dst"
+        local dst_ssh=$(get_ssh_command "$dst")
+        
+        if [ "$DRY_RUN" = true ]; then
+            echo "    [DRY RUN] $dst_ssh 'iperf3 -s -p $port -D'"
+        else
+            eval "$dst_ssh 'iperf3 -s -p $port -D'" > /dev/null 2>&1 &
+            server_pids+=($!)
+            server_ports+=("$port")
+            server_dsts+=("$dst")
+        fi
+        
+        pair_idx=$((pair_idx + 1))
+    done
+    
+    # Wait for all batch servers to be ready
+    if [ "$DRY_RUN" != true ]; then
+        echo "    Waiting for servers to start..."
+        local wait_timeout=15
+        local waited=0
+        
+        while [ $waited -lt $wait_timeout ]; do
+            local all_ready=true
+            local pair_check=0
+            for pair in "${pairs[@]}"; do
+                IFS='|' read -r src dst <<< "$pair"
+                local port=$((base_port + pair_check))
+                
+                # Get SSH command for this destination
+                set_ssh_password "$dst"
+                local dst_ssh=$(get_ssh_command "$dst")
+                
+                # Check if port is listening on remote host
+                if ! wait_for_iperf3_server "$dst_ssh" "$port" "true" 1; then
+                    all_ready=false
+                    break
+                fi
+                pair_check=$((pair_check + 1))
+            done
+            
+            if [ "$all_ready" = true ]; then
+                echo "    All servers ready"
+                break
+            fi
+            
+            waited=$((waited + 1))
+        done
+        
+        if [ $waited -ge $wait_timeout ]; then
+            echo "    ⚠ Server startup timeout after ${wait_timeout}s, continuing anyway"
+        fi
+    fi
+    
+    # Run all clients in parallel
+    local client_pids=()
+    local client_output_files=()
+    local client_results=()
+    pair_idx=0
+    
+    for pair in "${pairs[@]}"; do
+        IFS='|' read -r src dst <<< "$pair"
+        local port=$((base_port + pair_idx))
+        local client_output_file="$TMP_DIR/network_matrix_${batch_idx}_${pair_idx}_${TIMESTAMP}.json"
+        local client_text_output="$TMP_DIR/network_matrix_${batch_idx}_${pair_idx}_${TIMESTAMP}_text.log"
+        local client_timeout=$((duration + 15))
+        
+        echo "    Running client: $src -> $dst (port $port)..."
+        
+        if [ "$DRY_RUN" = true ]; then
+            if [ "$src" = "$LOCAL_IP" ]; then
+                echo "    [DRY RUN] timeout --signal=KILL $client_timeout iperf3 -c \"$dst\" -p \"$port\" -t \"$duration\" -P \"$parallel\" -J"
+            else
+                local src_ssh=$(get_ssh_command "$src")
+                echo "    [DRY RUN] timeout --signal=KILL $client_timeout $src_ssh 'iperf3 -c \"$dst\" -p \"$port\" -t \"$duration\" -P \"$parallel\" -J'"
+            fi
+            client_results+=("$src|$dst|0")
+        else
+            if [ "$src" = "$LOCAL_IP" ]; then
+                timeout --signal=KILL $client_timeout iperf3 -c "$dst" -p "$port" -t "$duration" -P "$parallel" -J > "$client_output_file" 2>&1 &
+                client_pids+=($!)
+            else
+                set_ssh_password "$src"
+                local src_ssh=$(get_ssh_command "$src")
+                eval "timeout --signal=KILL $client_timeout $src_ssh 'iperf3 -c \"$dst\" -p \"$port\" -t \"$duration\" -P \"$parallel\" -J'" > "$client_output_file" 2>&1 &
+                client_pids+=($!)
+            fi
+            client_output_files+=("$client_output_file|$client_text_output|$src|$dst")
+        fi
+        
+        pair_idx=$((pair_idx + 1))
+    done
+    
+    # Wait for all clients to complete
+    if [ "$DRY_RUN" != true ]; then
+        for pid in "${client_pids[@]}"; do
+            wait $pid 2>/dev/null
+        done
+        
+        # Parse results for all pairs
+        pair_idx=0
+        for output_info in "${client_output_files[@]}"; do
+            IFS='|' read -r client_output_file client_text_output src dst <<< "$output_info"
+            IFS='|' read -r pair_src pair_dst <<< "${pairs[$pair_idx]}"
+            
+            if [ -f "$client_output_file" ]; then
+                generate_iperf3_text_from_json "$client_output_file" "$client_text_output"
+                local bandwidth=$(parse_iperf3_matrix_result "$client_output_file")
+                
+                display_per_second_throughput "$client_text_output" "$pair_dst (from $pair_src)"
+                append_to_original "NETWORK MATRIX TEST RESULTS ($pair_src -> $pair_dst)" "$client_text_output"
+                
+                echo "    ✓ Test completed: $pair_src -> $pair_dst = ${bandwidth} MB/s"
+                client_results+=("$pair_src|$pair_dst|$bandwidth")
+            else
+                echo "    ⚠ Test failed: $pair_src -> $pair_dst (timeout or error)"
+                client_results+=("$pair_src|$pair_dst|0")
+            fi
+            
+            pair_idx=$((pair_idx + 1))
+        done
+    fi
+    
+    # Stop all servers
+    if [ "$DRY_RUN" = true ]; then
+        pair_idx=0
+        for pair in "${pairs[@]}"; do
+            IFS='|' read -r src dst <<< "$pair"
+            local port=$((base_port + pair_idx))
+            set_ssh_password "$dst"
+            local dst_ssh=$(get_ssh_command "$dst")
+            echo "    [DRY RUN] $dst_ssh 'pkill -f \"iperf3 -s -p $port\"'"
+            pair_idx=$((pair_idx + 1))
+        done
+    else
+        pair_idx=0
+        for dst in "${server_dsts[@]}"; do
+            local port=${server_ports[$pair_idx]}
+            set_ssh_password "$dst"
+            local dst_ssh=$(get_ssh_command "$dst")
+            nohup eval "$dst_ssh 'pkill -f \"iperf3 -s -p $port\" 2>/dev/null'" > /dev/null 2>&1 &
+            pair_idx=$((pair_idx + 1))
+        done
+        sleep 1
+    fi
+    
+    # Return results
+    for result in "${client_results[@]}"; do
+        echo "RESULT:$result"
+    done
+}
+
+
 
 # Matrix network test (all-to-all cross testing)
+# Supports batch parallel execution when num_hosts > 3
 run_matrix_network_test() {
     start_timer "network_test_matrix"
     echo "=== Matrix Network Performance Test (All-to-All) ==="
@@ -3699,122 +4054,172 @@ run_matrix_network_test() {
     local total_pairs=$((num_hosts * (num_hosts - 1) / 2))
     echo "  Total test pairs: $total_pairs"
     
-    # Generate host pairs (A→B only, no B→A duplicates)
-    local test_pairs=()
-    for ((i=0; i<num_hosts; i++)); do
-        for ((j=i+1; j<num_hosts; j++)); do
-            test_pairs+=("${host_ips[i]}|${host_ips[j]}")
-        done
-    done
+    # Determine execution mode: serial vs batch parallel
+    local use_batch_parallel=false
+    local batch_size=1
     
-    local num_pairs=${#test_pairs[@]}
-    echo "  Total test scenarios: $num_pairs"
-    echo "  Test pairs: ${test_pairs[*]}"
+    if [ $num_hosts -gt 3 ]; then
+        batch_size=$((num_hosts / 2))
+        use_batch_parallel=true
+        echo "  Execution mode: Batch parallel (batch_size=$batch_size)"
+    else
+        echo "  Execution mode: Serial (num_hosts <= 3, cannot batch)"
+    fi
     
     # Create results array
     local results=()
     
-    # Execute tests for each pair
-    local pair_idx=0
-    for pair in "${test_pairs[@]}"; do
-        pair_idx=$((pair_idx + 1))
-        IFS='|' read -r src dst <<< "$pair"
+    if [ "$use_batch_parallel" = true ]; then
+        # Batch parallel execution mode
+        # Generate all batches at once using greedy partitioning
+        local all_batches=()
+        while IFS= read -r batch_line; do
+            [ -n "$batch_line" ] && all_batches+=("$batch_line")
+        done < <(partition_pairs_into_batches $num_hosts "${host_ips[@]}")
         
-        echo ""
-        echo "  [Test $pair_idx/$num_pairs] Testing: $src -> $dst"
+        local num_batches=${#all_batches[@]}
+        echo "  Total batches: $num_batches"
         
-        # Start iperf3 server on destination
-        echo "  Starting iperf3 server on $dst..."
-        set_ssh_password "$dst"
-        local dst_ssh=$(get_ssh_command "$dst")
-        
-        if [ "$DRY_RUN" = true ]; then
-            echo "[DRY RUN] $dst_ssh 'iperf3 -s -p $port -D'"
-        else
-            eval "$dst_ssh 'iperf3 -s -p $port -D'" > /dev/null 2>&1
-            sleep 3  # Wait for server to start
-        fi
-        
-        # Run iperf3 client from source
-        local client_output_file="$TMP_DIR/network_matrix_${pair_idx}_${TIMESTAMP}.json"
-        local client_text_output="$TMP_DIR/network_matrix_${pair_idx}_${TIMESTAMP}_text.log"
-        
-        echo "  Running iperf3 client from $src to $dst..."
-        
-        # Calculate timeout: duration + 15s buffer
-        local client_timeout=$((duration + 15))
-        
-        # Check if source is local machine
-        if [ "$DRY_RUN" = true ]; then
-            echo "[DRY RUN] Would run iperf3 client from $src to $dst"
-            if [ "$src" = "$LOCAL_IP" ]; then
-                echo "[DRY RUN] timeout --signal=KILL $client_timeout iperf3 -c \"$dst\" -p \"$port\" -t \"$duration\" -P \"$parallel\" -J"
-            else
-                local src_ssh=$(get_ssh_command "$src")
-                echo "[DRY RUN] timeout --signal=KILL $client_timeout $src_ssh 'iperf3 -c \"$dst\" -p \"$port\" -t \"$duration\" -P \"$parallel\" -J'"
-            fi
-        else
-            if [ "$src" = "$LOCAL_IP" ]; then
-                # Run locally
-                if timeout --signal=KILL $client_timeout iperf3 -c "$dst" -p "$port" -t "$duration" -P "$parallel" -J > "$client_output_file" 2>&1; then
-                    # Generate text format from JSON
-                    generate_iperf3_text_from_json "$client_output_file" "$client_text_output"
-                else
-                    results+=("$src|$dst|0")
-                    echo "  ⚠ Test failed: $src -> $dst"
-                    # Stop iperf3 server on destination
-                    eval "$dst_ssh 'pkill -f \"iperf3 -s -p $port\"'" > /dev/null 2>&1
-                    continue
+        for ((batch_idx=0; batch_idx<num_batches; batch_idx++)); do
+            local batch_line="${all_batches[$batch_idx]}"
+            local batch_pairs=()
+            IFS=',' read -ra batch_pairs <<< "$batch_line"
+            
+            local batch_count=${#batch_pairs[@]}
+            echo ""
+            echo "  === Batch $((batch_idx + 1))/$num_batches ==="
+            echo "  Pairs in this batch: $batch_count"
+            for pair in "${batch_pairs[@]}"; do
+                echo "    $pair"
+            done
+            
+            # Run batch in parallel and collect results
+            while IFS= read -r line; do
+                if [[ "$line" == RESULT:* ]]; then
+                    results+=("${line#RESULT:}")
                 fi
-            else
-                # Run via SSH
-                set_ssh_password "$src"
-                local src_ssh=$(get_ssh_command "$src")
-                if eval "timeout --signal=KILL $client_timeout $src_ssh 'iperf3 -c \"$dst\" -p \"$port\" -t \"$duration\" -P \"$parallel\" -J'" > "$client_output_file" 2>&1; then
-                    # Generate text format from JSON
-                    generate_iperf3_text_from_json "$client_output_file" "$client_text_output"
-                else
-                    results+=("$src|$dst|0")
-                    echo "  ⚠ Test failed: $src -> $dst"
-                    # Stop iperf3 server on destination
-                    eval "$dst_ssh 'pkill -f \"iperf3 -s -p $port\"'" > /dev/null 2>&1
-                    continue
-                fi
-            fi
-        fi
+            done < <(run_matrix_batch $((batch_idx + 1)) "$port" "$duration" "$parallel" "$LOCAL_IP" "${batch_pairs[@]}")
+        done
+    else
+        # Original serial execution mode
+        # Generate host pairs (A→B only, no B→A duplicates)
+        local test_pairs=()
+        for ((i=0; i<num_hosts; i++)); do
+            for ((j=i+1; j<num_hosts; j++)); do
+                test_pairs+=("${host_ips[i]}|${host_ips[j]}")
+            done
+        done
         
-        # Parse result
-        if [ "$DRY_RUN" != true ] && [ -f "$client_output_file" ]; then
-            local bandwidth=$(parse_iperf3_matrix_result "$client_output_file")
-            results+=("$src|$dst|$bandwidth")
+        local num_pairs=${#test_pairs[@]}
+        echo "  Total test scenarios: $num_pairs"
+        echo "  Test pairs: ${test_pairs[*]}"
+        
+        # Execute tests for each pair serially
+        local pair_idx=0
+        for pair in "${test_pairs[@]}"; do
+            pair_idx=$((pair_idx + 1))
+            IFS='|' read -r src dst <<< "$pair"
             
-            # Display per-second throughput
-            display_per_second_throughput "$client_text_output" "$dst (from $src)"
+            echo ""
+            echo "  [Test $pair_idx/$num_pairs] Testing: $src -> $dst"
             
-            # Append to combined results file
-            append_to_original "NETWORK MATRIX TEST RESULTS ($src -> $dst)" "$client_text_output"
+            # Start iperf3 server on destination
+            echo "  Starting iperf3 server on $dst..."
+            set_ssh_password "$dst"
+            local dst_ssh=$(get_ssh_command "$dst")
             
-            echo "  ✓ Test completed: $src -> $dst = ${bandwidth} MB/s"
-        else
             if [ "$DRY_RUN" = true ]; then
-                results+=("$src|$dst|0")
-                echo "  [DRY RUN] Test would complete: $src -> $dst"
+                echo "[DRY RUN] $dst_ssh 'iperf3 -s -p $port -D'"
             else
-                results+=("$src|$dst|0")
-                echo "  ⚠ Test failed: $src -> $dst"
+                eval "$dst_ssh 'iperf3 -s -p $port -D'" > /dev/null 2>&1
+                
+                # Wait for remote server port to be ready
+                if ! wait_for_iperf3_server "$dst_ssh" "$port" "true" 15; then
+                    echo "  ⚠ Server $dst:$port startup timeout after 15s"
+                fi
             fi
-        fi
-        
-        # Stop iperf3 server on destination
-        if [ "$DRY_RUN" = true ]; then
-            echo "[DRY RUN] Would stop iperf3 server on $dst"
-            echo "[DRY RUN] $dst_ssh 'pkill -f \"iperf3 -s -p $port\"'"
-        else
-            # Use nohup to avoid SSH blocking
-            nohup eval "$dst_ssh 'pkill -f \"iperf3 -s -p $port\" 2>/dev/null'" > /dev/null 2>&1 &
-            sleep 1
-        fi
-    done
+            
+            # Run iperf3 client from source
+            local client_output_file="$TMP_DIR/network_matrix_${pair_idx}_${TIMESTAMP}.json"
+            local client_text_output="$TMP_DIR/network_matrix_${pair_idx}_${TIMESTAMP}_text.log"
+            
+            echo "  Running iperf3 client from $src to $dst..."
+            
+            # Calculate timeout: duration + 15s buffer
+            local client_timeout=$((duration + 15))
+            
+            # Check if source is local machine
+            if [ "$DRY_RUN" = true ]; then
+                echo "[DRY RUN] Would run iperf3 client from $src to $dst"
+                if [ "$src" = "$LOCAL_IP" ]; then
+                    echo "[DRY RUN] timeout --signal=KILL $client_timeout iperf3 -c \"$dst\" -p \"$port\" -t \"$duration\" -P \"$parallel\" -J"
+                else
+                    local src_ssh=$(get_ssh_command "$src")
+                    echo "[DRY RUN] timeout --signal=KILL $client_timeout $src_ssh 'iperf3 -c \"$dst\" -p \"$port\" -t \"$duration\" -P \"$parallel\" -J'"
+                fi
+            else
+                if [ "$src" = "$LOCAL_IP" ]; then
+                    # Run locally
+                    if timeout --signal=KILL $client_timeout iperf3 -c "$dst" -p "$port" -t "$duration" -P "$parallel" -J > "$client_output_file" 2>&1; then
+                        # Generate text format from JSON
+                        generate_iperf3_text_from_json "$client_output_file" "$client_text_output"
+                    else
+                        results+=("$src|$dst|0")
+                        echo "  ⚠ Test failed: $src -> $dst"
+                        # Stop iperf3 server on destination
+                        eval "$dst_ssh 'pkill -f \"iperf3 -s -p $port\"'" > /dev/null 2>&1
+                        continue
+                    fi
+                else
+                    # Run via SSH
+                    set_ssh_password "$src"
+                    local src_ssh=$(get_ssh_command "$src")
+                    if eval "timeout --signal=KILL $client_timeout $src_ssh 'iperf3 -c \"$dst\" -p \"$port\" -t \"$duration\" -P \"$parallel\" -J'" > "$client_output_file" 2>&1; then
+                        # Generate text format from JSON
+                        generate_iperf3_text_from_json "$client_output_file" "$client_text_output"
+                    else
+                        results+=("$src|$dst|0")
+                        echo "  ⚠ Test failed: $src -> $dst"
+                        # Stop iperf3 server on destination
+                        eval "$dst_ssh 'pkill -f \"iperf3 -s -p $port\"'" > /dev/null 2>&1
+                        continue
+                    fi
+                fi
+            fi
+            
+            # Parse result
+            if [ "$DRY_RUN" != true ] && [ -f "$client_output_file" ]; then
+                local bandwidth=$(parse_iperf3_matrix_result "$client_output_file")
+                results+=("$src|$dst|$bandwidth")
+                
+                # Display per-second throughput
+                display_per_second_throughput "$client_text_output" "$dst (from $src)"
+                
+                # Append to combined results file
+                append_to_original "NETWORK MATRIX TEST RESULTS ($src -> $dst)" "$client_text_output"
+                
+                echo "  ✓ Test completed: $src -> $dst = ${bandwidth} MB/s"
+            else
+                if [ "$DRY_RUN" = true ]; then
+                    results+=("$src|$dst|0")
+                    echo "  [DRY RUN] Test would complete: $src -> $dst"
+                else
+                    results+=("$src|$dst|0")
+                    echo "  ⚠ Test failed: $src -> $dst"
+                fi
+            fi
+            
+            # Stop iperf3 server on destination
+            if [ "$DRY_RUN" = true ]; then
+                echo "[DRY RUN] Would stop iperf3 server on $dst"
+                echo "[DRY RUN] $dst_ssh 'pkill -f \"iperf3 -s -p $port\"'"
+            else
+                # Use nohup to avoid SSH blocking
+                nohup eval "$dst_ssh 'pkill -f \"iperf3 -s -p $port\" 2>/dev/null'" > /dev/null 2>&1 &
+                sleep 1
+            fi
+        done
+    fi
     
     # Generate matrix report
     generate_matrix_report results host_ips
@@ -4028,6 +4433,38 @@ EOF
 }
 
 # Parse iperf3 result for matrix test
+# Wait for iperf3 server to be ready by polling port listening status
+# Parameters: server_ssh, port, [is_remote]
+#   server_ssh: SSH command prefix to run on target host (empty for local)
+#   port: port number to check
+#   is_remote: "true" or empty/false
+# Returns: 0 if port is ready within timeout, 1 if timeout
+wait_for_iperf3_server() {
+    local server_ssh="$1"
+    local port="$2"
+    local is_remote="${3:-}"
+    
+    local timeout="$4"
+    local interval=1
+    local waited=0
+    
+    while [ $waited -lt $timeout ]; do
+        if [ "$is_remote" = "true" ]; then
+            if eval "$server_ssh 'netstat -tln 2>/dev/null | grep -q :$port || ss -tln 2>/dev/null | grep -q :$port'" > /dev/null 2>&1; then
+                return 0
+            fi
+        else
+            if netstat -tln 2>/dev/null | grep -q ":$port " || ss -tln 2>/dev/null | grep -q ":$port "; then
+                return 0
+            fi
+        fi
+        sleep $interval
+        waited=$((waited + interval))
+    done
+    
+    return 1
+}
+
 parse_iperf3_matrix_result() {
     local json_file="$1"
     
@@ -6231,9 +6668,9 @@ install_sysbench() {
     if ! command -v gcc &> /dev/null || ! command -v make &> /dev/null || ! command -v automake &> /dev/null; then
         echo "  Installing build dependencies..."
         if command -v yum &> /dev/null; then
-            run_command "sudo yum install -y automake autoconf libtool gcc gcc-c++ make" "/dev/null"
+            run_command "sudo yum install -y automake autoconf libtool gcc make" "/dev/null"
         elif command -v apt-get &> /dev/null; then
-            run_command "sudo apt-get install -y automake autoconf libtool gcc g++ make" "/dev/null"
+            run_command "sudo apt-get install -y automake autoconf libtool gcc make" "/dev/null"
         else
             echo "  ⚠ Could not install dependencies automatically"
         fi
@@ -6269,11 +6706,11 @@ install_sshpass() {
     if ! command -v gcc &> /dev/null || ! command -v make &> /dev/null; then
         echo "  Installing build dependencies..."
         if command -v yum &> /dev/null; then
-            run_command "sudo yum install -y gcc gcc-c++ make" "/dev/null"
+            run_command "sudo yum install -y gcc make" "/dev/null"
         elif command -v apt-get &> /dev/null; then
-            run_command "sudo apt-get install -y gcc g++ make" "/dev/null"
+            run_command "sudo apt-get install -y gcc make" "/dev/null"
         else
-            echo "  ⚠ Could not install dependencies automatically"
+            echo "   Could not install dependencies automatically"
         fi
     else
         echo "  Build dependencies already installed"
@@ -6310,9 +6747,9 @@ install_fio() {
     if ! command -v gcc &> /dev/null || ! command -v make &> /dev/null; then
         echo "  Installing build dependencies..."
         if command -v yum &> /dev/null; then
-            run_command "sudo yum install -y gcc gcc-c++ make" "/dev/null"
+            run_command "sudo yum install -y gcc make" "/dev/null"
         elif command -v apt-get &> /dev/null; then
-            run_command "sudo apt-get install -y gcc g++ make" "/dev/null"
+            run_command "sudo apt-get install -y gcc make" "/dev/null"
         else
             echo "  ⚠ Could not install dependencies automatically"
         fi
@@ -6349,9 +6786,9 @@ install_iperf3() {
     if ! command -v gcc &> /dev/null || ! command -v make &> /dev/null || ! command -v automake &> /dev/null; then
         echo "  Installing build dependencies..."
         if command -v yum &> /dev/null; then
-            run_command "sudo yum install -y automake autoconf libtool gcc gcc-c++ make" "/dev/null"
+            run_command "sudo yum install -y automake autoconf libtool gcc make" "/dev/null"
         elif command -v apt-get &> /dev/null; then
-            run_command "sudo apt-get install -y automake autoconf libtool gcc g++ make" "/dev/null"
+            run_command "sudo apt-get install -y automake autoconf libtool gcc make" "/dev/null"
         else
             echo "  ⚠ Could not install dependencies automatically"
         fi
@@ -6389,9 +6826,9 @@ install_jq() {
     if ! command -v gcc &> /dev/null || ! command -v make &> /dev/null || ! command -v automake &> /dev/null; then
         echo "  Installing build dependencies..."
         if command -v yum &> /dev/null; then
-            run_command "sudo yum install -y automake autoconf libtool gcc gcc-c++ make" "/dev/null"
+            run_command "sudo yum install -y automake autoconf libtool gcc make" "/dev/null"
         elif command -v apt-get &> /dev/null; then
-            run_command "sudo apt-get install -y automake autoconf libtool gcc g++ make" "/dev/null"
+            run_command "sudo apt-get install -y automake autoconf libtool gcc make" "/dev/null"
         else
             echo "  ⚠ Could not install dependencies automatically"
         fi
