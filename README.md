@@ -16,12 +16,9 @@
 - **一站式性能评估**：覆盖 CPU、内存、磁盘 IO、网络吞吐、线程调度、互斥锁六大核心维度
 - **双引擎 IO 测试**：同时支持 sysbench 和 fio，满足不同场景下的 IO 性能评估需求
 - **多维网络测试**：支持串行、并行、全矩阵三种网络测试模式，全面评估集群网络性能
-
-### 📦 多位能力
-
-- **自动依赖分发**：自动编译并分发 sysbench、sshpass 到远程服务器，支持跨架构部署
+- **自动分发依赖包**：自动编译并分发 sysbench、sshpass 到远程服务器，支持跨架构部署
 - **灵活认证方式**：同时支持 SSH 免密登录和密码认证，适应不同运维场景
-- **多位配置**：支持命令行参数、配置文件 parameter.conf、混合使用多种配置方式
+- **灵活配置**：支持命令行参数、配置文件 parameter.conf、混合使用多种配置方式
 
 ### 📊 结果汇总
 
@@ -66,14 +63,6 @@ $HOME/oscheckperf/
 └── README.md                 # 中英文文档
 ```
 
-### 目录结构说明
-
-| 目录         | 用途                                                         | 默认路径                        |
-| ---------- | ---------------------------------------------------------- | --------------------------- |
-| `output/`  | 最终报告和日志（original\_data\_*, data\_*, report\_benchmark\_\*） | `./output`（当前目录）            |
-| `tmp/`     | 临时文件（网络测试结果、fio JSON、sysbench 输出）                          | `$HOME/oscheckperf/tmp`     |
-| `io_test/` | IO测试数据文件（sysbench/fio 创建的测试文件）                             | `$HOME/oscheckperf/io_test` |
-
 ### 文件类型说明
 
 | 文件类型            | 存放位置                                        | 说明                   |
@@ -110,14 +99,14 @@ sudo yum install -y sysbench iperf3 fio jq sshpass
 
 **编译安装说明**：
 
-编译安装仅需在**编译机（脚本所在服务器）**上安装编译依赖，其它远程服务器**无需**安装编译工具，工具会自动推送。
+编译安装仅需在**编译机（脚本所在服务器）上安装编译依赖，其它远程服务器**无需安装编译工具，工具会自动推送。
 
 ```bash
 # CentOS/RHEL 系列（仅编译机需要）
-sudo yum install -y automake autoconf libtool gcc gcc-c++ make
+sudo yum install -y automake autoconf libtool gcc make
 
 # Ubuntu/Debian 系列（仅编译机需要）
-sudo apt install -y automake autoconf libtool gcc g++ make
+sudo apt install -y automake autoconf libtool gcc make
 ```
 
 **自动编译安装组件**
@@ -523,7 +512,7 @@ FIO 测试采用不同的工作方式：
 ### 多服务器网络测试
 
 ```bash
-# 矩阵模式测试所有服务器间网络
+# 矩阵模式测试所有服务器间网络（主机数>3时自动分批并行）
 ./oscheckperf network -f all-servers NETWORK_MODE=matrix NETWORK_PARALLEL=4
 
 # 并行模式同时测试
@@ -532,6 +521,21 @@ FIO 测试采用不同的工作方式：
 # 串行模式逐个测试
 ./oscheckperf network -f all-servers NETWORK_MODE=serial
 ```
+
+**矩阵测试分批并行说明**：
+
+- **自动分批**：当主机数 > 3 时，矩阵模式自动启用分批并行执行
+- **并行度计算**：自动计算为 `floor(主机数 / 2)`，无需手动配置
+- **完美匹配算法**：每批次内所有主机都参与测试且无资源竞争
+- **端口偏移机制**：批次内不同主机对使用不同端口（NETWORK_PORT + 序号）
+
+| 主机数 | 并行度 | 总测试对 | 总批次数 |
+|--------|--------|----------|----------|
+| 2 | 1 | 1 | 1 |
+| 3 | 1 | 3 | 3 |
+| 4 | 2 | 6 | 3 |
+| 6 | 3 | 15 | 5 |
+| 8 | 4 | 28 | 7 |
 
 ### 硬件信息检查
 
@@ -572,6 +576,11 @@ FIO 测试采用不同的工作方式：
   - `serial`：逐个执行客户端测试，一个完成后再开始下一个
   - `parallel`：同时执行所有客户端测试
   - `matrix`：执行全矩阵交叉测试（每对服务器之间都进行测试）
+    - **自动分批并行**：当主机数 > 3 时，自动启用分批并行执行（参考 gpcheckperf）
+    - **并行度**：自动计算为 `floor(主机数 / 2)`，无需手动配置
+    - **批次内**：多个主机对同时测试，无资源竞争（完美匹配算法）
+    - **批次间**：顺序执行，确保测试准确性
+    - **端口偏移**：批次内不同主机对使用不同端口（NETWORK_PORT + 序号）
 - **NETWORK\_PARALLEL**：控制每个 iperf3 测试的并行连接数，在所有模式下都生效
   - 例如：`NETWORK_PARALLEL=4` 表示每个测试使用 4 个并行连接
 
@@ -646,10 +655,8 @@ FIO 测试采用不同的工作方式：
 
 **Core Value**:
 
-- Facilitates pre-deployment performance validation for databases (Vastbase, openGauss, PostgreSQL, MySQL)
-- Supports cluster network performance evaluation for optimizing distributed architecture design
-- Generates professional performance reports for trend analysis and issue identification
-- Ensures testing safety and protects production environment stability
+- One-stop server hardware performance testing with aggregated results, enabling quick identification of cluster performance differences for efficient troubleshooting
+- Facilitates database server hardware performance validation (Vastbase, openGauss, PostgreSQL, MySQL)
 
 ## Core Features
 
@@ -657,15 +664,15 @@ FIO 测试采用不同的工作方式：
 
 - **One-stop Performance Evaluation**: Covers six core dimensions - CPU, Memory, Disk IO, Network Throughput, Thread Scheduling, and Mutex Lock
 - **Dual-Engine IO Testing**: Supports both sysbench and fio for comprehensive IO performance evaluation
-- **Matrix Network Testing**: Three network testing modes - serial, parallel, and full matrix for complete cluster network assessment
+- **Multi-dimensional Network Testing**: Supports serial, parallel, and full matrix network testing modes for comprehensive cluster network assessment
 
-### 📦 Intelligent Deployment
+### 📦 Multi-scenario Deployment
 
 - **Automatic Dependency Distribution**: Automatically compiles and distributes sysbench, sshpass to remote servers, supports cross-architecture deployment
 - **Flexible Authentication**: Supports both SSH passwordless login and password authentication for different operation scenarios
-- **Configuration File Management**: Centralized parameter management via parameter.conf for batch configuration and version control
+- **Multi-mode Configuration**: Supports command line parameters, parameter.conf configuration file, and hybrid usage of multiple configuration methods
 
-### 📊 Professional Report Analysis
+### 📊 Result Aggregation
 
 - **Structured Report Generation**: Automatically generates professional performance reports with system info, test configuration, and detailed metrics
 - **Multi-dimensional Comparison**: Supports multi-server comparison reports for quick performance difference and bottleneck identification
@@ -773,10 +780,10 @@ Compilation dependencies only need to be installed on the **compiler machine**. 
 
 ```bash
 # CentOS/RHEL (compiler machine only)
-sudo yum install -y automake autoconf libtool gcc gcc-c++ make
+sudo yum install -y automake autoconf libtool gcc make
 
 # Ubuntu/Debian (compiler machine only)
-sudo apt install -y automake autoconf libtool gcc g++ make
+sudo apt install -y automake autoconf libtool gcc make
 ```
 
 **Supported Components for Compilation**:
@@ -1217,7 +1224,7 @@ The execution flow of oscheckperf:
 ### Multi-server Network Testing
 
 ```bash
-# Matrix mode - test all server pairs
+# Matrix mode - test all server pairs (auto batch parallel when hosts > 3)
 ./oscheckperf network -f all-servers NETWORK_MODE=matrix NETWORK_PARALLEL=4
 
 # Parallel mode - test all clients simultaneously
@@ -1226,6 +1233,21 @@ The execution flow of oscheckperf:
 # Serial mode - test clients sequentially
 ./oscheckperf network -f all-servers NETWORK_MODE=serial
 ```
+
+**Matrix Test Batch Parallel Explanation**:
+
+- **Auto Batching**: When hosts > 3, matrix mode automatically enables batch parallel execution
+- **Parallelism Calculation**: Auto-calculated as `floor(hosts / 2)`, no manual configuration needed
+- **Perfect Matching Algorithm**: All hosts participate in each batch with no resource contention
+- **Port Offset Mechanism**: Different host pairs in a batch use different ports (NETWORK_PORT + index)
+
+| Hosts | Parallelism | Total Pairs | Total Batches |
+|-------|-------------|-------------|---------------|
+| 2 | 1 | 1 | 1 |
+| 3 | 1 | 3 | 3 |
+| 4 | 2 | 6 | 3 |
+| 6 | 3 | 15 | 5 |
+| 8 | 4 | 28 | 7 |
 
 ### Hardware Information Check
 
@@ -1266,6 +1288,11 @@ The execution flow of oscheckperf:
   - `serial`: Execute client tests one by one, wait for one to complete before starting the next
   - `parallel`: Execute all client tests simultaneously
   - `matrix`: Execute full matrix cross-testing (test between every pair of servers)
+    - **Auto Batch Parallel**: When hosts > 3, automatically enables batch parallel execution (inspired by gpcheckperf)
+    - **Parallelism**: Auto-calculated as `floor(hosts / 2)`, no manual configuration needed
+    - **Intra-batch**: Multiple host pairs test simultaneously with no resource contention (perfect matching algorithm)
+    - **Inter-batch**: Sequential execution to ensure test accuracy
+    - **Port Offset**: Different host pairs in a batch use different ports (NETWORK_PORT + index)
 - **NETWORK\_PARALLEL**: Controls the number of parallel connections for each iperf3 test, effective in all modes
   - Example: `NETWORK_PARALLEL=4` means each test uses 4 parallel connections
 
@@ -1329,3 +1356,5 @@ The execution flow of oscheckperf:
 ## License
 
 This project is licensed under the GNU General Public License v3.0.
+````
+
