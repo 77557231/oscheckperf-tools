@@ -1,7 +1,7 @@
 #!/bin/bash
 #--------------------------------------------------------------------------------
 #-- File name:   oscheckperf
-#-- Version:     v0.9.3
+#-- Version:     v0.9.4
 #-- Purpose:     Database System Benchmark Tool
 #-- Author:      Wanping Pan 
 #-- Description: One-click system benchmarking tool, supports configuration via config file or command line parameters
@@ -651,9 +651,9 @@ build_auth_prefix() {
     fi
     
     if [ "$cmd_type" = "ssh" ]; then
-        echo "${pass_arg}ssh -p $ssh_port -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null $port_opt $host_arg"
+        echo "${pass_arg}ssh -p $ssh_port -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR $port_opt $host_arg"
     else
-        echo "${pass_arg}scp -P $ssh_port -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null $port_opt"
+        echo "${pass_arg}scp -P $ssh_port -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR $port_opt"
     fi
 }
 
@@ -800,7 +800,7 @@ parse_args() {
                 exit 0
                 ;;
             --version)
-                echo "Version: 0.9.3"
+                echo "Version: 0.9.4"
                 exit 0
                 ;;
             --dry-run)
@@ -890,6 +890,12 @@ parse_args() {
                     check)
                         # Only run checks
                         export CHECK_ENABLED=true
+                        # Check if next argument is an IP address (for remote mode)
+                        local next_idx=$((i + 1))
+                        if [ $next_idx -le $# ] && [[ "${!next_idx}" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+                            export CHECK_SERVER_IP="${!next_idx}"
+                            i=$((i + 1))
+                        fi
                         ;;
                     hardware)
                         # Only show hardware info
@@ -1087,20 +1093,34 @@ show_help() {
 }
 
 # Check if command exists
+# Returns 0 if command is available (either in oscheckperf/bin or system PATH)
+# Returns 1 if command is not found anywhere
+# Side effect: sets CHECK_CMD_SOURCE to "local", "system", or "not_found"
 check_command() {
     local cmd="$1"
     local install_hint="$2"
+    local local_bin="$HOME/oscheckperf/bin/$cmd"
     
-    if command -v "$cmd" &> /dev/null; then
+    # Check if command exists in oscheckperf bin directory
+    if [ -x "$local_bin" ]; then
+        CHECK_CMD_SOURCE="local"
         return 0
-    else
-        if [ -n "$install_hint" ]; then
-            echo "Warning: Command '$cmd' is not installed. $install_hint"
-        else
-            echo "Warning: Command '$cmd' is not installed"
-        fi
-        return 1
     fi
+    
+    # Check system PATH
+    if command -v "$cmd" &> /dev/null; then
+        CHECK_CMD_SOURCE="system"
+        return 0
+    fi
+    
+    # Command not found anywhere
+    CHECK_CMD_SOURCE="not_found"
+    if [ -n "$install_hint" ]; then
+        echo "Warning: Command '$cmd' is not installed. $install_hint"
+    else
+        echo "Warning: Command '$cmd' is not installed"
+    fi
+    return 1
 }
 
 # Require command to exist (exits if not found)
@@ -2465,7 +2485,11 @@ parse_test_scenarios() {
 }
 
 # Check all dependencies
+# Usage: check_all [server_ip]
+# If server_ip is provided, it will be included in dependency check output
 check_all() {
+    local server_ip="${1:-}"
+    
     if [ "$NO_CHECKS" = "true" ]; then
         return
     fi
@@ -2492,7 +2516,7 @@ check_all() {
     echo ""
     
     # Check dependencies
-    check_dependencies
+    check_dependencies "$server_ip"
     
     # Check permissions
     check_permissions
@@ -2525,36 +2549,58 @@ check_all() {
 }
 
 # Check dependencies
+# Usage: check_dependencies [server_ip]
+# If server_ip is provided, it will be included in the output
 check_dependencies() {
+    local server_ip="${1:-}"
     local has_error=false
     
     echo "  Checking dependencies..."
     
+    # Helper function to print dependency status
+    print_dep_status() {
+        local cmd="$1"
+        local desc="$2"
+        local source="$3"
+        
+        if [ "$source" = "local" ]; then
+            if [ -n "$server_ip" ]; then
+                echo "  ✓ $cmd: Installed on $server_ip ($desc)"
+            else
+                echo "  ✓ $cmd: Installed ($desc)"
+            fi
+        elif [ "$source" = "system" ]; then
+            if [ -n "$server_ip" ]; then
+                echo "  ⚠ $cmd: Using system version on $server_ip ($desc) - recommended to distribute"
+            else
+                echo "  ⚠ $cmd: Using system version ($desc) - recommended to distribute"
+            fi
+        else
+            if [ -n "$server_ip" ]; then
+                echo "  ⚠ $cmd: Not installed on $server_ip (will be automatically distributed)"
+            else
+                echo "  ⚠ $cmd: Not installed (will be automatically distributed)"
+            fi
+        fi
+    }
+    
     # sysbench is required
-    if check_command "sysbench" "sysbench will be automatically distributed to remote servers"; then
-        echo "  ✓ sysbench: Installed (required for all tests)"
-    else
-        echo "  ⚠ sysbench: Not installed (will be automatically distributed)"
-    fi
+    CHECK_CMD_SOURCE=""
+    check_command "sysbench" "sysbench will be automatically distributed to remote servers" >/dev/null 2>&1
+    print_dep_status "sysbench" "required for all tests" "$CHECK_CMD_SOURCE"
     
     # Additional tools (optional, based on test types)
-    if check_command "fio" "fio will be automatically distributed to remote servers"; then
-        echo "  ✓ fio: Installed (required for IO tests)"
-    else
-        echo "  ⚠ fio: Not installed (will be automatically distributed)"
-    fi
+    CHECK_CMD_SOURCE=""
+    check_command "fio" "fio will be automatically distributed to remote servers" >/dev/null 2>&1
+    print_dep_status "fio" "required for IO tests" "$CHECK_CMD_SOURCE"
     
-    if check_command "iperf3" "iperf3 will be automatically distributed to remote servers"; then
-        echo "  ✓ iperf3: Installed (required for network tests)"
-    else
-        echo "  ⚠ iperf3: Not installed (will be automatically distributed)"
-    fi
+    CHECK_CMD_SOURCE=""
+    check_command "iperf3" "iperf3 will be automatically distributed to remote servers" >/dev/null 2>&1
+    print_dep_status "iperf3" "required for network tests" "$CHECK_CMD_SOURCE"
     
-    if check_command "jq" "jq will be automatically distributed to remote servers"; then
-        echo "  ✓ jq: Installed (required for parsing fio JSON output)"
-    else
-        echo "  ⚠ jq: Not installed (will be automatically distributed)"
-    fi
+    CHECK_CMD_SOURCE=""
+    check_command "jq" "jq will be automatically distributed to remote servers" >/dev/null 2>&1
+    print_dep_status "jq" "required for parsing fio JSON output" "$CHECK_CMD_SOURCE"
     
     echo "  Note: Install optional dependencies based on your testing needs"
     
@@ -2681,7 +2727,7 @@ check_ssh() {
                 has_passwordless_auth=true
                 local ssh_port=$(get_ssh_port)
                 # Test SSH connection with BatchMode=yes to avoid password prompt
-                if ! ssh -p "$ssh_port" -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "$ip" "echo 2>/dev/null" > /dev/null 2>&1; then
+                if ! ssh -p "$ssh_port" -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR "$ip" "echo 2>/dev/null" > /dev/null 2>&1; then
                     ssh_failed+=($ip)
                 fi
             fi
@@ -3689,7 +3735,7 @@ run_serial_network_test() {
         else
             set_ssh_password "$server_ip"
             local server_ssh=$(get_ssh_command "$server_ip")
-            eval "$server_ssh 'pkill -f \"iperf3 -s -p $port\"'" > /dev/null 2>&1
+            eval "$server_ssh 'killall iperf3 2>/dev/null || true'" > /dev/null 2>&1
         fi
         sleep 1
     fi
@@ -3854,7 +3900,7 @@ run_single_matrix_pair() {
                 generate_iperf3_text_from_json "$client_output_file" "$client_text_output"
             else
                 echo "  ⚠ Test failed: $src -> $dst"
-                eval "$dst_ssh 'pkill -f \"iperf3 -s -p $port\"'" > /dev/null 2>&1
+                eval "$dst_ssh 'killall iperf3 2>/dev/null || true'" > /dev/null 2>&1
                 echo "$src|$dst|0"
                 return
             fi
@@ -3866,7 +3912,7 @@ run_single_matrix_pair() {
                 generate_iperf3_text_from_json "$client_output_file" "$client_text_output"
             else
                 echo "  ⚠ Test failed: $src -> $dst"
-                eval "$dst_ssh 'pkill -f \"iperf3 -s -p $port\"'" > /dev/null 2>&1
+                eval "$dst_ssh 'killall iperf3 2>/dev/null || true'" > /dev/null 2>&1
                 echo "$src|$dst|0"
                 return
             fi
@@ -3894,7 +3940,7 @@ run_single_matrix_pair() {
         echo "[DRY RUN] Would stop iperf3 server on $dst"
         echo "[DRY RUN] $dst_ssh 'pkill -f \"iperf3 -s -p $port\"'"
     else
-        nohup eval "$dst_ssh 'pkill -f \"iperf3 -s -p $port\" 2>/dev/null'" > /dev/null 2>&1 &
+        eval "$dst_ssh 'killall iperf3 2>/dev/null || true'" > /dev/null 2>&1
         sleep 1
     fi
     
@@ -4066,10 +4112,10 @@ run_matrix_batch() {
             local port=${server_ports[$pair_idx]}
             set_ssh_password "$dst"
             local dst_ssh=$(get_ssh_command "$dst")
-            nohup eval "$dst_ssh 'pkill -f \"iperf3 -s -p $port\" 2>/dev/null'" > /dev/null 2>&1 &
+            eval "$dst_ssh 'killall iperf3 2>/dev/null || true'" > /dev/null 2>&1
             pair_idx=$((pair_idx + 1))
         done
-        sleep 1
+        sleep 2
     fi
     
     # Return results
@@ -4130,7 +4176,7 @@ run_matrix_network_test() {
     for host in "${host_ips[@]}"; do
         set_ssh_password "$host"
         local host_ssh=$(get_ssh_command "$host")
-        eval "$host_ssh 'pkill -f iperf3 2>/dev/null || true'" > /dev/null 2>&1
+        eval "$host_ssh 'killall iperf3 2>/dev/null || true'" > /dev/null 2>&1
     done
     
     # Determine execution mode: serial vs batch parallel
@@ -4246,7 +4292,7 @@ run_matrix_network_test() {
                         results+=("$src|$dst|0")
                         echo "  ⚠ Test failed: $src -> $dst"
                         # Stop iperf3 server on destination
-                        eval "$dst_ssh 'pkill -f \"iperf3 -s -p $port\"'" > /dev/null 2>&1
+                        eval "$dst_ssh 'killall iperf3 2>/dev/null || true'" > /dev/null 2>&1
                         continue
                     fi
                 else
@@ -4260,7 +4306,7 @@ run_matrix_network_test() {
                         results+=("$src|$dst|0")
                         echo "  ⚠ Test failed: $src -> $dst"
                         # Stop iperf3 server on destination
-                        eval "$dst_ssh 'pkill -f \"iperf3 -s -p $port\"'" > /dev/null 2>&1
+                        eval "$dst_ssh 'killall iperf3 2>/dev/null || true'" > /dev/null 2>&1
                         continue
                     fi
                 fi
@@ -4293,7 +4339,7 @@ run_matrix_network_test() {
                 echo "[DRY RUN] Would stop iperf3 server on $dst"
                 echo "[DRY RUN] $dst_ssh 'pkill -f \"iperf3 -s -p $port\"'"
             else
-                eval "$dst_ssh 'pkill -f \"iperf3 -s -p $port\" 2>/dev/null || true'" > /dev/null 2>&1
+                eval "$dst_ssh 'killall iperf3 2>/dev/null || true'" > /dev/null 2>&1
                 sleep 1
             fi
         done
@@ -4304,7 +4350,7 @@ run_matrix_network_test() {
     for host in "${host_ips[@]}"; do
         set_ssh_password "$host"
         local host_ssh=$(get_ssh_command "$host")
-        eval "$host_ssh 'pkill -f iperf3 2>/dev/null || true'" > /dev/null 2>&1
+        eval "$host_ssh 'killall iperf3 2>/dev/null || true'" > /dev/null 2>&1
     done
     
     # Generate matrix report
@@ -4433,7 +4479,7 @@ run_parallel_network_test() {
     if [ "$DRY_RUN" = true ]; then
         echo "[DRY RUN] $server_ssh 'pkill -f \"iperf3 -s -p $port\"'"
     else
-        eval "$server_ssh 'pkill -f \"iperf3 -s -p $port\"'" > /dev/null 2>&1
+        eval "$server_ssh 'killall iperf3 2>/dev/null || true'" > /dev/null 2>&1
         sleep 1
     fi
     
@@ -5240,112 +5286,140 @@ generate_report() {
     printf -- "                           Detailed Test Configuration\n" >> "$report_file"
     printf -- "================================================================================\n" >> "$report_file"
     printf -- "\n" >> "$report_file"
-    printf -- "[CPU Test]\n" >> "$report_file"
-    printf -- "  Enabled: ${CPU_ENABLED:-true}\n" >> "$report_file"
-    printf -- "  Duration: ${unified_duration}s\n" >> "$report_file"
-    printf -- "  Max Prime: ${CPU_MAX_PRIME:-20000}\n" >> "$report_file"
-    printf -- "  Threads:\n" >> "$report_file"
-    if [ "${CPU_THREADS:-0}" = "0" ]; then
-        printf -- "    %s: auto (%s)\n" "$local_ip" "$cpu_cores" >> "$report_file"
+    
+    # General Configuration Table - 3-column format
+    printf -- "[General Configuration]\n" >> "$report_file"
+    printf -- "--------------------------------------------------------------------------------\n" >> "$report_file"
+    printf -- "%-28s %-20s %-25s\n" "Parameter" "Env Var" "Value" >> "$report_file"
+    printf -- "--------------------------------------------------------------------------------\n" >> "$report_file"
+    printf -- "%-28s %-20s %-25s\n" "Unified Duration" "DURATION" "${unified_duration}s" >> "$report_file"
+    printf -- "%-28s %-20s %-25s\n" "Output Directory" "OUTPUT_DIR" "${OUTPUT_DIR:-$OUTPUT_DIR_DEFAULT}" >> "$report_file"
+    printf -- "%-28s %-20s %-25s\n" "Cleanup After Test" "CLEANUP" "${CLEANUP:-true}" >> "$report_file"
+    printf -- "%-28s %-20s %-25s\n" "Execution Mode" "EXEC_MODE" "${EXEC_MODE:-parallel}" >> "$report_file"
+    printf -- "%-28s %-20s %-25s\n" "SSH Port" "SSH_PORT" "${SSH_PORT:-$SSH_PORT_DEFAULT}" >> "$report_file"
+    printf -- "%-28s %-20s %-25s\n" "Report Hardware Info" "REPORT_HARDWARE_INFO" "${REPORT_HARDWARE_INFO:-true}" >> "$report_file"
+    printf -- "\n" >> "$report_file"
+    
+    # CPU Test Configuration Table
+    printf -- "[CPU Test Configuration]\n" >> "$report_file"
+    printf -- "--------------------------------------------------------------------------------\n" >> "$report_file"
+    printf -- "%-28s %-20s %-25s\n" "Parameter" "Env Var" "Value" >> "$report_file"
+    printf -- "--------------------------------------------------------------------------------\n" >> "$report_file"
+    printf -- "%-28s %-20s %-25s\n" "Enabled" "CPU_ENABLED" "${CPU_ENABLED:-true}" >> "$report_file"
+    printf -- "%-28s %-20s %-25s\n" "Duration" "DURATION" "${unified_duration}s" >> "$report_file"
+    printf -- "%-28s %-20s %-25s\n" "Max Prime Number" "CPU_MAX_PRIME" "${CPU_MAX_PRIME:-20000}" >> "$report_file"
+    local cpu_threads_val="${CPU_THREADS:-0}"
+    if [ "$cpu_threads_val" = "0" ]; then
+        printf -- "%-28s %-20s %-25s\n" "CPU Threads" "CPU_THREADS" "auto" >> "$report_file"
     else
-        printf -- "    %s: %s\n" "$local_ip" "${CPU_THREADS}" >> "$report_file"
-    fi
-    if [ ${#target_servers[@]} -gt 0 ]; then
-        for server in "${target_servers[@]}"; do
-            if [ "$server" != "$local_ip" ]; then
-                if [ "${CPU_THREADS:-0}" = "0" ]; then
-                    set_ssh_password "$server"
-                    local remote_ssh=$(get_ssh_command "$server")
-                    local remote_cpu=$(eval "$remote_ssh 'nproc 2>/dev/null || grep -c ^processor /proc/cpuinfo 2>/dev/null || echo N/A'" 2>/dev/null || echo "N/A")
-                    printf -- "    %s: auto (%s)\n" "$server" "${remote_cpu:-N/A}" >> "$report_file"
-                else
-                    printf -- "    %s: %s\n" "$server" "${CPU_THREADS}" >> "$report_file"
-                fi
-            fi
-        done
+        printf -- "%-28s %-20s %-25s\n" "CPU Threads" "CPU_THREADS" "$cpu_threads_val" >> "$report_file"
     fi
     printf -- "\n" >> "$report_file"
-    printf -- "[Memory Test]\n" >> "$report_file"
-    printf -- "  Enabled: ${MEMORY_ENABLED:-true}\n" >> "$report_file"
-    printf -- "  Block Size: ${MEMORY_BLOCK_SIZE:-8K}\n" >> "$report_file"
-    printf -- "  Total Size: ${MEMORY_TOTAL_SIZE:-20G}\n" >> "$report_file"
-    printf -- "  Operation: ${MEMORY_OPER:-read}\n" >> "$report_file"
-    printf -- "  Duration: ${unified_duration}s\n" >> "$report_file"
+    
+    # Memory Test Configuration Table
+    printf -- "[Memory Test Configuration]\n" >> "$report_file"
+    printf -- "--------------------------------------------------------------------------------\n" >> "$report_file"
+    printf -- "%-28s %-20s %-25s\n" "Parameter" "Env Var" "Value" >> "$report_file"
+    printf -- "--------------------------------------------------------------------------------\n" >> "$report_file"
+    printf -- "%-28s %-20s %-25s\n" "Enabled" "MEMORY_ENABLED" "${MEMORY_ENABLED:-true}" >> "$report_file"
+    printf -- "%-28s %-20s %-25s\n" "Block Size" "MEMORY_BLOCK_SIZE" "${MEMORY_BLOCK_SIZE:-8K}" >> "$report_file"
+    printf -- "%-28s %-20s %-25s\n" "Total Size" "MEMORY_TOTAL_SIZE" "${MEMORY_TOTAL_SIZE:-20G}" >> "$report_file"
+    printf -- "%-28s %-20s %-25s\n" "Operation" "MEMORY_OPER" "${MEMORY_OPER:-read}" >> "$report_file"
+    printf -- "%-28s %-20s %-25s\n" "Duration" "DURATION" "${unified_duration}s" >> "$report_file"
+    local mem_threads_val="${MEMORY_THREADS:-0}"
+    if [ "$mem_threads_val" = "0" ]; then
+        printf -- "%-28s %-20s %-25s\n" "Memory Threads" "MEMORY_THREADS" "auto" >> "$report_file"
+    else
+        printf -- "%-28s %-20s %-25s\n" "Memory Threads" "MEMORY_THREADS" "$mem_threads_val" >> "$report_file"
+    fi
     printf -- "\n" >> "$report_file"
-    printf -- "[IO Test]\n" >> "$report_file"
-    printf -- "  Enabled: ${IO_ENABLED:-true}\n" >> "$report_file"
-    printf -- "  Tool: ${IO_TOOL:-sysbench}\n" >> "$report_file"
-    printf -- "  File Size: ${IO_TOTAL_SIZE:-1G}\n" >> "$report_file"
+    
+    # IO Test Configuration Table
+    printf -- "[IO Test Configuration]\n" >> "$report_file"
+    printf -- "--------------------------------------------------------------------------------\n" >> "$report_file"
+    printf -- "%-28s %-20s %-25s\n" "Parameter" "Env Var" "Value" >> "$report_file"
+    printf -- "--------------------------------------------------------------------------------\n" >> "$report_file"
+    printf -- "%-28s %-20s %-25s\n" "Enabled" "IO_ENABLED" "${IO_ENABLED:-true}" >> "$report_file"
+    printf -- "%-28s %-20s %-25s\n" "Tool" "IO_TOOL" "${IO_TOOL:-sysbench}" >> "$report_file"
+    printf -- "%-28s %-20s %-25s\n" "File Size" "IO_TOTAL_SIZE" "${IO_TOTAL_SIZE:-1G}" >> "$report_file"
+    printf -- "%-28s %-20s %-25s\n" "Test Path" "IO_PATH" "$(resolve_io_path)" >> "$report_file"
     if [ "${IO_TOOL:-sysbench}" = "fio" ]; then
-        printf -- "  Test Profiles: ${FIO_PROFILES:-randrw}\n" >> "$report_file"
-        # Show individual profile configurations
-        local profiles="${FIO_PROFILES:-randrw}"
-        for profile in $profiles; do
-            local rw_type="${profile}"
-            local bs="${FIO_BS:-16K}"
-            local iodepth="${FIO_IODEPTH:-32}"
-            local numjobs="${FIO_NUMJOBS:-4}"
-            printf -- "  Profile %s: rw=%s, bs=%s, iodepth=%s, numjobs=%s\n" "$profile" "$rw_type" "$bs" "$iodepth" "$numjobs" >> "$report_file"
-        done
+        printf -- "%-28s %-20s %-25s\n" "Test Profiles" "FIO_PROFILES" "${FIO_PROFILES:-randrw}" >> "$report_file"
+        printf -- "%-28s %-20s %-25s\n" "Duration" "FIO_DURATION" "${FIO_DURATION:-$unified_duration}s" >> "$report_file"
+        printf -- "%-28s %-20s %-25s\n" "Block Size" "FIO_BS" "${FIO_BS:-16K}" >> "$report_file"
+        printf -- "%-28s %-20s %-25s\n" "IO Depth" "FIO_IODEPTH" "${FIO_IODEPTH:-32}" >> "$report_file"
+        printf -- "%-28s %-20s %-25s\n" "Num Jobs" "FIO_NUMJOBS" "${FIO_NUMJOBS:-4}" >> "$report_file"
+        printf -- "%-28s %-20s %-25s\n" "Direct IO" "FIO_DIRECT" "${FIO_DIRECT:-1}" >> "$report_file"
+        printf -- "%-28s %-20s %-25s\n" "File Num" "FIO_FILE_NUM" "${FIO_FILE_NUM:-4}" >> "$report_file"
+        printf -- "%-28s %-20s %-25s\n" "IO Engine" "FIO_IOENGINE" "${FIO_IOENGINE:-libaio}" >> "$report_file"
+        
+        local fio_total_size="${IO_TOTAL_SIZE:-1G}"
+        local fio_file_num="${FIO_FILE_NUM:-4}"
+        local fio_numjobs="${FIO_NUMJOBS:-4}"
+        local fio_size_value=$(echo "$fio_total_size" | sed -E 's/([0-9]+)([GMK])/\1/')
+        local fio_per_file_size="auto"
+        if [ "$fio_file_num" -gt 0 ] && [ "$fio_size_value" -gt 0 ]; then
+            local fio_per_size=$((fio_size_value * 1024 / fio_file_num))
+            if [ "$fio_numjobs" -gt 1 ]; then
+                fio_per_size=$((fio_per_size / fio_numjobs))
+            fi
+            fio_per_file_size="${fio_per_size}M"
+        else
+            fio_per_file_size="${fio_total_size}"
+        fi
+        printf -- "%-28s %-20s %-25s\n" "Per File Size" "(Calculated)" "${fio_per_file_size}" >> "$report_file"
     else
-        printf -- "  Test Mode: ${SYSBENCH_PROFILES:-rndrw}\n" >> "$report_file"
+        printf -- "%-28s %-20s %-25s\n" "Test Mode" "SYSBENCH_PROFILES" "${SYSBENCH_PROFILES:-rndrw}" >> "$report_file"
+        printf -- "%-28s %-20s %-25s\n" "Duration" "SYSBENCH_DURATION" "${SYSBENCH_DURATION:-$unified_duration}s" >> "$report_file"
+        printf -- "%-28s %-20s %-25s\n" "File Num" "SYSBENCH_FILE_NUM" "${SYSBENCH_FILE_NUM:-4}" >> "$report_file"
+        printf -- "%-28s %-20s %-25s\n" "Block Size" "SYSBENCH_BLOCK_SIZE" "${SYSBENCH_BLOCK_SIZE:-16K}" >> "$report_file"
+        printf -- "%-28s %-20s %-25s\n" "IO Mode" "SYSBENCH_IO_MODE" "${SYSBENCH_IO_MODE:-sync}" >> "$report_file"
+        printf -- "%-28s %-20s %-25s\n" "Extra Flags" "SYSBENCH_EXTRA_FLAGS" "${SYSBENCH_EXTRA_FLAGS:-direct}" >> "$report_file"
+        printf -- "%-28s %-20s %-25s\n" "Threads" "SYSBENCH_THREADS" "${SYSBENCH_THREADS:-4}" >> "$report_file"
     fi
-    printf -- "  Test Path: $(resolve_io_path)\n" >> "$report_file"
-    printf -- "  Duration: $(if [ "${IO_TOOL:-sysbench}" = "fio" ]; then echo "${FIO_DURATION:-$unified_duration}s"; else echo "${SYSBENCH_DURATION:-$unified_duration}s"; fi)\n" >> "$report_file"
     printf -- "\n" >> "$report_file"
-    printf -- "[Network Test]\n" >> "$report_file"
-    printf -- "  Enabled: ${NETWORK_ENABLED:-true}\n" >> "$report_file"
-    printf -- "  Tool: ${NETWORK_TOOL:-iperf3}\n" >> "$report_file"
-    printf -- "  Server: ${NETWORK_SERVER_IP:-auto}\n" >> "$report_file"
-    printf -- "  Port: ${NETWORK_PORT:-$NETWORK_PORT_DEFAULT}\n" >> "$report_file"
-    printf -- "  Duration: ${unified_duration}s\n" >> "$report_file"
-    printf -- "  Parallel: ${NETWORK_PARALLEL:-1}\n" >> "$report_file"
+    
+    # Network Test Configuration Table
+    printf -- "[Network Test Configuration]\n" >> "$report_file"
+    printf -- "--------------------------------------------------------------------------------\n" >> "$report_file"
+    printf -- "%-28s %-20s %-25s\n" "Parameter" "Env Var" "Value" >> "$report_file"
+    printf -- "--------------------------------------------------------------------------------\n" >> "$report_file"
+    printf -- "%-28s %-20s %-25s\n" "Enabled" "NETWORK_ENABLED" "${NETWORK_ENABLED:-true}" >> "$report_file"
+    printf -- "%-28s %-20s %-25s\n" "Tool" "NETWORK_TOOL" "${NETWORK_TOOL:-iperf3}" >> "$report_file"
+    printf -- "%-28s %-20s %-25s\n" "Test Mode" "NETWORK_MODE" "${NETWORK_MODE:-matrix}" >> "$report_file"
+    printf -- "%-28s %-20s %-25s\n" "Port" "NETWORK_PORT" "${NETWORK_PORT:-$NETWORK_PORT_DEFAULT}" >> "$report_file"
+    printf -- "%-28s %-20s %-25s\n" "Duration" "DURATION" "${unified_duration}s" >> "$report_file"
+    printf -- "%-28s %-20s %-25s\n" "Parallel Connections" "NETWORK_PARALLEL" "${NETWORK_PARALLEL:-1}" >> "$report_file"
     printf -- "\n" >> "$report_file"
-    printf -- "[Threads Test]\n" >> "$report_file"
-    printf -- "  Enabled: ${THREADS_ENABLED:-true}\n" >> "$report_file"
-    printf -- "  Duration: ${unified_duration}s\n" >> "$report_file"
-    printf -- "  Yields: ${THREADS_YIELDS:-100}\n" >> "$report_file"
-    printf -- "  Locks: ${THREADS_LOCKS:-4}\n" >> "$report_file"
+    
+    # Threads Test Configuration Table
+    printf -- "[Threads Test Configuration]\n" >> "$report_file"
+    printf -- "--------------------------------------------------------------------------------\n" >> "$report_file"
+    printf -- "%-28s %-20s %-25s\n" "Parameter" "Env Var" "Value" >> "$report_file"
+    printf -- "--------------------------------------------------------------------------------\n" >> "$report_file"
+    printf -- "%-28s %-20s %-25s\n" "Enabled" "THREADS_ENABLED" "${THREADS_ENABLED:-true}" >> "$report_file"
+    printf -- "%-28s %-20s %-25s\n" "Duration" "DURATION" "${unified_duration}s" >> "$report_file"
+    printf -- "%-28s %-20s %-25s\n" "Yields" "THREADS_YIELDS" "${THREADS_YIELDS:-100}" >> "$report_file"
+    printf -- "%-28s %-20s %-25s\n" "Locks" "THREADS_LOCKS" "${THREADS_LOCKS:-4}" >> "$report_file"
     if [ -n "${THREADS_NUM}" ]; then
-        printf -- "  Threads: ${THREADS_NUM}\n" >> "$report_file"
+        printf -- "%-28s %-20s %-25s\n" "Threads" "THREADS_NUM" "${THREADS_NUM}" >> "$report_file"
     else
-        printf -- "  Threads:\n" >> "$report_file"
-        printf -- "    %s: auto (%s)\n" "$local_ip" "$((cpu_cores * 4))" >> "$report_file"
-        if [ ${#target_servers[@]} -gt 0 ]; then
-            for server in "${target_servers[@]}"; do
-                if [ "$server" != "$local_ip" ]; then
-                    set_ssh_password "$server"
-                    local remote_ssh=$(get_ssh_command "$server")
-                    local remote_cpu=$(eval "$remote_ssh 'nproc 2>/dev/null || grep -c ^processor /proc/cpuinfo 2>/dev/null || echo N/A'" 2>/dev/null || echo "N/A")
-                    if [ "$remote_cpu" = "N/A" ] || [ -z "$remote_cpu" ]; then
-                        printf -- "    %s: auto (N/A)\n" "$server" >> "$report_file"
-                    else
-                        printf -- "    %s: auto (%s)\n" "$server" "$((remote_cpu * 4))" >> "$report_file"
-                    fi
-                fi
-            done
-        fi
+        printf -- "%-28s %-20s %-25s\n" "Threads" "THREADS_NUM" "auto (CPU cores * 4)" >> "$report_file"
     fi
     printf -- "\n" >> "$report_file"
-    printf -- "[Mutex Test]\n" >> "$report_file"
-    printf -- "  Enabled: ${MUTEX_ENABLED:-true}\n" >> "$report_file"
-    printf -- "  Duration: ${unified_duration}s\n" >> "$report_file"
-    printf -- "  Mutex Num: ${MUTEX_NUM:-1024}\n" >> "$report_file"
+    
+    # Mutex Test Configuration Table
+    printf -- "[Mutex Test Configuration]\n" >> "$report_file"
+    printf -- "--------------------------------------------------------------------------------\n" >> "$report_file"
+    printf -- "%-28s %-20s %-25s\n" "Parameter" "Env Var" "Value" >> "$report_file"
+    printf -- "--------------------------------------------------------------------------------\n" >> "$report_file"
+    printf -- "%-28s %-20s %-25s\n" "Enabled" "MUTEX_ENABLED" "${MUTEX_ENABLED:-true}" >> "$report_file"
+    printf -- "%-28s %-20s %-25s\n" "Duration" "DURATION" "${unified_duration}s" >> "$report_file"
+    printf -- "%-28s %-20s %-25s\n" "Mutex Num" "MUTEX_NUM" "${MUTEX_NUM:-1024}" >> "$report_file"
     if [ "${MUTEX_THREADS:-0}" != "0" ]; then
-        printf -- "  Threads: ${MUTEX_THREADS}\n" >> "$report_file"
+        printf -- "%-28s %-20s %-25s\n" "Threads" "MUTEX_THREADS" "${MUTEX_THREADS}" >> "$report_file"
     else
-        printf -- "  Threads:\n" >> "$report_file"
-        printf -- "    %s: auto (%s)\n" "$local_ip" "$cpu_cores" >> "$report_file"
-        if [ ${#target_servers[@]} -gt 0 ]; then
-            for server in "${target_servers[@]}"; do
-                if [ "$server" != "$local_ip" ]; then
-                    set_ssh_password "$server"
-                    local remote_ssh=$(get_ssh_command "$server")
-                    local remote_cpu=$(eval "$remote_ssh 'nproc 2>/dev/null || grep -c ^processor /proc/cpuinfo 2>/dev/null || echo N/A'" 2>/dev/null || echo "N/A")
-                    printf -- "    %s: auto (%s)\n" "$server" "${remote_cpu:-N/A}" >> "$report_file"
-                fi
-            done
-        fi
+        printf -- "%-28s %-20s %-25s\n" "Threads" "MUTEX_THREADS" "auto (CPU cores)" >> "$report_file"
     fi
     printf -- "\n" >> "$report_file"
     printf -- "================================================================================\n" >> "$report_file"
@@ -6159,7 +6233,6 @@ main() {
             echo "  Local machine as iPerf3 server"
             
             # Set network test parameters
-            export NETWORK_SERVER_IP="$server_ip"
             export NETWORK_CLIENT_IP="$client_ips"
         fi
     fi
@@ -6195,13 +6268,13 @@ main() {
                     
                     if [ "$target_ip" = "$local_ip" ]; then
                         # Local machine check
-                        check_all
+                        check_all "$target_ip"
                     else
                         # Remote server check
                         echo "  Executing remote checks on $target_ip..."
                         set_ssh_password "$target_ip"
                         local check_ssh=$(get_ssh_command "$target_ip")
-                        eval "$check_ssh '\$HOME/oscheckperf/oscheckperf --remote check'"
+                        eval "$check_ssh '\$HOME/oscheckperf/oscheckperf --remote check $target_ip'"
                     fi
                     echo ""
                 done
@@ -6211,7 +6284,7 @@ main() {
             fi
         else
             # Remote mode: only run checks
-            check_all
+            check_all "$CHECK_SERVER_IP"
         fi
         
         exit 0
