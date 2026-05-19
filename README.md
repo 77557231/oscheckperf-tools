@@ -15,7 +15,7 @@
 
 - **一站式性能评估**：覆盖 CPU、内存、磁盘 IO、网络吞吐、线程调度、互斥锁六大核心维度
 - **双引擎 IO 测试**：同时支持 sysbench 和 fio，满足不同场景下的 IO 性能评估需求
-- **多维网络测试**：支持串行、并行、全矩阵三种网络测试模式，全面评估集群网络性能
+- **多维网络测试**：支持串行、全矩阵两种网络测试模式，全面评估集群网络性能
 - **自动分发依赖包**：自动编译并分发 sysbench、sshpass 到远程服务器，支持跨架构部署
 - **灵活认证方式**：同时支持 SSH 免密登录和密码认证，适应不同运维场景
 - **灵活配置**：支持命令行参数、配置文件 parameter.conf、混合使用多种配置方式
@@ -515,10 +515,7 @@ FIO 测试采用不同的工作方式：
 # 矩阵模式测试所有服务器间网络（主机数>3时自动分批并行）
 ./oscheckperf network -f all-servers NETWORK_MODE=matrix NETWORK_PARALLEL=4
 
-# 并行模式同时测试
-./oscheckperf network -f all-servers NETWORK_MODE=parallel
-
-# 串行模式逐个测试
+# 串行模式：第一个主机作为服务器，其余作为客户端（支持本地/远程服务器）
 ./oscheckperf network -f all-servers NETWORK_MODE=serial
 ```
 
@@ -572,9 +569,10 @@ FIO 测试采用不同的工作方式：
 
 **A**:
 
-- **NETWORK\_MODE**：控制多个客户端测试的执行方式
-  - `serial`：逐个执行客户端测试，一个完成后再开始下一个
-  - `parallel`：同时执行所有客户端测试
+- **NETWORK\_MODE**：控制网络测试的模式
+  - `serial`：串行模式，使用第一个主机作为服务器，其余主机作为客户端依次测试
+    - 支持本地和远程服务器（自动检测）
+    - 第一个主机为本机时直接执行，无需SSH开销
   - `matrix`：执行全矩阵交叉测试（每对服务器之间都进行测试）
     - **自动分批并行**：当主机数 > 3 时，自动启用分批并行执行（参考 gpcheckperf）
     - **并行度**：自动计算为 `floor(主机数 / 2)`，无需手动配置
@@ -587,11 +585,11 @@ FIO 测试采用不同的工作方式：
 **示例**：
 
 ```bash
-# 串行执行，每个测试使用 4 个并行连接
+# 串行模式，每个测试使用 4 个并行连接
 ./oscheckperf network -f all-servers NETWORK_MODE=serial NETWORK_PARALLEL=4
 
-# 并行执行，每个测试使用 4 个并行连接
-./oscheckperf network -f all-servers NETWORK_MODE=parallel NETWORK_PARALLEL=4
+# 矩阵模式，每个测试使用 4 个并行连接
+./oscheckperf network -f all-servers NETWORK_MODE=matrix NETWORK_PARALLEL=4
 ```
 
 ## 最佳实践
@@ -664,7 +662,7 @@ FIO 测试采用不同的工作方式：
 
 - **One-stop Performance Evaluation**: Covers six core dimensions - CPU, Memory, Disk IO, Network Throughput, Thread Scheduling, and Mutex Lock
 - **Dual-Engine IO Testing**: Supports both sysbench and fio for comprehensive IO performance evaluation
-- **Multi-dimensional Network Testing**: Supports serial, parallel, and full matrix network testing modes for comprehensive cluster network assessment
+- **Multi-dimensional Network Testing**: Supports serial and full matrix network testing modes for comprehensive cluster network assessment
 
 ### 📦 Multi-scenario Deployment
 
@@ -1227,10 +1225,7 @@ The execution flow of oscheckperf:
 # Matrix mode - test all server pairs (auto batch parallel when hosts > 3)
 ./oscheckperf network -f all-servers NETWORK_MODE=matrix NETWORK_PARALLEL=4
 
-# Parallel mode - test all clients simultaneously
-./oscheckperf network -f all-servers NETWORK_MODE=parallel
-
-# Serial mode - test clients sequentially
+# Serial mode - first host as server, others as clients (supports local/remote server)
 ./oscheckperf network -f all-servers NETWORK_MODE=serial
 ```
 
@@ -1284,9 +1279,10 @@ The execution flow of oscheckperf:
 
 **A**:
 
-- **NETWORK\_MODE**: Controls how multiple client tests are executed
-  - `serial`: Execute client tests one by one, wait for one to complete before starting the next
-  - `parallel`: Execute all client tests simultaneously
+- **NETWORK\_MODE**: Controls the network test mode
+  - `serial`: Serial mode, uses first host as server, other hosts as clients tested sequentially
+    - Supports local and remote servers (auto-detected)
+    - Direct execution when first host is local, no SSH overhead
   - `matrix`: Execute full matrix cross-testing (test between every pair of servers)
     - **Auto Batch Parallel**: When hosts > 3, automatically enables batch parallel execution (inspired by gpcheckperf)
     - **Parallelism**: Auto-calculated as `floor(hosts / 2)`, no manual configuration needed
@@ -1299,11 +1295,11 @@ The execution flow of oscheckperf:
 **Examples**:
 
 ```bash
-# Serial execution with 4 parallel connections per test
+# Serial mode with 4 parallel connections per test
 ./oscheckperf network -f all-servers NETWORK_MODE=serial NETWORK_PARALLEL=4
 
-# Parallel execution with 4 parallel connections per test
-./oscheckperf network -f all-servers NETWORK_MODE=parallel NETWORK_PARALLEL=4
+# Matrix mode with 4 parallel connections per test
+./oscheckperf network -f all-servers NETWORK_MODE=matrix NETWORK_PARALLEL=4
 ```
 
 ## Best Practices
