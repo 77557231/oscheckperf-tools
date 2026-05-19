@@ -1,7 +1,7 @@
 #!/bin/bash
 #--------------------------------------------------------------------------------
 #-- File name:   oscheckperf
-#-- Version:     v0.9.4
+#-- Version:     v0.9.5
 #-- Purpose:     Database System Benchmark Tool
 #-- Author:      Wanping Pan 
 #-- Description: One-click system benchmarking tool, supports configuration via config file or command line parameters
@@ -800,7 +800,7 @@ parse_args() {
                 exit 0
                 ;;
             --version)
-                echo "Version: 0.9.4"
+                echo "Version: 0.9.5"
                 exit 0
                 ;;
             --dry-run)
@@ -5896,7 +5896,11 @@ EOF
                 printf "  %-18s %-18s %-14s %-10s %-31s %-14s\n" "Client IP" "Server IP" "Bandwidth (MB/s)" "Retrans" "RTT(ms)" "CPU(%)" >> "$report_file"
                 echo "  ------------------------------------------------------------------------------------------------------------" >> "$report_file"
                 
-                # Process each network test file
+                # Collect all results for sorting and statistics
+                local -a results_arr=()
+                local -a display_arr=()
+                
+                # First pass: collect all results
                 for json_file in "${network_files[@]}"; do
                     local net_bw="N/A"
                     local client_ip="N/A"
@@ -5992,7 +5996,7 @@ EOF
                         fi
                     fi
                     
-                    # Display the result
+                    # Collect results for sorting and display
                     if [ "$server_ip" != "N/A" ] && [ "$server_ip" != "null" ]; then
                         local rtt_display="N/A"
                         if [ "$rtt_avg" != "N/A" ] && [ "$rtt_avg" != "null" ]; then
@@ -6003,19 +6007,41 @@ EOF
                             fi
                         fi
                         local cpu_display="N/A"
-                        local tcp_display="N/A"
                         if ([ "$cpu_sender" != "N/A" ] && [ "$cpu_sender" != "null" ]) || ([ "$cpu_receiver" != "N/A" ] && [ "$cpu_receiver" != "null" ]); then
                             cpu_display="${cpu_sender:-N/A}/${cpu_receiver:-N/A}"
                         fi
-                        if [ "$tcp_congestion" != "N/A" ] && [ "$tcp_congestion" != "null" ]; then
-                            tcp_display="${tcp_congestion}"
-                        fi
-                        printf "  %-18s %-18s %-14s %-10s %-26s %-14s\n" "$client_ip" "$server_ip" "${net_bw}" "${retransmits:-N/A}" "$rtt_display" "$cpu_display" >> "$report_file"
-                    else
-                        printf "  %-18s %-18s %-14s %-10s %-26s %-14s\n" "$client_ip" "N/A" "${net_bw}" "${retransmits:-N/A}" "${rtt_avg:-N/A}" "" >> "$report_file"
+                        
+                        # Store result for sorting (bandwidth|client|server|retrans|rtt|cpu)
+                        results_arr+=("$net_bw|$client_ip|$server_ip|${retransmits:-N/A}|$rtt_display|$cpu_display")
+                        found_results=true
                     fi
-                    found_results=true
                 done
+                
+                # Calculate statistics and sort results
+                if [ ${#results_arr[@]} -gt 0 ]; then
+                    # Find max bandwidth
+                    local max_bw=0
+                    for result in "${results_arr[@]}"; do
+                        local bw=$(echo "$result" | cut -d'|' -f1)
+                        if [ "$bw" != "N/A" ] && (( $(echo "$bw > $max_bw" | bc -l) )); then
+                            max_bw="$bw"
+                        fi
+                    done
+                    
+                    # Sort by bandwidth descending and display
+                    local sorted_results=$(printf "%s\n" "${results_arr[@]}" | sort -t'|' -k1 -rn)
+                    local rank=1
+                    echo "$sorted_results" | while IFS='|' read -r bw client server retrans rtt cpu; do
+                        printf "  %-18s %-18s %-14s %-10s %-26s %-14s" "$client" "$server" "$bw" "$retrans" "$rtt" "$cpu" >> "$report_file"
+                        # Highlight poor performers (below 25% of max bandwidth)
+                        if [ "$bw" != "N/A" ] && (( $(echo "$bw < $max_bw * 0.25" | bc -l) )); then
+                            echo "  ⚠ POOR PERFORMANCE" >> "$report_file"
+                        else
+                            echo "" >> "$report_file"
+                        fi
+                        rank=$((rank + 1))
+                    done
+                fi
             else
                 # No JSON files found, check combined file directly
                 echo "  Test executed but no detailed results available" >> "$report_file"
