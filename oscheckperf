@@ -1,7 +1,7 @@
 #!/bin/bash
 #--------------------------------------------------------------------------------
 #-- File name:   oscheckperf
-#-- Version:     v0.9.6
+#-- Version:     v0.9.7
 #-- Purpose:     Database System Benchmark Tool
 #-- Author:      Wanping Pan 
 #-- Description: One-click system benchmarking tool, supports configuration via config file or command line parameters
@@ -193,9 +193,9 @@ parse_cpu_report() {
     fi
     
     echo "  CPU Test Results" >> "$output_file"
-    echo "  -------------------------------------------------------------------------------------------------------------------------" >> "$output_file"
+    echo "  -----------------------------------------------------------------------------------------------------------" >> "$output_file"
     printf "  %-16s %-12s %-14s %-14s %-14s %-18s %-18s\n" "Server IP" "Events/sec" "Avg Lat(ms)" "P95 Lat(ms)" "Max Lat(ms)" "Min Lat(ms)" "Sum Lat(ms)" >> "$output_file"
-    echo "  -------------------------------------------------------------------------------------------------------------------------" >> "$output_file"
+    echo "  -----------------------------------------------------------------------------------------------------------" >> "$output_file"
     
     local in_section=false
     local current_server_ip=""
@@ -265,9 +265,9 @@ parse_memory_report() {
     fi
     
     echo "  Memory Test Results" >> "$output_file"
-    echo "  -----------------------------------------------------------------------------------------------------------------------------------" >> "$output_file"
+    echo "  -----------------------------------------------------------------------------------------------------------------------------" >> "$output_file"
     printf "  %-18s %-15s %-15s %-15s %-14s %-14s %-14s %-18s\n" "Server IP" "Ops/sec" "MiB/sec" "Avg Lat(ms)" "Min Lat(ms)" "Max Lat(ms)" "P95 Lat(ms)" "Sum Lat(ms)" >> "$output_file"
-    echo "  -----------------------------------------------------------------------------------------------------------------------------------" >> "$output_file"
+    echo "  -----------------------------------------------------------------------------------------------------------------------------" >> "$output_file"
     
     local in_section=false
     local current_server_ip=""
@@ -341,9 +341,9 @@ parse_threads_report() {
     fi
     
     echo "  Threads Test Results" >> "$output_file"
-    echo "  --------------------------------------------------------------------------------------------------------------------------------" >> "$output_file"
+    echo "  -------------------------------------------------------------------------------------------------------------------" >> "$output_file"
     printf "  %-18s %-15s %-18s %-18s %-14s %-14s %-18s\n" "Server IP" "Events/sec" "Avg Latency (ms)" "P95 Latency (ms)" "Min Lat(ms)" "Max Lat(ms)" "Sum Lat(ms)" >> "$output_file"
-    echo "  --------------------------------------------------------------------------------------------------------------------------------" >> "$output_file"
+    echo "  -------------------------------------------------------------------------------------------------------------------" >> "$output_file"
     
     local in_section=false
     local current_server_ip=""
@@ -454,9 +454,9 @@ parse_mutex_report() {
     fi
     
     echo "  Mutex Test Results" >> "$output_file"
-    echo "  --------------------------------------------------------------------------------------------------------------------------------" >> "$output_file"
+    echo "  ------------------------------------------------------------------------------------------------------------------------------" >> "$output_file"
     printf "  %-18s %-15s %-15s %-18s %-14s %-14s %-14s %-18s\n" "Server IP" "Transactions" "TPS" "Avg Lat(ms)" "Min Lat(ms)" "Max Lat(ms)" "P95 Lat(ms)" "Sum Lat(ms)" >> "$output_file"
-    echo "  --------------------------------------------------------------------------------------------------------------------------------" >> "$output_file"
+    echo "  ------------------------------------------------------------------------------------------------------------------------------" >> "$output_file"
     
     local in_section=false
     local current_server_ip=""
@@ -862,7 +862,7 @@ parse_args() {
                 exit 0
                 ;;
             --version)
-                echo "Version: 0.9.6"
+                echo "Version: 0.9.7"
                 exit 0
                 ;;
             --dry-run)
@@ -5902,9 +5902,9 @@ EOF
                         printf "  %-20s %-11s %-11s %-11s %-11s %-11s %-11s %-13s %-8s\n" "Server IP" "Read IOPS" "Write IOPS" "Total IOPS" "Read BW" "Write BW" "Total BW" "Latency(ms)" "Mode" >> "$report_file"
                         echo "  ---------------------------------------------------------------------------------------------------------------" >> "$report_file"
                     else
-                        echo "  ---------------------------------------------------------------------------------------------------------------" >> "$report_file"
-                        printf "  %-20s %-11s %-11s %-11s %-11s %-11s %-11s %-13s %-8s\n" "Server IP" "Read IOPS" "Write IOPS" "Total IOPS" "Read BW" "Write BW" "Total BW" "Latency(ms)" "Mode" >> "$report_file"
-                        echo "  ---------------------------------------------------------------------------------------------------------------" >> "$report_file"
+                        echo "  ------------------------------------------------------------------------------------------------------------------------" >> "$report_file"
+                        printf "  %-20s %-11s %-11s %-11s %-11s %-11s %-11s %-13s %-10s %-8s\n" "Server IP" "Read IOPS" "Write IOPS" "Total IOPS" "Read BW" "Write BW" "Total BW" "Latency(ms)" "P99(ms)" "Mode" >> "$report_file"
+                        echo "  ------------------------------------------------------------------------------------------------------------------------" >> "$report_file"
                     fi
                     
                     # Print core table
@@ -5924,7 +5924,10 @@ EOF
                         if [ "$is_sysbench" = true ]; then
                             printf "  %-20s %-11s %-11s %-11s %-11s %-11s %-11s %-13s %-8s\n" "$server_ip" "$fmt_read_iops" "$fmt_write_iops" "$fmt_total_iops" "$fmt_read_bw" "$fmt_write_bw" "$fmt_total_bw" "$fmt_avg_lat" "$io_mode" >> "$report_file"
                         else
-                            printf "  %-20s %-11s %-11s %-11s %-11s %-11s %-11s %-13s %-8s\n" "$server_ip" "$fmt_read_iops" "$fmt_write_iops" "$fmt_total_iops" "$fmt_read_bw" "$fmt_write_bw" "$fmt_total_bw" "$fmt_avg_lat" "$io_mode" >> "$report_file"
+                            local key="${server_ip}_${io_mode}"
+                            local p99="${fio_p99_lat[$key]:-N/A}"
+                            local fmt_p99=$(if [ "$p99" != "N/A" ]; then awk -v val="$p99" 'BEGIN {if (val == int(val)) printf "%d", val; else printf "%.2f", val}' 2>/dev/null || echo "$p99"; else echo "N/A"; fi)
+                            printf "  %-20s %-11s %-11s %-11s %-11s %-11s %-11s %-13s %-10s %-8s\n" "$server_ip" "$fmt_read_iops" "$fmt_write_iops" "$fmt_total_iops" "$fmt_read_bw" "$fmt_write_bw" "$fmt_total_bw" "$fmt_avg_lat" "$fmt_p99" "$io_mode" >> "$report_file"
                         fi
                     done < <(sort -t'|' -k1,1 "$results_temp_file")
                     
@@ -5953,9 +5956,9 @@ EOF
                     if [ "$is_sysbench" = false ]; then
                         echo "" >> "$report_file"
                         echo "  # FIO Extended Metrics" >> "$report_file"
-                        echo "  ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------" >> "$report_file"
-                        printf "  %-15s %-10s %-10s %-11s %-8s %-9s %-9s %-8s %-8s %-9s %-6s %-12s %-12s %-14s %-14s %-8s\n" "Server IP" "P99(ms)" "slat(us)" "clat(us)" "IO Depth" "CPU(usr)" "CPU(sys)" "bw_min" "bw_max" "disk_util" "Mode" "ctx(read)" "ctx(write)" "aggrios" "aggrticks" "aggrutil" >> "$report_file"
-                        echo "  ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------" >> "$report_file"
+                        echo "  -----------------------------------------------------------------------------------------------------------------------------------------------------------------------" >> "$report_file"
+                        printf "  %-15s %-10s %-11s %-8s %-9s %-9s %-8s %-8s %-6s %-12s %-12s %-14s %-14s %-8s %-8s\n" "Server IP" "slat(us)" "clat(us)" "IO Depth" "CPU(usr)" "CPU(sys)" "bw_min" "bw_max" "Mode" "ctx(read)" "ctx(write)" "aggrios" "aggrticks" "util" "aggrutil" >> "$report_file"
+                        echo "  -----------------------------------------------------------------------------------------------------------------------------------------------------------------------" >> "$report_file"
                         
                         # Print extended metrics
                         while IFS='|' read -r server_ip read_iops write_iops total_iops read_bw write_bw total_bw avg_lat p95_lat min_lat max_lat io_mode fsync_iops tool; do
@@ -5963,7 +5966,6 @@ EOF
                                 continue
                             fi
                             local key="${server_ip}_${io_mode}"
-                            local p99="${fio_p99_lat[$key]:-N/A}"
                             local slat="${fio_slat_avg[$key]:-N/A}"
                             local clat="${fio_clat_avg[$key]:-N/A}"
                             local iodepth="${fio_iodepth_level[$key]:-N/A}"
@@ -5979,7 +5981,6 @@ EOF
                             local aggrutil="${fio_aggrutil[$key]:-N/A}"
                             
                             # Format all numeric values - integers remain as integers, decimals to 2 places
-                            local fmt_p99=$(if [ "$p99" != "N/A" ]; then awk -v val="$p99" 'BEGIN {if (val == int(val)) printf "%d", val; else printf "%.2f", val}' 2>/dev/null || echo "$p99"; else echo "N/A"; fi)
                             local fmt_slat=$(if [ "$slat" != "N/A" ]; then awk -v val="$slat" 'BEGIN {if (val == int(val)) printf "%d", val; else printf "%.2f", val}' 2>/dev/null || echo "$slat"; else echo "N/A"; fi)
                             local fmt_clat=$(if [ "$clat" != "N/A" ]; then awk "BEGIN {printf \"%.0f\", $clat}" 2>/dev/null || echo "$clat"; else echo "N/A"; fi)
                             local fmt_util=$(if [ "$util" != "N/A" ]; then awk -v val="$util" 'BEGIN {if (val == int(val)) printf "%d", val; else printf "%.2f", val}' 2>/dev/null || echo "$util"; else echo "N/A"; fi)
@@ -5989,7 +5990,7 @@ EOF
                             local fmt_b_max=$(if [ "$b_max" != "N/A" ]; then awk "BEGIN {printf \"%.0f\", $b_max}" 2>/dev/null || echo "$b_max"; else echo "N/A"; fi)
                             local fmt_aggrutil=$(if [ "$aggrutil" != "N/A" ]; then awk "BEGIN {printf \"%.2f\", $aggrutil}" 2>/dev/null || echo "$aggrutil"; else echo "N/A"; fi)
                             
-                            printf "  %-15s %-10s %-10s %-11s %-8s %-9s %-9s %-8s %-8s %-9s %-6s %-12s %-12s %-14s %-14s %-8s\n" "$server_ip" "$fmt_p99" "$fmt_slat" "$fmt_clat" "$iodepth" "$fmt_cpu_usr" "$fmt_cpu_sys" "$fmt_b_min" "$fmt_b_max" "$fmt_util" "$io_mode" "${ctx_read:-N/A}" "${ctx_write:-N/A}" "${aggrios:-N/A}" "${aggrticks:-N/A}" "$fmt_aggrutil" >> "$report_file"
+                            printf "  %-15s %-10s %-11s %-8s %-9s %-9s %-8s %-8s %-6s %-12s %-12s %-14s %-14s %-8s %-8s\n" "$server_ip" "$fmt_slat" "$fmt_clat" "$iodepth" "$fmt_cpu_usr" "$fmt_cpu_sys" "$fmt_b_min" "$fmt_b_max" "$io_mode" "${ctx_read:-N/A}" "${ctx_write:-N/A}" "${aggrios:-N/A}" "${aggrticks:-N/A}" "$fmt_util" "$fmt_aggrutil" >> "$report_file"
                         done < <(sort -t'|' -k1,1 "$results_temp_file")
                     fi
                     
