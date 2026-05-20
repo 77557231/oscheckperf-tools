@@ -1,7 +1,7 @@
 #!/bin/bash
 #--------------------------------------------------------------------------------
 #-- File name:   oscheckperf
-#-- Version:     v0.9.7
+#-- Version:     v0.9.8
 #-- Purpose:     Database System Benchmark Tool
 #-- Author:      Wanping Pan 
 #-- Description: One-click system benchmarking tool, supports configuration via config file or command line parameters
@@ -862,7 +862,7 @@ parse_args() {
                 exit 0
                 ;;
             --version)
-                echo "Version: 0.9.7"
+                echo "Version: 0.9.8"
                 exit 0
                 ;;
             --dry-run)
@@ -1059,7 +1059,7 @@ show_help() {
     echo "  -o <output_dir>   Specify output directory path (default: $OUTPUT_DIR_DEFAULT)"
     echo "  -f <servers_file> Specify servers list file path (supports IP or IP:username:password)"
     echo "  -p <config_file>  Specify configuration file path (KEY=VALUE format)"
-    echo "  -i <component>    Install components: sysbench, sshpass, fio, iperf3, jq, oscheckperf, all (default: all)"
+    echo "  -i <component>    Install components: sysbench, sshpass, fio, iperf3, numactl, ethtool, jq, oscheckperf, all (default: all)"
     echo "  -h                Show this help message"
     echo "  --debug           Enable debug mode (show detailed logs)"
     echo "  --version         Show version information"
@@ -2663,6 +2663,14 @@ check_dependencies() {
     CHECK_CMD_SOURCE=""
     check_command "jq" "jq will be automatically distributed to remote servers" >/dev/null 2>&1
     print_dep_status "jq" "required for parsing fio JSON output" "$CHECK_CMD_SOURCE"
+    
+    CHECK_CMD_SOURCE=""
+    check_command "numactl" "numactl will be automatically distributed to remote servers" >/dev/null 2>&1
+    print_dep_status "numactl" "required for NUMA tests" "$CHECK_CMD_SOURCE"
+    
+    CHECK_CMD_SOURCE=""
+    check_command "ethtool" "ethtool will be automatically distributed to remote servers" >/dev/null 2>&1
+    print_dep_status "ethtool" "required for network interface tests" "$CHECK_CMD_SOURCE"
     
     echo "  Note: Install optional dependencies based on your testing needs"
     
@@ -6456,6 +6464,12 @@ main() {
                         echo "  Executing remote checks on $target_ip..."
                         set_ssh_password "$target_ip"
                         local check_ssh=$(get_ssh_command "$target_ip")
+                        
+                        # Ensure remote oscheckperf script is up-to-date before running check
+                        local scp_cmd=$(get_scp_command "$target_ip")
+                        eval "$scp_cmd -q '$0' '$target_ip:\$HOME/oscheckperf/'" > /dev/null 2>&1
+                        eval "$check_ssh 'chmod +x \$HOME/oscheckperf/oscheckperf'" > /dev/null 2>&1
+                        
                         eval "$check_ssh '\$HOME/oscheckperf/oscheckperf --remote check $target_ip'"
                     fi
                     echo ""
@@ -6909,6 +6923,50 @@ compile_package() {
     fi
 }
 
+# Check if sudo is available (passwordless)
+check_sudo_available() {
+    if [ "$(whoami)" = "root" ]; then
+        return 0
+    fi
+    sudo -n true 2>/dev/null
+    return $?
+}
+
+# Unified dependency installation function
+# Arguments:
+#   $1: RPM package list (for yum)
+#   $2: DEB package list (for apt-get)
+#   $3: Component name (for error messages)
+# Returns:
+#   0: success or already installed
+#   1: failed or sudo not available
+install_build_dependencies() {
+    local pkg_list_rpm="$1"
+    local pkg_list_deb="$2"
+    local component_name="$3"
+    
+    if check_sudo_available; then
+        echo "  Installing build dependencies..."
+        if command -v yum &> /dev/null; then
+            run_command "sudo yum install -y $pkg_list_rpm" "/dev/null"
+        elif command -v apt-get &> /dev/null; then
+            run_command "sudo apt-get install -y $pkg_list_deb" "/dev/null"
+        else
+            echo "  ⚠ Could not install dependencies automatically (unsupported package manager)"
+            return 1
+        fi
+    else
+        echo "  ⚠ Warning: sudo not available or requires password"
+        echo "  Please install $component_name dependencies manually:"
+        echo "    - CentOS/RHEL: sudo yum install -y $pkg_list_rpm"
+        echo "    - Ubuntu/Debian: sudo apt-get install -y $pkg_list_deb"
+        echo "  Or configure passwordless sudo for automated installation"
+        return 1
+    fi
+    
+    return 0
+}
+
 # Distribute oscheckperf directory to remote server
 # Arguments:
 #   $1: target server IP
@@ -7082,6 +7140,42 @@ distribute_to_server() {
         esac
         
         case "$install_target" in
+            numactl|all)
+                if [ -x "$bin_dir/numactl" ]; then
+                    eval "$ssh_cmd 'rm -f $bin_dir/numactl 2>/dev/null || true'" > /dev/null 2>&1
+                    local scp_output=$(eval "$scp_cmd '$bin_dir/numactl' '$target_ip:$bin_dir/' 2>&1")
+                    if [ $? -eq 0 ]; then
+                        echo "  ✓ Successfully distributed numactl to $target_ip"
+                    else
+                        echo "  ✗ Failed to distribute numactl to $target_ip"
+                        [ -n "$scp_output" ] && echo "    Error: $scp_output"
+                        dist_success=false
+                    fi
+                else
+                    echo "  - numactl not found locally, skipping"
+                fi
+                ;;
+        esac
+        
+        case "$install_target" in
+            ethtool|all)
+                if [ -x "$bin_dir/ethtool" ]; then
+                    eval "$ssh_cmd 'rm -f $bin_dir/ethtool 2>/dev/null || true'" > /dev/null 2>&1
+                    local scp_output=$(eval "$scp_cmd '$bin_dir/ethtool' '$target_ip:$bin_dir/' 2>&1")
+                    if [ $? -eq 0 ]; then
+                        echo "  ✓ Successfully distributed ethtool to $target_ip"
+                    else
+                        echo "  ✗ Failed to distribute ethtool to $target_ip"
+                        [ -n "$scp_output" ] && echo "    Error: $scp_output"
+                        dist_success=false
+                    fi
+                else
+                    echo "  - ethtool not found locally, skipping"
+                fi
+                ;;
+        esac
+        
+        case "$install_target" in
             jq|all)
                 if [ -x "$bin_dir/jq" ]; then
                     eval "$ssh_cmd 'rm -f $bin_dir/jq 2>/dev/null || true'" > /dev/null 2>&1
@@ -7100,7 +7194,7 @@ distribute_to_server() {
         esac
         
         # Set PATH if not already set
-        eval "$ssh_cmd 'if ! grep -q oscheckperf/bin ~/.bashrc; then echo export PATH=\\\$PATH:$bin_dir >> ~/.bashrc; fi && source ~/.bashrc'" > /dev/null 2>&1
+        eval "$ssh_cmd 'if ! grep -q oscheckperf/bin ~/.bashrc; then echo export PATH=$bin_dir:\\\$PATH >> ~/.bashrc; fi && source ~/.bashrc'" > /dev/null 2>&1
         
         if [ "$dist_success" = "false" ]; then
             return 1
@@ -7124,7 +7218,7 @@ distribute_to_server() {
             local tar_file="$HOME/oscheckperf.tar.gz"
             tar -czf "$tar_file" -C "$HOME" oscheckperf
             if eval "$scp_cmd -q '$tar_file' '$target_ip:\$HOME/'"; then
-                eval "$ssh_cmd 'rm -rf $install_dir && mkdir -p $install_dir && tar -xzf \$HOME/oscheckperf.tar.gz -C \$HOME && rm -f \$HOME/oscheckperf.tar.gz && chmod +x $install_dir/oscheckperf && if ! grep -q oscheckperf/bin ~/.bashrc; then echo export PATH=\\\$PATH:$install_dir/bin >> ~/.bashrc; fi && source ~/.bashrc'" > /dev/null 2>&1
+                eval "$ssh_cmd 'rm -rf $install_dir && mkdir -p $install_dir && tar -xzf \$HOME/oscheckperf.tar.gz -C \$HOME && rm -f \$HOME/oscheckperf.tar.gz && chmod +x $install_dir/oscheckperf && if ! grep -q oscheckperf/bin ~/.bashrc; then echo export PATH=$install_dir/bin:\\\$PATH >> ~/.bashrc; fi && source ~/.bashrc'" > /dev/null 2>&1
                 echo "  ✓ Successfully distributed to $target_ip"
             else
                 echo "  ✗ Failed to distribute to $target_ip"
@@ -7143,13 +7237,15 @@ distribute_to_server() {
             cp tools/sshpass-1.09.tar.gz /tmp/oscheckperf-src/tools/ 2>/dev/null || true
             cp tools/fio-3.40.tar.gz /tmp/oscheckperf-src/tools/ 2>/dev/null || true
             cp tools/iperf-3.18.tar.gz /tmp/oscheckperf-src/tools/ 2>/dev/null || true
+            cp tools/numactl-2.0.19.tar.gz /tmp/oscheckperf-src/tools/ 2>/dev/null || true
+            cp tools/ethtool-6.10.tar.gz /tmp/oscheckperf-src/tools/ 2>/dev/null || true
             cp tools/jq-1.8.1.tar.gz /tmp/oscheckperf-src/tools/ 2>/dev/null || true
             
             local tar_file="/tmp/oscheckperf-src.tar.gz"
             tar -czf "$tar_file" -C /tmp oscheckperf-src
             
             if eval "$scp_cmd -q '$tar_file' '$target_ip:\$HOME/'"; then
-                eval "$ssh_cmd 'rm -rf $install_dir && mkdir -p $install_dir && tar -xzf \$HOME/oscheckperf-src.tar.gz -C \$HOME && rm -f \$HOME/oscheckperf-src.tar.gz && mv \$HOME/oscheckperf-src/* $install_dir/ && rm -rf \$HOME/oscheckperf-src && chmod +x $install_dir/oscheckperf && if ! grep -q oscheckperf/bin ~/.bashrc; then echo export PATH=\\\$PATH:$install_dir/bin >> ~/.bashrc; fi && source ~/.bashrc && cd $install_dir && ./oscheckperf -i all'" > /dev/null 2>&1
+                eval "$ssh_cmd 'rm -rf $install_dir && mkdir -p $install_dir && tar -xzf \$HOME/oscheckperf-src.tar.gz -C \$HOME && rm -f \$HOME/oscheckperf-src.tar.gz && mv \$HOME/oscheckperf-src/* $install_dir/ && rm -rf \$HOME/oscheckperf-src && chmod +x $install_dir/oscheckperf && if ! grep -q oscheckperf/bin ~/.bashrc; then echo export PATH=$install_dir/bin:\\\$PATH >> ~/.bashrc; fi && source ~/.bashrc && cd $install_dir && ./oscheckperf -i all'" > /dev/null 2>&1
                 echo "  ✓ Successfully distributed source and triggered remote compilation"
             else
                 echo "  ✗ Failed to distribute source to $target_ip"
@@ -7177,15 +7273,8 @@ install_sysbench() {
     
     # Check build dependencies
     echo "  Checking build dependencies..."
-    if ! command -v gcc &> /dev/null || ! command -v make &> /dev/null || ! command -v automake &> /dev/null; then
-        echo "  Installing build dependencies..."
-        if command -v yum &> /dev/null; then
-            run_command "sudo yum install -y automake autoconf libtool gcc make" "/dev/null"
-        elif command -v apt-get &> /dev/null; then
-            run_command "sudo apt-get install -y automake autoconf libtool gcc make" "/dev/null"
-        else
-            echo "  ⚠ Could not install dependencies automatically"
-        fi
+    if ! command -v gcc &> /dev/null || ! command -v make &> /dev/null || ! command -v automake &> /dev/null || ! command -v autoconf &> /dev/null || ! command -v libtool &> /dev/null; then
+        install_build_dependencies "automake autoconf libtool gcc make" "automake autoconf libtool gcc make" "sysbench"
     else
         echo "  Build dependencies already installed"
     fi
@@ -7195,7 +7284,7 @@ install_sysbench() {
     
     # Configure bashrc
     if ! grep -q "oscheckperf/bin" ~/.bashrc; then
-        run_command "echo 'export PATH=\$PATH:$install_dir/bin' >> ~/.bashrc" "/dev/null"
+        run_command "echo 'export PATH=$install_dir/bin:\$PATH' >> ~/.bashrc" "/dev/null"
     fi
     
     return $compile_result
@@ -7216,14 +7305,7 @@ install_sshpass() {
     # Check build dependencies
     echo "  Checking build dependencies..."
     if ! command -v gcc &> /dev/null || ! command -v make &> /dev/null; then
-        echo "  Installing build dependencies..."
-        if command -v yum &> /dev/null; then
-            run_command "sudo yum install -y gcc make" "/dev/null"
-        elif command -v apt-get &> /dev/null; then
-            run_command "sudo apt-get install -y gcc make" "/dev/null"
-        else
-            echo "   Could not install dependencies automatically"
-        fi
+        install_build_dependencies "gcc make" "gcc make" "sshpass"
     else
         echo "  Build dependencies already installed"
     fi
@@ -7232,7 +7314,7 @@ install_sshpass() {
     
     # Configure bashrc
     if ! grep -q "oscheckperf/bin" ~/.bashrc; then
-        run_command "echo 'export PATH=\$PATH:$install_dir/bin' >> ~/.bashrc" "/dev/null"
+        run_command "echo 'export PATH=$install_dir/bin:\$PATH' >> ~/.bashrc" "/dev/null"
     fi
     
     # Verify
@@ -7257,14 +7339,7 @@ install_fio() {
     
     echo "  Checking build dependencies..."
     if ! command -v gcc &> /dev/null || ! command -v make &> /dev/null; then
-        echo "  Installing build dependencies..."
-        if command -v yum &> /dev/null; then
-            run_command "sudo yum install -y gcc make" "/dev/null"
-        elif command -v apt-get &> /dev/null; then
-            run_command "sudo apt-get install -y gcc make" "/dev/null"
-        else
-            echo "  ⚠ Could not install dependencies automatically"
-        fi
+        install_build_dependencies "gcc make" "gcc make" "fio"
     else
         echo "  Build dependencies already installed"
     fi
@@ -7295,15 +7370,8 @@ install_iperf3() {
     echo "[Step 1/2] Compiling iperf3..."
     
     echo "  Checking build dependencies..."
-    if ! command -v gcc &> /dev/null || ! command -v make &> /dev/null || ! command -v automake &> /dev/null; then
-        echo "  Installing build dependencies..."
-        if command -v yum &> /dev/null; then
-            run_command "sudo yum install -y automake autoconf libtool gcc make" "/dev/null"
-        elif command -v apt-get &> /dev/null; then
-            run_command "sudo apt-get install -y automake autoconf libtool gcc make" "/dev/null"
-        else
-            echo "  ⚠ Could not install dependencies automatically"
-        fi
+    if ! command -v gcc &> /dev/null || ! command -v make &> /dev/null || ! command -v automake &> /dev/null || ! command -v autoconf &> /dev/null || ! command -v libtool &> /dev/null; then
+        install_build_dependencies "automake autoconf libtool gcc make" "automake autoconf libtool gcc make" "iperf3"
     else
         echo "  Build dependencies already installed"
     fi
@@ -7322,6 +7390,72 @@ install_iperf3() {
     return $compile_result
 }
 
+# Compile and install numactl
+install_numactl() {
+    local install_dir="$HOME/oscheckperf"
+    
+    if [ -d "$install_dir/bin" ] && [ -x "$install_dir/bin/numactl" ]; then
+        echo "  ✓ numactl already installed at $install_dir"
+        export PATH="$PATH:$install_dir/bin"
+        return 0
+    fi
+    
+    echo "[Step 1/2] Compiling numactl..."
+    
+    echo "  Checking build dependencies..."
+    if ! command -v gcc &> /dev/null || ! command -v make &> /dev/null || ! command -v automake &> /dev/null || ! command -v autoconf &> /dev/null || ! command -v libtool &> /dev/null; then
+        install_build_dependencies "automake autoconf libtool gcc make numactl-devel" "automake autoconf libtool gcc make libnuma-dev" "numactl"
+    else
+        echo "  Build dependencies already installed"
+    fi
+    
+    compile_package "numactl" "tools/numactl-2.0.19.tar.gz" "numactl-2.0.19" "" "true"
+    local compile_result=$?
+    
+    if ! grep -q "oscheckperf/bin" ~/.bashrc; then
+        run_command "echo 'export PATH=\$PATH:$install_dir/bin' >> ~/.bashrc" "/dev/null"
+    fi
+    
+    if command -v numactl &> /dev/null; then
+        echo "  ✓ numactl version: $(numactl --version 2>&1 | head -1)"
+    fi
+    
+    return $compile_result
+}
+
+# Compile and install ethtool
+install_ethtool() {
+    local install_dir="$HOME/oscheckperf"
+    
+    if [ -d "$install_dir/bin" ] && [ -x "$install_dir/bin/ethtool" ]; then
+        echo "  ✓ ethtool already installed at $install_dir"
+        export PATH="$PATH:$install_dir/bin"
+        return 0
+    fi
+    
+    echo "[Step 1/2] Compiling ethtool..."
+    
+    echo "  Checking build dependencies..."
+    if ! command -v gcc &> /dev/null || ! command -v make &> /dev/null || ! command -v automake &> /dev/null || ! command -v autoconf &> /dev/null || ! command -v libtool &> /dev/null || ! command -v pkg-config &> /dev/null || ! pkg-config --exists libmnl 2>/dev/null; then
+        install_build_dependencies "automake autoconf libtool gcc make pkg-config libmnl-devel" "automake autoconf libtool gcc make pkg-config libmnl-dev" "ethtool"
+    else
+        echo "  Build dependencies already installed"
+    fi
+    
+    compile_package "ethtool" "tools/ethtool-6.10.tar.gz" "ethtool-6.10" "--exec-prefix=$install_dir --sbindir=$install_dir/bin --bindir=$install_dir/bin" "true"
+    local compile_result=$?
+    
+    if ! grep -q "oscheckperf/bin" ~/.bashrc; then
+        run_command "echo 'export PATH=\$PATH:$install_dir/bin' >> ~/.bashrc" "/dev/null"
+    fi
+    
+    if command -v ethtool &> /dev/null; then
+        echo "  ✓ ethtool version: $(ethtool --version 2>&1 | head -1)"
+    fi
+    
+    return $compile_result
+}
+
 # Compile and install jq
 install_jq() {
     local install_dir="$HOME/oscheckperf"
@@ -7335,15 +7469,8 @@ install_jq() {
     echo "[Step 1/2] Compiling jq..."
     
     echo "  Checking build dependencies..."
-    if ! command -v gcc &> /dev/null || ! command -v make &> /dev/null || ! command -v automake &> /dev/null; then
-        echo "  Installing build dependencies..."
-        if command -v yum &> /dev/null; then
-            run_command "sudo yum install -y automake autoconf libtool gcc make" "/dev/null"
-        elif command -v apt-get &> /dev/null; then
-            run_command "sudo apt-get install -y automake autoconf libtool gcc make" "/dev/null"
-        else
-            echo "  ⚠ Could not install dependencies automatically"
-        fi
+    if ! command -v gcc &> /dev/null || ! command -v make &> /dev/null || ! command -v automake &> /dev/null || ! command -v autoconf &> /dev/null || ! command -v libtool &> /dev/null; then
+        install_build_dependencies "automake autoconf libtool gcc make" "automake autoconf libtool gcc make" "jq"
     else
         echo "  Build dependencies already installed"
     fi
@@ -7394,6 +7521,8 @@ install_components() {
     local install_sshpass=false
     local install_fio=false
     local install_iperf3=false
+    local install_numactl=false
+    local install_ethtool=false
     local install_jq=false
     local install_script=false
     
@@ -7410,6 +7539,12 @@ install_components() {
         iperf3)
             install_iperf3=true
             ;;
+        numactl)
+            install_numactl=true
+            ;;
+        ethtool)
+            install_ethtool=true
+            ;;
         jq)
             install_jq=true
             ;;
@@ -7421,12 +7556,14 @@ install_components() {
             install_sshpass=true
             install_fio=true
             install_iperf3=true
+            install_numactl=true
+            install_ethtool=true
             install_jq=true
             install_script=true
             ;;
         *)
             echo "Error: Invalid installation target '$target'"
-            echo "Valid targets: sysbench, sshpass, fio, iperf3, jq, oscheckperf, all"
+            echo "Valid targets: sysbench, sshpass, fio, iperf3, numactl, ethtool, jq, oscheckperf, all"
             exit 1
             ;;
     esac
@@ -7446,6 +7583,14 @@ install_components() {
     
     if [ "$install_iperf3" = "true" ]; then
         install_iperf3 || error_count=$((error_count + 1))
+    fi
+    
+    if [ "$install_numactl" = "true" ]; then
+        install_numactl || error_count=$((error_count + 1))
+    fi
+    
+    if [ "$install_ethtool" = "true" ]; then
+        install_ethtool || error_count=$((error_count + 1))
     fi
     
     if [ "$install_jq" = "true" ]; then
@@ -7534,6 +7679,12 @@ install_components() {
     fi
     if [ "$install_iperf3" = "true" ] && command -v iperf3 &> /dev/null; then
         echo "  - iperf3: installed ($(iperf3 --version | head -1))"
+    fi
+    if [ "$install_numactl" = "true" ] && command -v numactl &> /dev/null; then
+        echo "  - numactl: installed ($(numactl --version 2>&1 | head -1))"
+    fi
+    if [ "$install_ethtool" = "true" ] && command -v ethtool &> /dev/null; then
+        echo "  - ethtool: installed ($(ethtool --version 2>&1 | head -1))"
     fi
     if [ "$install_jq" = "true" ] && command -v jq &> /dev/null; then
         echo "  - jq: installed ($(jq --version))"

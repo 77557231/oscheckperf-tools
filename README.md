@@ -123,8 +123,14 @@ sudo apt install -y automake autoconf libtool gcc make
 ./oscheckperf -i sshpass    # 编译安装 sshpass
 ./oscheckperf -i fio        # 编译安装 fio
 ./oscheckperf -i iperf3     # 编译安装 iperf3
+./oscheckperf -i numactl    # 编译安装 numactl
+./oscheckperf -i ethtool    # 编译安装 ethtool
 ./oscheckperf -i jq         # 编译安装 jq
 ```
+
+> **注意**：编译 ethtool 前需手动安装 libmnl 依赖：
+> - CentOS/RHEL: `sudo yum install -y libmnl-devel`
+> - Ubuntu/Debian: `sudo apt-get install -y libmnl-dev`
 
 ### 2. 运行测试
 
@@ -787,7 +793,7 @@ sudo apt install -y automake autoconf libtool gcc make
 **Supported Components for Compilation**:
 
 ```bash
-# Install all components (sysbench, sshpass, fio, iperf3, jq)
+# Install all components (sysbench, sshpass, fio, iperf3, numactl, ethtool, jq)
 ./oscheckperf -i all
 
 # Install specific component
@@ -795,8 +801,14 @@ sudo apt install -y automake autoconf libtool gcc make
 ./oscheckperf -i sshpass    # Compile and install sshpass
 ./oscheckperf -i fio        # Compile and install fio
 ./oscheckperf -i iperf3     # Compile and install iperf3
+./oscheckperf -i numactl    # Compile and install numactl
+./oscheckperf -i ethtool    # Compile and install ethtool
 ./oscheckperf -i jq         # Compile and install jq
 ```
+
+> **Note**: Before compiling ethtool, manually install libmnl dependency:
+> - CentOS/RHEL: `sudo yum install -y libmnl-devel`
+> - Ubuntu/Debian: `sudo apt-get install -y libmnl-dev`
 
 
 ### 2. Run Tests
