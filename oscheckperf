@@ -1,7 +1,7 @@
 #!/bin/bash
 #--------------------------------------------------------------------------------
 #-- File name:   oscheckperf
-#-- Version:     v0.9.10
+#-- Version:     v1.0.0
 #-- Purpose:     Database System Benchmark Tool
 #-- Author:      Wanping Pan 
 #-- Description: One-click system benchmarking tool, supports configuration via config file or command line parameters
@@ -840,7 +840,7 @@ parse_args() {
                 exit 0
                 ;;
             --version)
-                echo "Version: 0.9.10"
+                echo "Version: 1.0.0"
                 exit 0
                 ;;
             --dry-run)
@@ -1556,20 +1556,16 @@ print_disk_info_section() {
     local filtered_lines=()
     for disk_line in "${disk_lines[@]}"; do
         if [ -n "$disk_line" ] && [ "$disk_line" != "N/A" ]; then
-            IFS='|' read -r name size type fstype mountpoint disk_type vendor model scheduler wcache options <<< "$disk_line"
+            IFS='|' read -r name size type fstype mountpoint disk_type vendor model scheduler wcache <<< "$disk_line"
             # Clean up name (remove tree characters and leading spaces)
             local clean_name=$(echo "$name" | sed 's/^[├└─ ]*//; s/^[│ ]*//')
             local show=false
-            # Show swap (fstype=swap, name contains swap, or mountpoint contains SWAP)
-            if [[ "$fstype" == "swap" ]] || [[ "$clean_name" == *swap* ]] || [[ "$mountpoint" == *SWAP* ]]; then
+            # Show disk and rom types directly
+            if [ "$type" = "disk" ] || [ "$type" = "rom" ]; then
                 show=true
             fi
-            # Show IO_PATH related device (match cleaned name or mount point)
-            if [ -n "$io_device" ] && [ "$clean_name" = "$io_device" ]; then
-                show=true
-            fi
-            # Also match by mount point for LVM devices
-            if [ -n "$io_mount" ] && [ "$mountpoint" = "$io_mount" ]; then
+            # Show all partition and LVM devices
+            if [ "$type" = "part" ] || [ "$type" = "lvm" ]; then
                 show=true
             fi
             if $show; then
@@ -1580,22 +1576,15 @@ print_disk_info_section() {
     
     if [ ${#filtered_lines[@]} -gt 0 ]; then
         printf -- "%s[Disk Information]\n" "$prefix" >> "$report_file"
-        printf -- "%s--------------------------------------------------------------------------------\n" "$prefix" >> "$report_file"
-        printf -- "%s%-28s %-12s %-6s %-8s %-14s %-5s %-8s %-12s %-8s %-8s %-12s\n" "$prefix" "NAME" "SIZE" "TYPE" "FS" "MOUNTPOINT" "TYPE" "VENDOR" "MODEL" "SCHEDULER" "WCACHE" "OPTIONS" >> "$report_file"
-        printf -- "%s--------------------------------------------------------------------------------\n" "$prefix" >> "$report_file"
+        printf -- "%s------------------------------------------------------------------------------------------------------\n" "$prefix" >> "$report_file"
+        printf -- "%s%-28s %-12s %-6s %-8s %-14s %-5s %-8s %-12s %-8s %-8s\n" "$prefix" "NAME" "SIZE" "TYPE" "FS" "MOUNTPOINT" "TYPE" "VENDOR" "MODEL" "SCHEDULER" "WCACHE" >> "$report_file"
+        printf -- "%s------------------------------------------------------------------------------------------------------\n" "$prefix" >> "$report_file"
         for disk_line in "${filtered_lines[@]}"; do
-            IFS='|' read -r name size type fstype mountpoint disk_type vendor model scheduler wcache options <<< "$disk_line"
+            IFS='|' read -r name size type fstype mountpoint disk_type vendor model scheduler wcache <<< "$disk_line"
             # Clean up name for display
             local display_name=$(echo "$name" | sed 's/^[├└─ ]*//; s/^[│ ]*//')
-            if [ "$type" = "part" ] || [ "$type" = "lvm" ] || [ "$type" = "rom" ]; then
-                [ "$disk_type" = "Unknown" ] && disk_type="-"
-                [ "$vendor" = "N/A" ] && vendor="-"
-                [ "$model" = "N/A" ] && model="-"
-                [ "$scheduler" = "N/A" ] && scheduler="-"
-                [ "$wcache" = "N/A" ] && wcache="-"
-            fi
-            [ "$options" = "N/A" ] && options="-"
-            printf -- "%s%-28s %-12s %-6s %-8s %-14s %-5s %-8s %-12s %-8s %-8s %-12s\n" "$prefix" "$display_name" "$size" "$type" "$fstype" "$mountpoint" "$disk_type" "$vendor" "$model" "$scheduler" "$wcache" "$options" >> "$report_file"
+            [ "$disk_type" = "Unknown" ] && disk_type="-"
+            printf -- "%s%-28s %-12s %-6s %-8s %-14s %-5s %-8s %-12s %-8s %-8s\n" "$prefix" "$display_name" "$size" "$type" "$fstype" "$mountpoint" "$disk_type" "$vendor" "$model" "$scheduler" "$wcache" >> "$report_file"
         done
         printf -- "\n" >> "$report_file"
     fi
@@ -1745,6 +1734,14 @@ print_disk_io_settings() {
     local read_ahead="$4"
     local trim="$5"
     local max_sectors="$6"
+    local mount_opts="$7"
+    
+    if [ -n "$mount_opts" ] && [ "$mount_opts" != "N/A" ]; then
+        printf -- "%s[Mount Options (Benchmark FS Only)]\n" "$prefix" >> "$report_file"
+        printf -- "%s--------------------------------------------------------------------------------\n" "$prefix" >> "$report_file"
+        printf -- "%s%s\n" "$prefix" "$mount_opts" >> "$report_file"
+        printf -- "%s\n" "$prefix" >> "$report_file"
+    fi
     
     if [ "$queue_depth" != "N/A" ] || [ "$read_ahead" != "N/A" ] || [ "$trim" != "N/A" ] || [ "$max_sectors" != "N/A" ]; then
         printf -- "%s[Disk IO Settings (Benchmark Disk Only)]\n" "$prefix" >> "$report_file"
@@ -2002,7 +1999,7 @@ print_node_hardware_info() {
     print_disk_info_section "$report_file" "$prefix" "$resolved_io_path" "${disk_lines[@]}"
     print_disk_usage_section "$report_file" "$prefix" "$resolved_io_path" "${disk_usage_lines[@]}"
     print_inode_section "$report_file" "$prefix" "$resolved_io_path" "${inode_lines[@]}"
-    print_disk_io_settings "$report_file" "$prefix" "$disk_queue_depth" "$disk_read_ahead" "$disk_trim" "$disk_max_sectors"
+    print_disk_io_settings "$report_file" "$prefix" "$disk_queue_depth" "$disk_read_ahead" "$disk_trim" "$disk_max_sectors" "$mount_options"
     print_network_info "$report_file" "$prefix" "$net_count" "$net_bond" "${all_network_lines[@]}"
 }
 
@@ -2127,7 +2124,7 @@ generate_hardware_report_unified() {
             inode_lines+=("$line")
         done < <(get_inode_info 2>/dev/null)
         print_inode_section "$report_file" "" "$resolved_io_path" "${inode_lines[@]}"
-        print_disk_io_settings "$report_file" "" "$disk_queue" "$disk_ra" "$disk_trim_val" "$disk_ms"
+        print_disk_io_settings "$report_file" "" "$disk_queue" "$disk_ra" "$disk_trim_val" "$disk_ms" "$mount_opts"
         print_network_info "$report_file" "" "$net_count" "$net_bond" "${all_network_lines[@]}"
     fi
     
@@ -2514,70 +2511,54 @@ get_memory_freq() {
     echo "unknown (requires root)"
 }
 
-# Get detailed disk info with type detection, vendor, model, scheduler, and write cache
+# Get detailed disk info - only disk/rom types get vendor/model/scheduler/wcache
 get_disk_info_detailed() {
     if command -v lsblk &>/dev/null; then
-        lsblk -no NAME,SIZE,TYPE,FSTYPE,MOUNTPOINT 2>/dev/null | grep -v "^loop" | grep -v "^NAME" | grep -v "^sr" | while read -r line; do
+        while read -r line; do
             name=$(echo "$line" | awk '{print $1}' | sed 's/^[├└─ ]*//')
             size=$(echo "$line" | awk '{print $2}')
             type=$(echo "$line" | awk '{print $3}')
             fstype=$(echo "$line" | awk '{print $4}')
             mountpoint=$(echo "$line" | awk '{print $5}')
             
-            local vendor="N/A"
-            local model="N/A"
-            local scheduler="N/A"
-            local disk_type="Unknown"
-            local wcache="N/A"
-            local options="N/A"
+            local vendor="-"
+            local model="-"
+            local scheduler="-"
+            local disk_type="-"
+            local wcache="-"
             
-            local sys_block_name="$name"
-            if [ "$type" = "lvm" ] || [ "$type" = "part" ]; then
-                local parent_disk=""
-                if command -v lsblk &>/dev/null; then
-                    parent_disk=$(lsblk -ndo pkname "/dev/$name" 2>/dev/null | grep -v "^$" | head -1)
-                fi
-                if [ -n "$parent_disk" ] && [ -d "/sys/block/$parent_disk" ]; then
-                    sys_block_name="$parent_disk"
-                elif [ -d "/sys/block/dm-0" ]; then
-                    sys_block_name="dm-0"
-                fi
-            fi
-            
-            if [ -d "/sys/block/$sys_block_name" ]; then
-                if [ -f "/sys/block/$sys_block_name/device/vendor" ]; then
-                    vendor=$(cat "/sys/block/$sys_block_name/device/vendor" 2>/dev/null | tr -d ' ')
-                fi
-                if [ -f "/sys/block/$sys_block_name/device/model" ]; then
-                    model=$(cat "/sys/block/$sys_block_name/device/model" 2>/dev/null | tr -d ' ')
-                fi
-                if [ -f "/sys/block/$sys_block_name/queue/scheduler" ]; then
-                    scheduler=$(cat "/sys/block/$sys_block_name/queue/scheduler" 2>/dev/null | grep -o '\[.*\]' | tr -d '[]')
-                    [ -z "$scheduler" ] && scheduler=$(cat "/sys/block/$sys_block_name/queue/scheduler" 2>/dev/null | awk '{print $1}')
-                fi
-                if [ -f "/sys/block/$sys_block_name/queue/rotational" ]; then
-                    rotational=$(cat "/sys/block/$sys_block_name/queue/rotational" 2>/dev/null)
-                    if [ "$rotational" = "0" ]; then
-                        disk_type="SSD"
-                    elif [ "$rotational" = "1" ]; then
-                        disk_type="HDD"
+            # Only get hardware info for disk and rom types
+            if [ "$type" = "disk" ] || [ "$type" = "rom" ]; then
+                if [ -d "/sys/block/$name/device" ]; then
+                    if [ -f "/sys/block/$name/device/vendor" ]; then
+                        vendor=$(cat "/sys/block/$name/device/vendor" 2>/dev/null | tr -d ' ')
+                    fi
+                    if [ -f "/sys/block/$name/device/model" ]; then
+                        model=$(cat "/sys/block/$name/device/model" 2>/dev/null | tr -d ' ')
+                    fi
+                    if [ -f "/sys/block/$name/queue/scheduler" ]; then
+                        scheduler=$(cat "/sys/block/$name/queue/scheduler" 2>/dev/null | grep -o '\[.*\]' | tr -d '[]')
+                        [ -z "$scheduler" ] && scheduler=$(cat "/sys/block/$name/queue/scheduler" 2>/dev/null | awk '{print $1}')
+                    fi
+                    if [ -f "/sys/block/$name/queue/rotational" ]; then
+                        rotational=$(cat "/sys/block/$name/queue/rotational" 2>/dev/null)
+                        if [ "$rotational" = "0" ]; then
+                            disk_type="SSD"
+                        elif [ "$rotational" = "1" ]; then
+                            disk_type="HDD"
+                        fi
+                    fi
+                    if [ -f "/sys/block/$name/queue/write_cache" ]; then
+                        wcache=$(cat "/sys/block/$name/queue/write_cache" 2>/dev/null)
+                        if [ "$wcache" = "write back" ] || [ "$wcache" = "1" ]; then
+                            wcache="WriteBack"
+                        elif [ "$wcache" = "write through" ] || [ "$wcache" = "0" ]; then
+                            wcache="WriteThrough"
+                        else
+                            wcache="Unknown"
+                        fi
                     fi
                 fi
-                if [ -f "/sys/block/$sys_block_name/queue/write_cache" ]; then
-                    wcache=$(cat "/sys/block/$sys_block_name/queue/write_cache" 2>/dev/null)
-                    if [ "$wcache" = "write back" ] || [ "$wcache" = "1" ]; then
-                        wcache="WriteBack"
-                    elif [ "$wcache" = "write through" ] || [ "$wcache" = "0" ]; then
-                        wcache="WriteThrough"
-                    else
-                        wcache="Unknown"
-                    fi
-                fi
-            fi
-            
-            if [ "$mountpoint" != "-" ] && command -v findmnt &>/dev/null; then
-                options=$(findmnt -n -o OPTIONS --target "$mountpoint" 2>/dev/null)
-                [ -z "$options" ] && options="N/A"
             fi
             
             [ -z "$fstype" ] && fstype="-"
@@ -2586,10 +2567,9 @@ get_disk_info_detailed() {
             [ -z "$model" ] && model="-"
             [ -z "$scheduler" ] && scheduler="-"
             [ -z "$wcache" ] && wcache="-"
-            [ -z "$options" ] && options="-"
             
-            echo "$name|$size|$type|$fstype|$mountpoint|$disk_type|$vendor|$model|$scheduler|$wcache|$options"
-        done
+            echo "$name|$size|$type|$fstype|$mountpoint|$disk_type|$vendor|$model|$scheduler|$wcache"
+        done < <(lsblk -no NAME,SIZE,TYPE,FSTYPE,MOUNTPOINT 2>/dev/null | grep -v "^loop" | grep -v "^NAME" | grep -v "^sr")
     else
         echo "N/A"
     fi
@@ -2735,6 +2715,7 @@ get_hardware_info_output() {
 # Get hardware info functions for remote execution (minified inline version)
 get_hardware_functions_for_remote() {
     cat << 'REMOTE_EOF'
+get_disk_info_detailed() { if command -v lsblk &>/dev/null; then lsblk -no NAME,SIZE,TYPE,FSTYPE,MOUNTPOINT 2>/dev/null | grep -v "^loop" | grep -v "^NAME" | grep -v "^sr" | while read -r line; do name=$(echo "$line" | awk '{print $1}' | sed 's/^[├└─ ]*//'); size=$(echo "$line" | awk '{print $2}'); type=$(echo "$line" | awk '{print $3}'); fstype=$(echo "$line" | awk '{print $4}'); mountpoint=$(echo "$line" | awk '{print $5}'); vendor="-"; model="-"; scheduler="-"; disk_type="-"; wcache="-"; if [ "$type" = "disk" ] || [ "$type" = "rom" ]; then if [ -d "/sys/block/$name/device" ]; then if [ -f "/sys/block/$name/device/vendor" ]; then vendor=$(cat "/sys/block/$name/device/vendor" 2>/dev/null | tr -d ' '); fi; if [ -f "/sys/block/$name/device/model" ]; then model=$(cat "/sys/block/$name/device/model" 2>/dev/null | tr -d ' '); fi; if [ -f "/sys/block/$name/queue/scheduler" ]; then scheduler=$(cat "/sys/block/$name/queue/scheduler" 2>/dev/null | grep -o '\[.*\]' | tr -d '[]'); [ -z "$scheduler" ] && scheduler=$(cat "/sys/block/$name/queue/scheduler" 2>/dev/null | awk '{print $1}'); fi; if [ -f "/sys/block/$name/queue/rotational" ]; then rotational=$(cat "/sys/block/$name/queue/rotational" 2>/dev/null); [ "$rotational" = "0" ] && disk_type="SSD"; [ "$rotational" = "1" ] && disk_type="HDD"; fi; if [ -f "/sys/block/$name/queue/write_cache" ]; then wcache=$(cat "/sys/block/$name/queue/write_cache" 2>/dev/null); [ "$wcache" = "write back" ] && wcache="WriteBack"; [ "$wcache" = "1" ] && wcache="WriteBack"; [ "$wcache" = "write through" ] && wcache="WriteThrough"; [ "$wcache" = "0" ] && wcache="WriteThrough"; fi; fi; fi; [ -z "$fstype" ] && fstype="-"; [ -z "$mountpoint" ] && mountpoint="-"; [ -z "$vendor" ] && vendor="-"; [ -z "$model" ] && model="-"; [ -z "$scheduler" ] && scheduler="-"; [ -z "$wcache" ] && wcache="-"; echo "$name|$size|$type|$fstype|$mountpoint|$disk_type|$vendor|$model|$scheduler|$wcache"; done; else echo "N/A"; fi; }
 get_cpu_model() { if [ -f /proc/cpuinfo ]; then grep -m 1 'model name' /proc/cpuinfo | sed 's/model name\s*: //' 2>/dev/null || echo "N/A"; else echo "N/A"; fi; }
 get_cpu_physical_cores() { if [ -f /proc/cpuinfo ]; then local cores=$(grep -c 'physical id' /proc/cpuinfo 2>/dev/null); if [ -n "$cores" ]; then echo "$cores"; else echo "N/A"; fi; else echo "N/A"; fi; }
 get_cpu_logical_cores() { nproc 2>/dev/null || grep -c ^processor /proc/cpuinfo 2>/dev/null || echo "N/A"; }
@@ -2750,7 +2731,6 @@ get_network_bond() { if [ -d /proc/net/bonding/ ]; then local bonds=$(ls /proc/n
 get_network_interface_count() { ls /sys/class/net/ 2>/dev/null | grep -v "^lo$" | wc -l 2>/dev/null || echo "0"; }
 get_machine_type() { local machine_type="Physical Machine"; if command -v systemd-detect-virt &>/dev/null; then local virt_output=$(systemd-detect-virt 2>/dev/null); case "$virt_output" in "kvm") machine_type="Virtual Machine (KVM)";; "qemu") machine_type="Virtual Machine (QEMU)";; "vmware") machine_type="Virtual Machine (VMware)";; "virtualbox") machine_type="Virtual Machine (VirtualBox)";; "hyperv") machine_type="Virtual Machine (Hyper-V)";; "xen") machine_type="Virtual Machine (Xen)";; "none") machine_type="Physical Machine";; *) machine_type="Unknown";; esac; else if grep -qi 'kvm' /proc/cpuinfo 2>/dev/null || grep -qi 'qemu' /sys/devices/virtual/dmi/id/product_name 2>/dev/null; then machine_type="Virtual Machine (KVM/QEMU)"; elif grep -qi 'vmware' /sys/devices/virtual/dmi/id/product_name 2>/dev/null; then machine_type="Virtual Machine (VMware)"; elif grep -qi 'hypervisor' /proc/cpuinfo 2>/dev/null; then machine_type="Virtual Machine (Unknown)"; fi; fi; echo "$machine_type"; }
 get_os_info() { if [ -f /etc/redhat-release ]; then cat /etc/redhat-release; return; fi; if [ -f /etc/euleros-release ]; then echo "EulerOS $(cat /etc/euleros-release | awk '{print $3}')"; return; fi; if [ -f /etc/openEuler-release ]; then cat /etc/openEuler-release | awk '{print $1, $3}'; return; fi; if [ -f /etc/os-release ]; then local pretty_name=$(grep -oP 'PRETTY_NAME="?\K[^"]+' /etc/os-release 2>/dev/null); if [ -n "$pretty_name" ]; then echo "$pretty_name"; return; fi; fi; if [ -f /etc/lsb-release ]; then local os_name=$(grep -oP 'DISTRIB_ID=\K.*' /etc/lsb-release 2>/dev/null); local os_version=$(grep -oP 'DISTRIB_RELEASE=\K.*' /etc/lsb-release 2>/dev/null); echo "$os_name $os_version"; return; fi; echo "Unknown"; }
-get_disk_info_detailed() { if command -v lsblk &>/dev/null; then lsblk -no NAME,SIZE,TYPE,FSTYPE,MOUNTPOINT 2>/dev/null | grep -v "^loop" | grep -v "^NAME" | grep -v "^sr" | while read -r line; do name=$(echo "$line" | awk '{print $1}' | sed 's/^[├└─ ]*//'); size=$(echo "$line" | awk '{print $2}'); type=$(echo "$line" | awk '{print $3}'); fstype=$(echo "$line" | awk '{print $4}'); mountpoint=$(echo "$line" | awk '{print $5}'); vendor="N/A"; model="N/A"; scheduler="N/A"; disk_type="Unknown"; wcache="N/A"; if [ -d "/sys/block/$name" ]; then if [ -f "/sys/block/$name/device/vendor" ]; then vendor=$(cat "/sys/block/$name/device/vendor" 2>/dev/null | tr -d ' '); fi; if [ -f "/sys/block/$name/device/model" ]; then model=$(cat "/sys/block/$name/device/model" 2>/dev/null | tr -d ' '); fi; if [ -f "/sys/block/$name/queue/scheduler" ]; then scheduler=$(cat "/sys/block/$name/queue/scheduler" 2>/dev/null | grep -o '\[.*\]' | tr -d '[]'); [ -z "$scheduler" ] && scheduler=$(cat "/sys/block/$name/queue/scheduler" 2>/dev/null | awk '{print $1}'); fi; if [ -f "/sys/block/$name/queue/rotational" ]; then rotational=$(cat "/sys/block/$name/queue/rotational" 2>/dev/null); [ "$rotational" = "0" ] && disk_type="SSD"; [ "$rotational" = "1" ] && disk_type="HDD"; fi; if [ -f "/sys/block/$name/queue/write_cache" ]; then wcache=$(cat "/sys/block/$name/queue/write_cache" 2>/dev/null); [ "$wcache" = "write back" ] && wcache="WriteBack"; [ "$wcache" = "1" ] && wcache="WriteBack"; [ "$wcache" = "write through" ] && wcache="WriteThrough"; [ "$wcache" = "0" ] && wcache="WriteThrough"; fi; fi; [ -z "$fstype" ] && fstype="-"; [ -z "$mountpoint" ] && mountpoint="-"; [ -z "$vendor" ] && vendor="N/A"; [ -z "$model" ] && model="N/A"; [ -z "$scheduler" ] && scheduler="N/A"; echo "$name|$size|$type|$fstype|$mountpoint|$disk_type|$vendor|$model|$scheduler|$wcache"; done; else echo "N/A"; fi; }
 get_disk_usage_info() { if command -v df &>/dev/null; then df -h 2>/dev/null | grep -v "^Filesystem" | while read -r line; do fs=$(echo "$line" | awk '{print $1}'); size=$(echo "$line" | awk '{print $2}'); used=$(echo "$line" | awk '{print $3}'); avail=$(echo "$line" | awk '{print $4}'); pct=$(echo "$line" | awk '{print $5}'); mount=$(echo "$line" | awk '{print $6}'); [ -z "$fs" ] && fs="-"; [ -z "$size" ] && size="-"; [ -z "$used" ] && used="-"; [ -z "$avail" ] && avail="-"; [ -z "$pct" ] && pct="-"; [ -z "$mount" ] && mount="-"; echo "$fs|$size|$used|$avail|$pct|$mount"; done; else echo "N/A"; fi; }
 get_inode_info() { if command -v df &>/dev/null; then df -i 2>/dev/null | grep -v "^Filesystem" | while read -r line; do fs=$(echo "$line" | awk '{print $1}'); inodes=$(echo "$line" | awk '{print $2}'); used=$(echo "$line" | awk '{print $3}'); avail=$(echo "$line" | awk '{print $4}'); pct=$(echo "$line" | awk '{print $5}'); mount=$(echo "$line" | awk '{print $6}'); [ -z "$fs" ] && fs="-"; [ -z "$inodes" ] && inodes="-"; [ -z "$used" ] && used="-"; [ -z "$avail" ] && avail="-"; [ -z "$pct" ] && pct="-"; [ -z "$mount" ] && mount="-"; echo "$fs|$inodes|$used|$avail|$pct|$mount"; done; else echo "N/A"; fi; }
 get_uptime_info() { if command -v uptime &>/dev/null; then uptime | sed -n 's/.* up \(.*\) load.*/\1/p' | sed 's/^[[:space:]]*//' | sed 's/[[:space:]]*$//' | sed 's/, *[0-9]* *user[s]*,* *$//'; else echo "N/A"; fi; }
@@ -3488,8 +3468,33 @@ check_ssh() {
     fi
 }
 
+# Port allocation management for network tests
+declare -A PORT_ALLOCATION=()
+CURRENT_PORT="${NETWORK_PORT:-$NETWORK_PORT_DEFAULT}"
+
+# Allocate a unique port for a target host
+# Returns: allocated port number
+allocate_port() {
+    local host_ip="$1"
+    
+    # Check if host already has a port allocated
+    if [[ -n "${PORT_ALLOCATION[$host_ip]}" ]]; then
+        echo "${PORT_ALLOCATION[$host_ip]}"
+        return
+    fi
+    
+    # Allocate a new port
+    PORT_ALLOCATION["$host_ip"]="$CURRENT_PORT"
+    local allocated_port="$CURRENT_PORT"
+    CURRENT_PORT=$((CURRENT_PORT + 1))
+    
+    echo "$allocated_port"
+}
+
 # Cleanup residual processes on all servers
+# Parameter: $1 - if "network_only", only cleanup iperf3; otherwise cleanup all (fio, iperf3, sysbench, oscheckperf)
 cleanup_residual_processes() {
+    local mode="${1:-full}"
     echo "  Checking and cleaning up residual processes (fio, iperf3, sysbench)..."
     
     local local_ip=$(get_machine_ip)
@@ -3499,11 +3504,11 @@ cleanup_residual_processes() {
     local current_user=$(whoami)
     
     # Define process patterns to check (using exact patterns to avoid false positives)
-    # iperf3: server mode with specific port
+    # iperf3: server mode (all ports, not just specific port)
     # fio: running fio tests (not just any fio process)
     # sysbench: running sysbench tests (not just any sysbench process)
     # oscheckperf: main benchmark script (for cleanup after Ctrl+C)
-    local iperf3_pattern="iperf3 -s -p $port"
+    local iperf3_pattern="iperf3 -s"
     local fio_pattern="fio.*--name="
     local sysbench_pattern="sysbench.*fileio"
     local oscheckperf_pattern="oscheckperf"
@@ -3553,29 +3558,35 @@ cleanup_residual_processes() {
         local iperf3_pids=$(get_user_pids "$iperf3_pattern")
         iperf3_pids=$(echo "$iperf3_pids" | grep -E '^[0-9]+$' || true)
         if [ -n "$iperf3_pids" ]; then
-            kill_pids "$iperf3_pids" "iperf3 server on port $port"
+            kill_pids "$iperf3_pids" "iperf3 server"
         fi
         
-        # Check and cleanup fio test processes (current user only)
-        local fio_pids=$(get_user_pids "$fio_pattern")
-        fio_pids=$(echo "$fio_pids" | grep -E '^[0-9]+$' || true)
-        if [ -n "$fio_pids" ]; then
-            kill_pids "$fio_pids" "fio test"
-        fi
-        
-        # Check and cleanup sysbench test processes (current user only)
-        local sysbench_pids=$(get_user_pids "$sysbench_pattern")
-        sysbench_pids=$(echo "$sysbench_pids" | grep -E '^[0-9]+$' || true)
-        if [ -n "$sysbench_pids" ]; then
-            kill_pids "$sysbench_pids" "sysbench test"
-        fi
-        
-        # Check and cleanup oscheckperf processes (cleanup after Ctrl+C) - current user only
-        # Exclude the current running process
-        local oscheckperf_pids=$(get_user_pids "$oscheckperf_pattern")
-        oscheckperf_pids=$(echo "$oscheckperf_pids" | grep -v $$ | grep -E '^[0-9]+$' || true)
-        if [ -n "$oscheckperf_pids" ]; then
-            kill_pids "$oscheckperf_pids" "oscheckperf"
+        # In network_only mode, only cleanup iperf3
+        if [ "$mode" = "network_only" ]; then
+            # Skip fio, sysbench, and oscheckperf cleanup
+            :
+        else
+            # Check and cleanup fio test processes (current user only)
+            local fio_pids=$(get_user_pids "$fio_pattern")
+            fio_pids=$(echo "$fio_pids" | grep -E '^[0-9]+$' || true)
+            if [ -n "$fio_pids" ]; then
+                kill_pids "$fio_pids" "fio test"
+            fi
+            
+            # Check and cleanup sysbench test processes (current user only)
+            local sysbench_pids=$(get_user_pids "$sysbench_pattern")
+            sysbench_pids=$(echo "$sysbench_pids" | grep -E '^[0-9]+$' || true)
+            if [ -n "$sysbench_pids" ]; then
+                kill_pids "$sysbench_pids" "sysbench test"
+            fi
+            
+            # Check and cleanup oscheckperf processes (cleanup after Ctrl+C) - current user only
+            local oscheckperf_pids=$(get_user_pids "$oscheckperf_pattern")
+            # Exclude current process and all its children
+            oscheckperf_pids=$(echo "$oscheckperf_pids" | grep -v $$ | grep -v -f <(pgrep -P $$ 2>/dev/null || true) | grep -E '^[0-9]+$' || true)
+            if [ -n "$oscheckperf_pids" ]; then
+                kill_pids "$oscheckperf_pids" "oscheckperf"
+            fi
         fi
         
         # Print cleanup details if any processes were cleaned
@@ -4283,6 +4294,10 @@ run_network_test() {
         echo "Error: iperf3 not installed, please run: sudo yum install -y iperf3"
         return 1
     fi
+
+    # Clean up residual iperf3 processes before starting network tests
+    echo "  Cleaning up residual iperf3 server processes before network test..."
+    cleanup_residual_processes "network_only"
     
     if [ "$network_mode" = "matrix" ]; then
         run_matrix_network_test
@@ -4348,17 +4363,23 @@ run_serial_network_test() {
     
     # Start iperf3 server
     echo "  Starting iperf3 server on $server_ip..."
+    # Calculate timeout parameters:
+    # --idle-timeout: 600 seconds (10 minutes) for automatic cleanup
+    # --rcv-timeout: (duration + 30) * 1000 milliseconds to support long tests
+    local server_idle_timeout=600
+    local server_rcv_timeout=$(( (duration + 30) * 1000 ))
+    
     if [ "$DRY_RUN" = true ]; then
         if [ "$is_local_server" = "true" ]; then
-            echo "[DRY RUN] iperf3 -s -p \"$port\" -D"
+            echo "[DRY RUN] iperf3 -s -p \"$port\" -D --idle-timeout $server_idle_timeout --rcv-timeout $server_rcv_timeout"
         else
             local server_ssh=$(get_ssh_command "$server_ip")
-            echo "[DRY RUN] $server_ssh 'iperf3 -s -p $port -D'"
+            echo "[DRY RUN] $server_ssh 'iperf3 -s -p $port -D --idle-timeout $server_idle_timeout --rcv-timeout $server_rcv_timeout'"
         fi
     else
         if [ "$is_local_server" = "true" ]; then
             # Local server: direct execution for better performance
-            run_command "iperf3 -s -p \"$port\" -D" "/dev/null"
+            run_command "iperf3 -s -p \"$port\" -D --idle-timeout $server_idle_timeout --rcv-timeout $server_rcv_timeout" "/dev/null"
             if ! wait_for_iperf3_server "" "$port" "" 10; then
                 echo "  ✗ Local server $port startup timeout after 10s"
                 return 1
@@ -4367,7 +4388,7 @@ run_serial_network_test() {
             # Remote server: use SSH
             set_ssh_password "$server_ip"
             local server_ssh=$(get_ssh_command "$server_ip")
-            eval "$server_ssh 'iperf3 -s -p $port -D'" > /dev/null 2>&1
+            eval "$server_ssh 'iperf3 -s -p $port -D --idle-timeout $server_idle_timeout --rcv-timeout $server_rcv_timeout'" > /dev/null 2>&1
             sleep 3
         fi
     fi
@@ -4390,8 +4411,8 @@ run_serial_network_test() {
             continue
         fi
         
-        # Calculate timeout: duration + 15s buffer for each client
-        local client_timeout=$((duration + 15))
+        # Calculate timeout: duration + 30s buffer for each client (increased from 15s)
+        local client_timeout=$((duration + 30))
         local client_output_file="$TMP_DIR/network_scenario_${client_idx}_${TIMESTAMP}.json"
         local client_text_output="$TMP_DIR/network_scenario_${client_idx}_${TIMESTAMP}_text.log"
         
@@ -4399,8 +4420,8 @@ run_serial_network_test() {
         if [ "$DRY_RUN" = true ]; then
             set_ssh_password "$client"
             local client_ssh=$(get_ssh_command "$client")
-            echo "[DRY RUN] $client_ssh 'iperf3 -c $server_ip -p $port -t $duration -P $parallel -J'"
-            echo "[DRY RUN] $client_ssh 'iperf3 -c $server_ip -p $port -t $duration -P $parallel 2>&1 | grep -v ^$'"
+            echo "[DRY RUN] $client_ssh 'iperf3 -c $server_ip -p $port -t $duration -P $parallel --connect-timeout 3000 -J'"
+            echo "[DRY RUN] $client_ssh 'iperf3 -c $server_ip -p $port -t $duration -P $parallel --connect-timeout 3000 2>&1 | grep -v ^$'"
             results+=("$client|$server_ip|0")
             echo "  [DRY RUN] Test would complete: $client -> $server_ip"
         else
@@ -4431,7 +4452,7 @@ run_serial_network_test() {
             
             # Run iperf3 client with timeout
             local exit_status=0
-            eval "timeout --signal=KILL $client_timeout $client_ssh 'iperf3 -c $server_ip -p $port -t $duration -P $parallel -J'" > "$client_output_file" 2>&1
+            eval "timeout --signal=KILL $client_timeout $client_ssh 'iperf3 -c $server_ip -p $port -t $duration -P $parallel --connect-timeout 3000 -J'" > "$client_output_file" 2>&1
             exit_status=$?
             
             if [ $exit_status -eq 0 ]; then
@@ -4712,6 +4733,12 @@ run_matrix_batch() {
     local server_dsts=()
     local pair_idx=0
     
+    # Calculate timeout parameters for server:
+    # --idle-timeout: 600 seconds (10 minutes) for automatic cleanup
+    # --rcv-timeout: (duration + 30) * 1000 milliseconds to support long tests
+    local server_idle_timeout=600
+    local server_rcv_timeout=$(( (duration + 30) * 1000 ))
+    
     for pair in "${pairs[@]}"; do
         IFS='|' read -r src dst <<< "$pair"
         local port=$((base_port + pair_idx))
@@ -4721,10 +4748,10 @@ run_matrix_batch() {
         local dst_ssh=$(get_ssh_command "$dst")
         
         if [ "$DRY_RUN" = true ]; then
-            echo "    [DRY RUN] $dst_ssh 'iperf3 -s -p $port -D'"
+            echo "    [DRY RUN] $dst_ssh 'iperf3 -s -p $port -D --idle-timeout $server_idle_timeout --rcv-timeout $server_rcv_timeout'"
         else
             # iperf3 -D daemonizes itself, so no & needed; SSH session returns immediately
-            eval "$dst_ssh 'iperf3 -s -p $port -D'" > /dev/null 2>&1
+            eval "$dst_ssh 'iperf3 -s -p $port -D --idle-timeout $server_idle_timeout --rcv-timeout $server_rcv_timeout'" > /dev/null 2>&1
             server_ports+=("$port")
             server_dsts+=("$dst")
         fi
@@ -4765,26 +4792,26 @@ run_matrix_batch() {
         local port=$((base_port + pair_idx))
         local client_output_file="$TMP_DIR/network_matrix_${batch_idx}_${pair_idx}_${TIMESTAMP}.json"
         local client_text_output="$TMP_DIR/network_matrix_${batch_idx}_${pair_idx}_${TIMESTAMP}_text.log"
-        local client_timeout=$((duration + 15))
+        local client_timeout=$((duration + 30))  # Increased from 15s to 30s buffer
         
         echo "    Running client: $src -> $dst (port $port)..."
         
         if [ "$DRY_RUN" = true ]; then
             if [ "$src" = "$LOCAL_IP" ]; then
-                echo "    [DRY RUN] timeout --signal=KILL $client_timeout iperf3 -c \"$dst\" -p \"$port\" -t \"$duration\" -P \"$parallel\" -J"
+                echo "    [DRY RUN] timeout --signal=KILL $client_timeout iperf3 -c \"$dst\" -p \"$port\" -t \"$duration\" -P \"$parallel\" --connect-timeout 3000 -J"
             else
                 local src_ssh=$(get_ssh_command "$src")
-                echo "    [DRY RUN] timeout --signal=KILL $client_timeout $src_ssh 'iperf3 -c \"$dst\" -p \"$port\" -t \"$duration\" -P \"$parallel\" -J'"
+                echo "    [DRY RUN] timeout --signal=KILL $client_timeout $src_ssh 'iperf3 -c \"$dst\" -p \"$port\" -t \"$duration\" -P \"$parallel\" --connect-timeout 3000 -J'"
             fi
             client_results+=("$src|$dst|0")
         else
             if [ "$src" = "$LOCAL_IP" ]; then
-                timeout --signal=KILL $client_timeout iperf3 -c "$dst" -p "$port" -t "$duration" -P "$parallel" -J > "$client_output_file" 2>&1 &
+                timeout --signal=KILL $client_timeout iperf3 -c "$dst" -p "$port" -t "$duration" -P "$parallel" --connect-timeout 3000 -J > "$client_output_file" 2>&1 &
                 client_pids+=($!)
             else
                 set_ssh_password "$src"
                 local src_ssh=$(get_ssh_command "$src")
-                eval "timeout --signal=KILL $client_timeout $src_ssh 'iperf3 -c \"$dst\" -p \"$port\" -t \"$duration\" -P \"$parallel\" -J'" > "$client_output_file" 2>&1 &
+                eval "timeout --signal=KILL $client_timeout $src_ssh 'iperf3 -c \"$dst\" -p \"$port\" -t \"$duration\" -P \"$parallel\" --connect-timeout 3000 -J'" > "$client_output_file" 2>&1 &
                 client_pids+=($!)
             fi
             client_output_files+=("$client_output_file|$client_text_output|$src|$dst")
@@ -4953,11 +4980,19 @@ run_matrix_network_test() {
             done
             
             # Run batch in parallel and collect results
-            while IFS= read -r line; do
-                if [[ "$line" == RESULT:* ]]; then
-                    results+=("${line#RESULT:}")
-                fi
-            done < <(run_matrix_batch $((batch_idx + 1)) "$port" "$duration" "$parallel" "$LOCAL_IP" "${batch_pairs[@]}")
+            if [ "$DRY_RUN" = true ]; then
+                run_matrix_batch $((batch_idx + 1)) "$port" "$duration" "$parallel" "$LOCAL_IP" "${batch_pairs[@]}"
+                for pair in "${batch_pairs[@]}"; do
+                    IFS='|' read -r src dst <<< "$pair"
+                    results+=("$src|$dst|0")
+                done
+            else
+                while IFS= read -r line; do
+                    if [[ "$line" == RESULT:* ]]; then
+                        results+=("${line#RESULT:}")
+                    fi
+                done < <(run_matrix_batch $((batch_idx + 1)) "$port" "$duration" "$parallel" "$LOCAL_IP" "${batch_pairs[@]}")
+            fi
         done
     else
         # Original serial execution mode
@@ -4987,10 +5022,16 @@ run_matrix_network_test() {
             set_ssh_password "$dst"
             local dst_ssh=$(get_ssh_command "$dst")
             
+            # Calculate timeout parameters for server:
+            # --idle-timeout: 600 seconds (10 minutes) for automatic cleanup
+            # --rcv-timeout: (duration + 30) * 1000 milliseconds to support long tests
+            local server_idle_timeout=600
+            local server_rcv_timeout=$(( (duration + 30) * 1000 ))
+            
             if [ "$DRY_RUN" = true ]; then
-                echo "[DRY RUN] $dst_ssh 'iperf3 -s -p $port -D'"
+                echo "[DRY RUN] $dst_ssh 'iperf3 -s -p $port -D --idle-timeout $server_idle_timeout --rcv-timeout $server_rcv_timeout'"
             else
-                eval "$dst_ssh 'iperf3 -s -p $port -D'" > /dev/null 2>&1
+                eval "$dst_ssh 'iperf3 -s -p $port -D --idle-timeout $server_idle_timeout --rcv-timeout $server_rcv_timeout'" > /dev/null 2>&1
                 
                 # Wait for remote server port to be ready
                 if ! wait_for_iperf3_server "$dst_ssh" "$port" "true" 15 "true"; then
@@ -5004,22 +5045,22 @@ run_matrix_network_test() {
             
             echo "  Running iperf3 client from $src to $dst..."
             
-            # Calculate timeout: duration + 15s buffer
-            local client_timeout=$((duration + 15))
+            # Calculate timeout: duration + 30s buffer
+            local client_timeout=$((duration + 30))
             
             # Check if source is local machine
             if [ "$DRY_RUN" = true ]; then
                 echo "[DRY RUN] Would run iperf3 client from $src to $dst"
                 if [ "$src" = "$LOCAL_IP" ]; then
-                    echo "[DRY RUN] timeout --signal=KILL $client_timeout iperf3 -c \"$dst\" -p \"$port\" -t \"$duration\" -P \"$parallel\" -J"
+                    echo "[DRY RUN] timeout --signal=KILL $client_timeout iperf3 -c \"$dst\" -p \"$port\" -t \"$duration\" -P \"$parallel\" --connect-timeout 3000 -J"
                 else
                     local src_ssh=$(get_ssh_command "$src")
-                    echo "[DRY RUN] timeout --signal=KILL $client_timeout $src_ssh 'iperf3 -c \"$dst\" -p \"$port\" -t \"$duration\" -P \"$parallel\" -J'"
+                    echo "[DRY RUN] timeout --signal=KILL $client_timeout $src_ssh 'iperf3 -c \"$dst\" -p \"$port\" -t \"$duration\" -P \"$parallel\" --connect-timeout 3000 -J'"
                 fi
             else
                 if [ "$src" = "$LOCAL_IP" ]; then
                     # Run locally
-                    if timeout --signal=KILL $client_timeout iperf3 -c "$dst" -p "$port" -t "$duration" -P "$parallel" -J > "$client_output_file" 2>&1; then
+                    if timeout --signal=KILL $client_timeout iperf3 -c "$dst" -p "$port" -t "$duration" -P "$parallel" --connect-timeout 3000 -J > "$client_output_file" 2>&1; then
                         # Generate text format from JSON
                         generate_iperf3_text_from_json "$client_output_file" "$client_text_output"
                     else
@@ -5033,7 +5074,7 @@ run_matrix_network_test() {
                     # Run via SSH
                     set_ssh_password "$src"
                     local src_ssh=$(get_ssh_command "$src")
-                    if eval "timeout --signal=KILL $client_timeout $src_ssh 'iperf3 -c \"$dst\" -p \"$port\" -t \"$duration\" -P \"$parallel\" -J'" > "$client_output_file" 2>&1; then
+                    if eval "timeout --signal=KILL $client_timeout $src_ssh 'iperf3 -c \"$dst\" -p \"$port\" -t \"$duration\" -P \"$parallel\" --connect-timeout 3000 -J'" > "$client_output_file" 2>&1; then
                         # Generate text format from JSON
                         generate_iperf3_text_from_json "$client_output_file" "$client_text_output"
                     else
