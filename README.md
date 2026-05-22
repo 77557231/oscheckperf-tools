@@ -1,4 +1,3 @@
-vastbase@vastbase:~/project/script/oscheckperf$ cat README.md
 中文 | [English](#english)
 
 # oscheckperf - 系统性能基准测试工具
@@ -52,7 +51,6 @@ vastbase@vastbase:~/project/script/oscheckperf$ cat README.md
 
 可以通过参数或配置文件 `BASE_DIR` 统一修改基础目录：
 
-- `BASE_DIR` > 默认值 `$HOME/oscheckperf`
 - `IO_PATH` > 默认值 `$BASE_DIR/io_test`
 - `OUTPUT_DIR` > 默认值 `./output`
 
@@ -62,9 +60,17 @@ vastbase@vastbase:~/project/script/oscheckperf$ cat README.md
 
 **方式一：直接安装依赖包**
 
-```shellscript
-# CentOS （fio可选、多IP压测非免密环境需安装sshpass）
-sudo yum install -y sysbench iperf3 fio jq sshpass
+#### CentOS 系统为例
+
+```bash
+#  （fio可选、多IP压测）
+sudo yum install -y sysbench iperf3 fio jq 
+
+# 非免密环境需额外安装sshpass
+sudo yum install -y sshpass
+
+# 扩展查看更多硬件资源安装
+sudo yum install ethtool numactl
 ```
 
 **方式二：工具自动安装依赖**
@@ -76,10 +82,12 @@ sudo yum install -y sysbench iperf3 fio jq sshpass
 ```bash
 # CentOS/RHEL 系列（仅编译机需要）
 sudo yum install -y automake autoconf libtool gcc make
-
-# Ubuntu/Debian 系列（仅编译机需要）
-sudo apt install -y automake autoconf libtool gcc make
 ```
+
+> **注意**：编译 ethtool 前需手动安装 libmnl 依赖：
+>
+> - CentOS/RHEL: `sudo yum install -y libmnl-devel`
+> - Ubuntu/Debian: `sudo apt-get install -y libmnl-dev`
 
 **自动编译安装组件**
 
@@ -97,47 +105,31 @@ sudo apt install -y automake autoconf libtool gcc make
 ./oscheckperf -i iperf3     # 编译安装 iperf3
 ./oscheckperf -i numactl    # 编译安装 numactl
 ./oscheckperf -i ethtool    # 编译安装 ethtool
-./oscheckperf -i jq         # 编译安装 jq
 ```
-
-> **注意**：编译 ethtool 前需手动安装 libmnl 依赖：
->
-> - CentOS/RHEL: `sudo yum install -y libmnl-devel`
-> - Ubuntu/Debian: `sudo apt-get install -y libmnl-dev`
 
 ### 2. 运行测试
 
 ```bash
-# 单机运行所有测试（默认值）
+#单机运行
+# 所有测试项目（默认值）
 ./oscheckperf
-
-# 单机运行
+# 单机运行，例如：
 ./oscheckperf cpu           # 仅 CPU 测试
-./oscheckperf mem           # 仅内存测试
-./oscheckperf io            # 仅 IO 测试
+./oscheckperf cpu mem io    #  MEM和IO 测试
 ./oscheckperf network       # 仅网络测试
-
 # 参数和配置文件同时配置时，参数优先级大于配置文件
 ./oscheckperf -p parameter.conf cpu
 
+
 #多机运行
-# 使用配置文件
-./oscheckperf io IO_TOOL=sysbench -p parameter.conf -f server_list 
-# 干运行模式（预览命令，不执行）
-./oscheckperf all -f server_list all --dry-run
-```
-
-**命令与参数组合使用**：
-
-```bash
-# 指定子命令和参数
-./oscheckperf io DURATION=60 IO_TOOL=fio
-
-# 网络测试指定服务器列表
-./oscheckperf network -f server_list
-
 # 检查模式配合调试
-./oscheckperf check --debug
+./oscheckperf check -f server_list 
+# 使用配置文件
+./oscheckperf  -p parameter.conf -f server_list 
+# 指定子命令和参数
+./oscheckperf io DURATION=60 IO_TOOL=fio -f server_list
+# 网络测试指定服务器列表(相同选项中参数优先级大于配置文件)
+./oscheckperf network -f server_list -p parameter.conf
 ```
 
 ### 3. 服务器认证方式
@@ -165,9 +157,9 @@ sudo apt install -y automake autoconf libtool gcc make
 
 ```bash
 # server_list 文件内容（格式：IP:username:password）
-IP:username:password
-IP:username:password
-IP:username:password
+192.168.1.101:username:password
+192.168.1.102:username:password
+192.168.1.103:username:password
 ```
 
 **运行测试**：
@@ -340,8 +332,6 @@ FIO 测试采用不同的工作方式：
 **IO\_PATH 参数说明**：
 
 - 默认测试路径为 `$HOME/oscheckperf/io_test`
-- **不要使用** **`/tmp`** **目录**：某些服务器的 `/tmp` 是 tmpfs（内存文件系统），会导致测试结果不准确（测试的是内存而非磁盘）
-- 建议使用实际业务数据所在的磁盘分区，结果更具参考价值
 - 确保目标分区有足够的可用空间（至少大于 `IO_TOTAL_SIZE`）
 
 **常用参数**：
@@ -411,19 +401,6 @@ FIO 测试采用不同的工作方式：
 - 当配置 `FIO_FILE_NUM` 时，每个文件大小 = `IO_TOTAL_SIZE / FIO_FILE_NUM`
 - 例如：`IO_TOTAL_SIZE=1G`，`FIO_FILE_NUM=4` → 每个文件 256M
 
-**示例**：
-
-```bash
-# 使用 sysbench 进行随机读写测试
-./oscheckperf io DURATION=60 IO_TOTAL_SIZE=2G
-
-# 使用 fio 进行顺序读测试
-./oscheckperf io IO_TOOL=fio FIO_PROFILES=read FIO_DURATION=60
-
-# 指定测试路径
-./oscheckperf io IO_PATH=/data/test
-```
-
 ### 网络测试
 
 - **Bandwidth (MB/s)**：网络带宽（越高越好）
@@ -442,23 +419,12 @@ FIO 测试采用不同的工作方式：
 - **TPS**：每秒事务数（越高越好）
 - **latency**：锁等待延迟（越低越好）
 
-## 依赖工具说明
-
-| 工具       | 必选 | 用途               |
-| -------- | -- | ---------------- |
-| sysbench | 是  | CPU/内存/IO/线程/锁测试 |
-| fio      | 可选 | 专业 IO 压测         |
-| iperf3   | 可选 | 网络吞吐测试           |
-| jq       | 是 | JSON 结果解析        |
-| sshpass  | 可选 | 密码认证支持           |
-
-
 ### 输出文件说明
 
 | 文件类型            | 路径                              | 说明            | 用途        |
 | --------------- | ------------------------------- | ------------- | --------- |
 | **原始测试数据**      | `output/original_data_*.log`    | 所有测试的完整原始输出   | 问题排查、追溯   |
-| **解析结果**        | `output/data_*.log`             | 结构化的测试结果      | 数据处理、二次分析 |
+| **命令输出结果**        | `output/data_*.log`             | 结构化的测试结果      | 数据处理、二次分析 |
 | **最终报告**        | `output/report_benchmark_*.log` | 格式化的性能报告      | 直接查看、分享   |
 | **sysbench 输出** | `tmp/vb_fileio_*.txt`           | sysbench 文本输出 | 调试、详细分析   |
 | **fio 配置**      | `tmp/fio_*.fio`                 | fio 配置文件      | 调试配置      |
@@ -467,20 +433,7 @@ FIO 测试采用不同的工作方式：
 
 ## 实用场景示例
 
-### 生产环境测试
-
-```bash
-# 生产环境完整测试（60秒，fio IO测试）
-./oscheckperf DURATION=60 IO_TOOL=fio IO_TOTAL_SIZE=10G
-
-# 快速验证测试（短时间）
-./oscheckperf DURATION=10
-
-# 仅运行关键测试（CPU、内存、IO）
-./oscheckperf NETWORK_ENABLED=false THREADS_ENABLED=false MUTEX_ENABLED=false
-```
-
-### 数据库场景测试
+### IO场景测试
 
 ```bash
 # Vastbase/openGauss 数据库场景（高IOPS要求）
@@ -490,17 +443,17 @@ FIO 测试采用不同的工作方式：
 ./oscheckperf io IO_TOOL=sysbench SYSBENCH_PROFILES="rndrw"
 
 # PostgreSQL 场景（高吞吐量）
-./oscheckperf io IO_TOOL=fio FIO_PROFILES="randrw" FIO_BS=32K FIO_NUMJOBS=16
+./oscheckperf io IO_TOOL=fio FIO_PROFILES="randrw" FIO_BS=16K FIO_NUMJOBS=16
 ```
 
 ### 多服务器网络测试
 
 ```bash
 # 矩阵模式测试所有服务器间网络（主机数>3时自动分批并行）
-./oscheckperf network -f all-servers NETWORK_MODE=matrix NETWORK_PARALLEL=4
+./oscheckperf network -f server_list NETWORK_MODE=matrix 
 
 # 串行模式：第一个主机作为服务器，其余作为客户端（支持本地/远程服务器）
-./oscheckperf network -f all-servers NETWORK_MODE=serial
+./oscheckperf network -f server_list NETWORK_MODE=serial
 ```
 
 **矩阵测试分批并行说明**：
@@ -518,17 +471,15 @@ FIO 测试采用不同的工作方式：
 | 6   | 3   | 15   | 5    |
 | 8   | 4   | 28   | 7    |
 
-### 硬件信息检查
+### 硬件信息及检查
 
 ```bash
 # 仅查看硬件信息
-./oscheckperf hardware
+./oscheckperf hardware -f server_list
 
 # 检查系统环境（依赖、权限、磁盘、网络）
-./oscheckperf check
+./oscheckperf check -f server_list
 
-# 检查并启用调试模式
-./oscheckperf check --debug
 ```
 
 ## 常见问题
@@ -537,8 +488,8 @@ FIO 测试采用不同的工作方式：
 
 **A**: 大多数测试不需要 root 权限。脚本支持普通用户运行，但以下情况建议使用 `sudo`：
 
-- fio direct IO 模式（默认启用）：需要绕过 OS 缓存进行真实磁盘测试
-- 安装依赖包时需要 root 权限
+- 部分硬件信息采集需要root ，如：dmidecode 查看内存槽信息，没有root权限会不显示
+- 安装依赖包/或者编译依赖包时需要 root 权限
 - 建议在测试前使用 `./oscheckperf check` 检查系统环境
 
 ### Q2: 测试会删除数据吗？
@@ -549,18 +500,18 @@ FIO 测试采用不同的工作方式：
 
 **A**: 使用 `IO_PATH` 参数：`./oscheckperf io IO_PATH=/data`
 
-### Q4: NETWORK\_MODE 和 NETWORK\_PARALLEL 参数的区别是什么？
+### Q4: NETWORK\_MODE 和NETWORK\_PARALLEL具体指什么？
 
 **A**:
 
 - **NETWORK\_MODE**：控制网络测试的模式
-  - `serial`：串行模式，使用第一个主机作为服务器，其余主机作为客户端依次测试
+  - `serial`：串行模式，使用server_list文件IP列表中第一个主机作为服务器，其余主机作为客户端依次测试
     - 支持本地和远程服务器（自动检测）
     - 第一个主机为本机时直接执行，无需SSH开销
   - `matrix`：执行全矩阵交叉测试（每对服务器之间都进行测试）
     - **自动分批并行**：当主机数 > 3 时，自动启用分批并行执行（参考 gpcheckperf）
     - **并行度**：自动计算为 `floor(主机数 / 2)`，无需手动配置
-    - **批次内**：多个主机对同时测试，无资源竞争（完美匹配算法）
+    - **批次内**：多个主机对同时测试，无资源竞争
     - **批次间**：顺序执行，确保测试准确性
     - **端口偏移**：批次内不同主机对使用不同端口（NETWORK\_PORT + 序号）
 - **NETWORK\_PARALLEL**：控制每个 iperf3 测试的并行连接数，在所有模式下都生效
@@ -570,35 +521,11 @@ FIO 测试采用不同的工作方式：
 
 ```bash
 # 串行模式，每个测试使用 4 个并行连接
-./oscheckperf network -f all-servers NETWORK_MODE=serial NETWORK_PARALLEL=4
+./oscheckperf network -f server_list NETWORK_MODE=serial NETWORK_PARALLEL=4
 
-# 矩阵模式，每个测试使用 4 个并行连接
-./oscheckperf network -f all-servers NETWORK_MODE=matrix NETWORK_PARALLEL=4
+# 矩阵模式
+./oscheckperf network -f server_list NETWORK_MODE=matrix 
+
+# 矩阵模式，通过 parameter.conf设置 NETWORK_MODE=matrix
+./oscheckperf network -f server_list  -p parameter.conf
 ```
-
-## 最佳实践
-### 参数调优建议
-
-```bash
-# 根据 CPU 核心数调整线程数
-# CPU_THREADS=0 表示自动（建议值）
-
-# 对于高 IOPS 场景（如 SSD）
-./oscheckperf io IO_TOOL=fio FIO_NUMJOBS=8 FIO_IODEPTH=64
-
-# 对于高带宽场景（如 RAID）
-./oscheckperf io IO_TOOL=fio FIO_BS=128K FIO_NUMJOBS=4
-
-# 数据库场景推荐（混合读写，16K 块大小）
-./oscheckperf DURATION=120 IO_TOOL=fio FIO_PROFILES="randrw" FIO_BS=16K
-
-# 内存密集型场景
-./oscheckperf mem MEMORY_TOTAL_SIZE=100G MEMORY_BLOCK_SIZE=16K
-
-# CPU 密集型场景
-./oscheckperf cpu CPU_MAX_PRIME=50000
-```
-
-***
-
-
