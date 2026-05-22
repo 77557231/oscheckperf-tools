@@ -45,22 +45,22 @@ $HOME/oscheckperf/
 ├── oscheckperf              # 主入口脚本
 ├── sysbench-1.0.20/         # sysbench 源码编译目录（-i 参数自动下载编译）
 ├── sysbench-1.0.20.tar.gz   # sysbench 源码压缩包（自动下载）
-├── output/                   # 测试结果输出目录（当前目录下）
+├── output/                  # 测试结果输出目录（当前目录下）
 │   ├── original_data_*_all_results.log  # 原始测试数据汇总
 │   ├── data_*_all_results.log           # 解析后的测试结果
 │   └── report_benchmark_*.log           # 最终性能报告
-├── tmp/                      # 临时文件目录
-│   ├── vb_fileio_*.txt       # sysbench fileio 测试输出
-│   ├── fio_*.fio             # fio 配置文件
-│   ├── fio_*_result_*.json   # fio JSON 测试结果
-│   └── network_*.json        # 网络测试 JSON 结果
-├── io_test/                  # IO测试数据目录
-│   ├── test_file.*           # sysbench 创建的测试文件（测试后自动清理）
-│   └── fio_test_file.*       # fio 创建的测试文件（保留）
+├── tmp/                     # 临时文件目录
+│   ├── vb_fileio_*.txt      # sysbench fileio 测试输出
+│   ├── fio_*.fio            # fio 配置文件
+│   ├── fio_*_result_*.json  # fio JSON 结果
+│   └── network_*.json       # 网络测试 JSON 结果
+├── io_test/                 # IO测试数据目录
+│   ├── test_file.*          # sysbench 创建的测试文件（测试后自动清理）
+│   └── fio_test_file.*      # fio 创建的测试文件（保留）
 ├── tools/
-│   └── skill.md              # 开发规范文档
-├── parameter.conf            # 配置文件模板
-└── README.md                 # 中英文文档
+│   └── skill.md             # 开发规范文档
+├── parameter.conf           # 配置文件模板
+└── README.md                # 中英文文档
 ```
 
 ### 文件类型说明
@@ -129,6 +129,7 @@ sudo apt install -y automake autoconf libtool gcc make
 ```
 
 > **注意**：编译 ethtool 前需手动安装 libmnl 依赖：
+>
 > - CentOS/RHEL: `sudo yum install -y libmnl-devel`
 > - Ubuntu/Debian: `sudo apt-get install -y libmnl-dev`
 
@@ -192,8 +193,8 @@ sudo apt install -y automake autoconf libtool gcc make
 
 ```bash
 # server_list 文件内容（格式：IP:username:password）
-192.168.1.101:user1:password123
-192.168.1.102:user1:mypassword
+192.168.1.101:user1:secret456
+192.168.1.102:user1:secret456
 192.168.1.103:user1:secret456
 ```
 
@@ -256,19 +257,26 @@ cat output/original_data_*_all_results.log
 ### CPU 测试
 
 - **events/sec**：每秒执行事件数（越高越好）
-- **avg latency**：平均延迟（越低越好）
-- **P95/P99 latency**：95/99 百分位延迟（越低越好）
-- **Max latency**：最大延迟（越低越好）
-- **Fairness (events)**：线程事件公平性，表示各线程间事件分布的均衡程度（格式为 avg/stddev，stddev 越小表示分布越均匀）
-- **Fairness (execution time)**：线程执行时间公平性
+- **Avg Latency**：平均延迟（越低越好）
+- **Min Latency**：最小延迟（越低越好）
+- **P95 Latency**：95 百分位延迟（越低越好）
+- **P99 Latency**：99 百分位延迟（越低越好）
+- **Max Latency**：最大延迟（越低越好）
+- **Sum Latency**：累计延迟（越低越好）
+- **Threads fairness (events)**：线程事件公平性（格式为 avg/stddev，stddev 越小表示分布越均匀）
+- **Threads fairness (execution time)**：线程执行时间公平性
 
 ### 内存测试
 
 - **Total operations**：总操作数
 - **operations/sec**：每秒内存操作数（越高越好）
-- **throughput**：内存吞吐量 MB/s（越高越好）
-- **avg latency**：平均延迟（越低越好）
-- **P95 latency**：95 百分位延迟（越低越好）
+- **Transferred**：实际传输数据量（MiB）
+- **throughput**：内存吞吐量 MiB/s（越高越好）
+- **Avg Latency**：平均延迟（越低越好）
+- **Min Latency**：最小延迟（越低越好）
+- **Max Latency**：最大延迟（越低越好）
+- **P95 Latency**：95 百分位延迟（越低越好）
+- **Sum Latency**：累计延迟（越低越好）
 
 ### IO 测试（sysbench）
 
@@ -279,23 +287,55 @@ cat output/original_data_*_all_results.log
 - **Read BW**：读吞吐量 MB/s（越高越好）
 - **Write BW**：写吞吐量 MB/s（越高越好）
 - **Total BW**：总吞吐量 MB/s（越高越好）
-- **avg latency**：平均延迟（越低越好）
-- **Min/Max latency**：最小/最大延迟（越低越好）
-- **P95/P99 latency**：95/99 百分位延迟（越低越好）
+- **Avg Latency**：平均延迟（越低越好）
+- **Min/Max Latency**：最小/最大延迟（越低越好）
+- **P95/P99 Latency**：95/99 百分位延迟（越低越好）
 - **Threads fairness**：线程公平性（events/execution time）
 
 ### IO 测试（fio）
 
 - **Read/Write IOPS**：每秒读/写操作数（越高越好）
 - **Read/Write BW**：读/写吞吐量 MB/s（越高越好）
-- **avg latency**：平均延迟（越低越好）
-- **Min/Max/P95/P99 latency**：最小/最大/95/99 百分位延迟（越低越好）
+- **Avg Latency**：平均延迟（越低越好）
+- **Min/Max/P95/P99 Latency**：最小/最大/95/99 百分位延迟（越低越好）
 - **Device utilization**：设备利用率（%）
 - **CPU user/system**：CPU 用户态/系统态利用率（%）
 - **bw\_min/bw\_max**：最小/最大带宽（反映带宽稳定性）
 - **slat/clat**：提交延迟/完成延迟（slat 指 IO 提交到设备的时间，clat 指设备处理完成的时间）
 - **ctx/majf/minf**：上下文切换/主要页错误/次要页错误（反映系统资源使用情况）
 - **iodepth\_level**：IO 队列深度级别（反映 IO 并发程度）
+
+### 网络测试
+
+- **Bandwidth (MB/s)**：网络带宽（越高越好）
+- **Retrans**：TCP 重传次数（越少越好）
+- **RTT(ms)**：往返时间（格式：平均值 (Min: 最小值, Max: 最大值)）
+- **CPU(%)**：发送端/接收端 CPU 利用率（格式：senderCPU%/receiverCPU%）
+
+### 线程测试
+
+- **total number of events**：总事件数
+- **total time**：总耗时（秒）
+- **Events/sec**：每秒线程事件数（越高越好）
+- **Avg Latency**：平均延迟（越低越好）
+- **Min Latency**：最小延迟（越低越好）
+- **Max Latency**：最大延迟（越低越好）
+- **P95 Latency**：95 百分位延迟（越低越好）
+- **Sum Latency**：累计延迟（越低越好）
+- **Threads fairness (events)**：线程事件公平性（格式 avg/stddev）
+- **Threads fairness (execution time)**：线程执行时间公平性
+
+### 互斥锁测试
+
+- **total number of events**：总事件数
+- **total time**：总耗时（秒）
+- **Transactions**：事务数（越高越好）
+- **TPS**：每秒事务数（越高越好）
+- **Avg Latency**：平均延迟（越低越好）
+- **Min Latency**：最小延迟（越低越好）
+- **Max Latency**：最大延迟（越低越好）
+- **P95 Latency**：95 百分位延迟（越低越好）
+- **Sum Latency**：累计延迟（越低越好）
 
 ### IO 压测详细说明
 
@@ -530,15 +570,15 @@ FIO 测试采用不同的工作方式：
 - **自动分批**：当主机数 > 3 时，矩阵模式自动启用分批并行执行
 - **并行度计算**：自动计算为 `floor(主机数 / 2)`，无需手动配置
 - **完美匹配算法**：每批次内所有主机都参与测试且无资源竞争
-- **端口偏移机制**：批次内不同主机对使用不同端口（NETWORK_PORT + 序号）
+- **端口偏移机制**：批次内不同主机对使用不同端口（NETWORK\_PORT + 序号）
 
 | 主机数 | 并行度 | 总测试对 | 总批次数 |
-|--------|--------|----------|----------|
-| 2 | 1 | 1 | 1 |
-| 3 | 1 | 3 | 3 |
-| 4 | 2 | 6 | 3 |
-| 6 | 3 | 15 | 5 |
-| 8 | 4 | 28 | 7 |
+| --- | --- | ---- | ---- |
+| 2   | 1   | 1    | 1    |
+| 3   | 1   | 3    | 3    |
+| 4   | 2   | 6    | 3    |
+| 6   | 3   | 15   | 5    |
+| 8   | 4   | 28   | 7    |
 
 ### 硬件信息检查
 
@@ -584,7 +624,7 @@ FIO 测试采用不同的工作方式：
     - **并行度**：自动计算为 `floor(主机数 / 2)`，无需手动配置
     - **批次内**：多个主机对同时测试，无资源竞争（完美匹配算法）
     - **批次间**：顺序执行，确保测试准确性
-    - **端口偏移**：批次内不同主机对使用不同端口（NETWORK_PORT + 序号）
+    - **端口偏移**：批次内不同主机对使用不同端口（NETWORK\_PORT + 序号）
 - **NETWORK\_PARALLEL**：控制每个 iperf3 测试的并行连接数，在所有模式下都生效
   - 例如：`NETWORK_PARALLEL=4` 表示每个测试使用 4 个并行连接
 
@@ -871,15 +911,6 @@ sudo apt install -y automake autoconf libtool gcc make
 
 #### Method 1: SSH Passwordless Login (Recommended)
 
-```bash
-# Generate key pair locally (if not exists)
-ssh-keygen -t rsa -b 4096
-
-# Distribute public key to all target servers
-ssh-copy-id root@192.168.1.101
-ssh-copy-id root@192.168.1.102
-```
-
 **Server List File Format**:
 
 ```bash
@@ -911,9 +942,9 @@ apt-get install -y sshpass
 
 ```bash
 # server_list file content (format: IP:username:password)
-192.168.1.101:root:password123
-192.168.1.102:admin:mypassword
-192.168.1.103:user:secret456
+192.168.1.101:user1:secret456
+192.168.1.102:user1:secret456
+192.168.1.103:user1:secret456
 ```
 
 **Run Test**:
@@ -975,43 +1006,85 @@ cat output/original_data_*_all_results.log
 ### CPU Test
 
 - **events/sec**: Events per second (higher is better)
-- **avg latency**: Average latency in ms (lower is better)
-- **P95/P99 latency**: 95th/99th percentile latency in ms (lower is better)
-- **Max latency**: Maximum latency in ms (lower is better)
-- **Fairness (events)**: Thread events fairness (avg/stddev format, lower stddev means better distribution)
-- **Fairness (execution time)**: Thread execution time fairness
+- **Avg Latency**: Average latency in ms (lower is better)
+- **Min Latency**: Minimum latency in ms (lower is better)
+- **P95 Latency**: 95th percentile latency in ms (lower is better)
+- **P99 Latency**: 99th percentile latency in ms (lower is better)
+- **Max Latency**: Maximum latency in ms (lower is better)
+- **Sum Latency**: Cumulative latency in ms (lower is better)
+- **Threads fairness (events)**: Thread events fairness (avg/stddev format, lower stddev means better distribution)
+- **Threads fairness (execution time)**: Thread execution time fairness
 
 ### Memory Test
 
 - **Total operations**: Total number of operations
 - **operations/sec**: Memory operations per second (higher is better)
-- **throughput**: Memory throughput in MB/s (higher is better)
-- **avg latency**: Average latency in ms (lower is better)
-- **P95 latency**: 95th percentile latency in ms (lower is better)
+- **Transferred**: Actual transferred data size (MiB)
+- **throughput**: Memory throughput in MiB/s (higher is better)
+- **Avg Latency**: Average latency in ms (lower is better)
+- **Min Latency**: Minimum latency in ms (lower is better)
+- **Max Latency**: Maximum latency in ms (lower is better)
+- **P95 Latency**: 95th percentile latency in ms (lower is better)
+- **Sum Latency**: Cumulative latency in ms (lower is better)
 
 ### IO Test (sysbench)
 
-- **Read/Write IOPS**: Read/write operations per second (higher is better)
+- **Read IOPS**: Read operations per second (higher is better)
+- **Write IOPS**: Write operations per second (higher is better)
 - **Total IOPS**: Total IO operations per second (higher is better)
 - **fsyncs/s**: Fsync operations per second (measures synchronous write performance)
-- **Read/Write BW**: Read/write bandwidth in MB/s (higher is better)
+- **Read BW**: Read bandwidth in MB/s (higher is better)
+- **Write BW**: Write bandwidth in MB/s (higher is better)
 - **Total BW**: Total bandwidth in MB/s (higher is better)
-- **avg latency**: Average latency in ms (lower is better)
-- **Min/Max/P95/P99 latency**: Latency percentiles in ms (lower is better)
+- **Avg Latency**: Average latency in ms (lower is better)
+- **Min/Max Latency**: Minimum/Maximum latency in ms (lower is better)
+- **P95/P99 Latency**: 95th/99th percentile latency in ms (lower is better)
 - **Threads fairness**: Thread fairness (events/execution time)
 
 ### IO Test (fio)
 
 - **Read/Write IOPS**: Read/write operations per second (higher is better)
 - **Read/Write BW**: Read/write bandwidth in MB/s (higher is better)
-- **avg latency**: Average latency in ms (lower is better)
-- **Min/Max/P95/P99 latency**: Latency percentiles in ms (lower is better)
+- **Avg Latency**: Average latency in ms (lower is better)
+- **Min/Max/P95/P99 Latency**: Latency percentiles in ms (lower is better)
 - **Device utilization**: Device utilization (%)
 - **CPU user/system**: CPU user/system utilization (%)
 - **bw\_min/bw\_max**: Minimum/maximum bandwidth (reflects bandwidth stability)
 - **slat/clat**: Submit latency/Completion latency (slat is time to submit IO to device, clat is time for device to complete)
 - **ctx/majf/minf**: Context switches/Major page faults/Minor page faults (reflects system resource usage)
 - **iodepth\_level**: IO queue depth level (reflects IO concurrency)
+
+### Network Test
+
+- **Bandwidth (MB/s)**: Network bandwidth (higher is better)
+- **Retrans**: TCP retransmit count (lower is better)
+- **RTT(ms)**: Round Trip Time (format: average (Min: min, Max: max))
+- **CPU(%)**: Sender/receiver CPU utilization (format: senderCPU%/receiverCPU%)
+
+### Threads Test
+
+- **total number of events**: Total number of events
+- **total time**: Total duration in seconds
+- **Events/sec**: Thread events per second (higher is better)
+- **Avg Latency**: Average latency in ms (lower is better)
+- **Min Latency**: Minimum latency in ms (lower is better)
+- **Max Latency**: Maximum latency in ms (lower is better)
+- **P95 Latency**: 95th percentile latency in ms (lower is better)
+- **Sum Latency**: Cumulative latency in ms (lower is better)
+- **Threads fairness (events)**: Thread events fairness (avg/stddev format)
+- **Threads fairness (execution time)**: Thread execution time fairness
+
+### Mutex Test
+
+- **total number of events**: Total number of events
+- **total time**: Total duration in seconds
+- **Transactions**: Number of transactions (higher is better)
+- **TPS**: Transactions per second (higher is better)
+- **Avg Latency**: Average latency in ms (lower is better)
+- **Min Latency**: Minimum latency in ms (lower is better)
+- **Max Latency**: Maximum latency in ms (lower is better)
+- **P95 Latency**: 95th percentile latency in ms (lower is better)
+- **Sum Latency**: Cumulative latency in ms (lower is better)
 
 ### IO Benchmark Detailed Description
 
@@ -1360,6 +1433,23 @@ The execution flow of oscheckperf:
 1. **Multi-server testing**: Configure SSH passwordless login or prepare password authentication before network testing
 2. **Resource monitoring**: Use vmstat, iostat, mpstat during testing to monitor system resources
 3. **Result preservation**: Save reports regularly for historical trend analysis and issue tracking
+
+## Installation Parameters
+
+| Parameter           | Default   | Description                                  |
+| ------------------- | --------- | -------------------------------------------- |
+| `INSTALL_TARGET`    | Empty     | Installation target (sysbench/sshpass/fio/iperf3/numactl/ethtool/jq/oscheckperf/all) |
+| `SERVERS_FILE`      | Empty     | Server list file path                        |
+
+## Debug Parameters
+
+| Parameter               | Default   | Description                                  |
+| ----------------------- | --------- | -------------------------------------------- |
+| `DEBUG`                 | `false`   | Debug mode (show detailed logs)              |
+| `DRY_RUN`               | `false`   | Dry-run mode (preview commands, no execution) |
+| `NO_CHECKS`             | `false`   | Skip pre-test checks                         |
+| `CLEANUP`               | `true`    | Cleanup temporary files after testing        |
+| `REPORT_HARDWARE_INFO`  | `true`    | Include hardware information in performance report |
 
 ## License
 
