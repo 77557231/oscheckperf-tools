@@ -157,9 +157,9 @@ sudo yum install -y automake autoconf libtool gcc make
 
 ```bash
 # server_list 文件内容（格式：IP:username:password）
-192.168.1.101:username:password
-192.168.1.102:username:password
-192.168.1.103:username:password
+IP:username:password
+IP:username:password
+IP:username:password
 ```
 
 **运行测试**：
