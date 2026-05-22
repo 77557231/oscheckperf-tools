@@ -16,7 +16,7 @@
 - **一站式性能评估**：覆盖 CPU、内存、磁盘 IO、网络吞吐、线程调度、互斥锁六大核心维度
 - **双引擎 IO 测试**：同时支持 sysbench 和 fio，满足不同场景下的 IO 性能评估需求
 - **多维网络测试**：支持串行、全矩阵两种网络测试模式，全面评估集群网络性能
-- **自动分发依赖包**：自动编译并分发 sysbench、sshpass 到远程服务器，支持跨架构部署
+- **自动分发依赖包**：自动编译并分发 sysbench等到远程服务器
 - **灵活认证方式**：同时支持 SSH 免密登录和密码认证，适应不同运维场景
 - **灵活配置**：支持命令行参数、配置文件 parameter.conf、混合使用多种配置方式
 
@@ -66,7 +66,7 @@
 #  （fio可选、多IP压测）
 sudo yum install -y sysbench iperf3 fio jq 
 
-# 非免密环境需额外安装sshpass
+# 非免密环境需额外安装
 sudo yum install -y sshpass
 
 # 扩展查看更多硬件资源安装
@@ -100,7 +100,6 @@ sudo yum install -y automake autoconf libtool gcc make
 
 # 可以指定安装组件
 ./oscheckperf -i sysbench   # 编译安装 sysbench
-./oscheckperf -i sshpass    # 编译安装 sshpass
 ./oscheckperf -i fio        # 编译安装 fio
 ./oscheckperf -i iperf3     # 编译安装 iperf3
 ./oscheckperf -i numactl    # 编译安装 numactl
@@ -157,9 +156,9 @@ sudo yum install -y automake autoconf libtool gcc make
 
 ```bash
 # server_list 文件内容（格式：IP:username:password）
-IP:username:password
-IP:username:password
-IP:username:password
+IP:username:xxxx
+IP:username:xxxx
+IP:username:xxxx
 ```
 
 **运行测试**：
@@ -167,12 +166,6 @@ IP:username:password
 ```bash
 ./oscheckperf network -f server_list
 ```
-
-**注意事项**：
-
-- 密码认证需要安装 `sshpass` 工具，**参考安装依赖部分**
-- 服务器列表中的密码以明文存储，请妥善保管
-- 支持混合模式：服务器列表中可以同时包含免密和密码认证的服务器
 
 ### 4. 自定义 SSH 端口
 
