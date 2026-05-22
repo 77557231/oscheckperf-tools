@@ -1,7 +1,7 @@
 #!/bin/bash
 #--------------------------------------------------------------------------------
 #-- File name:   oscheckperf
-#-- Version:     v1.0.0
+#-- Version:     v1.0.1
 #-- Purpose:     Database System Benchmark Tool
 #-- Author:      Wanping Pan 
 #-- Description: One-click system benchmarking tool, supports configuration via config file or command line parameters
@@ -9,8 +9,6 @@
 
 # Note: set -e is intentionally not used to allow tests to continue even if some fail
 # This ensures report generation happens regardless of individual test failures
-
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # ================================================================================
 # Global Configuration Variables - Centralized Management
@@ -30,13 +28,14 @@ export OUTPUT_DIR="${OUTPUT_DIR:-./output}"
 
 # System Configuration Constants
 MIN_DISK_SPACE_GB=1                    # Minimum disk space required for IO tests (GB)
-NETWORK_PORT_DEFAULT=25201             # Network test default port
-SSH_PORT_DEFAULT=22                    # SSH configuration default port
+NETWORK_PORT="${NETWORK_PORT:-25201}"  # Network test port
+SSH_PORT="${SSH_PORT:-22}"             # SSH port for remote server connections
 
 # Default parameters
 CONFIG_FILE=""
 DRY_RUN=false
 NO_CHECKS=false
+DURATION="${DURATION:-60}"               # Unified test duration in seconds
 
 # ================================================================================
 
@@ -578,7 +577,7 @@ parse_mutex_report() {
 # Get SSH port with validation
 # Returns: Valid SSH port number (1-65535)
 get_ssh_port() {
-    local port="${SSH_PORT:-$SSH_PORT_DEFAULT}"
+    local port="$SSH_PORT"
     
     # Validate port is a number between 1 and 65535
     if ! [[ "$port" =~ ^[1-9][0-9]{0,4}$ ]] || [ "$port" -lt 1 ] || [ "$port" -gt 65535 ]; then
@@ -683,7 +682,7 @@ build_auth_prefix() {
                 echo "  Ubuntu/Debian: sudo apt-get install -y sshpass"
                 exit 1
             fi
-            pass_arg="sshpass -e "
+            pass_arg="sshpass -p $(printf '%q' "$password") "
         elif [ -z "$password" ]; then
             echo "Error: Password not provided for server $ip with username '$username'"
             exit 1
@@ -840,7 +839,7 @@ parse_args() {
                 exit 0
                 ;;
             --version)
-                echo "Version: 1.0.0"
+                echo "Version: 1.0.1"
                 exit 0
                 ;;
             --dry-run)
@@ -1049,7 +1048,7 @@ show_help() {
     echo "  DURATION=<seconds>          Unified test duration (default: 60)"
     echo "  OUTPUT_DIR=<path>           Output directory (default: ./output)"
     echo "  CLEANUP=true|false          Cleanup temp files after test (default: true)"
-    echo "  SSH_PORT=<port>             SSH port for remote server connections (default: $SSH_PORT_DEFAULT)"
+    echo "  SSH_PORT=<port>             SSH port for remote server connections (default: 22)"
     echo "  REPORT_HARDWARE_INFO=true|false  Include hardware information in report (default: true)"
     echo ""
     echo "CPU test parameters:"
@@ -1091,7 +1090,7 @@ show_help() {
     echo ""
     echo "Network test parameters:"
     echo "  NETWORK_MODE=serial|matrix  Network test mode (default: matrix)"
-    echo "  NETWORK_PORT=<port>        Test port (default: $NETWORK_PORT_DEFAULT)"
+    echo "  NETWORK_PORT=<port>        Test port (default: 25201)"
     echo "  NETWORK_PARALLEL=<number>  Parallel connections per test (default: 1)"
     echo ""
     echo "Threads test parameters:"
@@ -1216,10 +1215,10 @@ get_cpu_model() {
 get_cpu_physical_cores() {
     if [ -f /proc/cpuinfo ]; then
         local cores=$(grep -c 'physical id' /proc/cpuinfo 2>/dev/null)
-        if [ -n "$cores" ]; then
+        if [ -n "$cores" ] && [ "$cores" -gt 0 ] 2>/dev/null; then
             echo "$cores"
         else
-            echo "unknown"
+            nproc 2>/dev/null || echo "unknown"
         fi
     else
         echo "unknown"
@@ -1239,20 +1238,30 @@ get_cpu_freq() {
             awk "BEGIN {printf \"%.2f\", $freq / 1000}"
             return
         fi
+    fi
+    # Fallback to sysfs cpufreq (more reliable on aarch64)
+    local freq=$(cat /sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq 2>/dev/null)
+    if [ -n "$freq" ] && [ "$freq" != "0" ]; then
+        awk "BEGIN {printf \"%.2f\", $freq / 1000000}"
+        return
+    fi
+    # Fallback to lscpu
+    if command -v lscpu &>/dev/null; then
+        freq=$(lscpu 2>/dev/null | grep -i 'CPU max MHz' | awk '{print $NF}')
+        if [ -n "$freq" ] && [ "$freq" != "0" ]; then
+            awk "BEGIN {printf \"%.2f\", $freq / 1000}"
+            return
+        fi
+    fi
+    # Last fallback: BogoMIPS (not reliable on aarch64)
+    if [ -f /proc/cpuinfo ]; then
         freq=$(grep -m 1 'BogoMIPS' /proc/cpuinfo | awk '{print $3}')
         if [ -n "$freq" ]; then
             awk "BEGIN {printf \"%.2f\", $freq / 1000}"
             return
         fi
-        freq=$(cat /sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq 2>/dev/null)
-        if [ -n "$freq" ]; then
-            awk "BEGIN {printf \"%.2f\", $freq / 1000000}"
-            return
-        fi
-        echo "unknown"
-    else
-        echo "unknown"
     fi
+    echo "unknown"
 }
 
 # Get available memory (MB)
@@ -2717,9 +2726,9 @@ get_hardware_functions_for_remote() {
     cat << 'REMOTE_EOF'
 get_disk_info_detailed() { if command -v lsblk &>/dev/null; then lsblk -no NAME,SIZE,TYPE,FSTYPE,MOUNTPOINT 2>/dev/null | grep -v "^loop" | grep -v "^NAME" | grep -v "^sr" | while read -r line; do name=$(echo "$line" | awk '{print $1}' | sed 's/^[├└─ ]*//'); size=$(echo "$line" | awk '{print $2}'); type=$(echo "$line" | awk '{print $3}'); fstype=$(echo "$line" | awk '{print $4}'); mountpoint=$(echo "$line" | awk '{print $5}'); vendor="-"; model="-"; scheduler="-"; disk_type="-"; wcache="-"; if [ "$type" = "disk" ] || [ "$type" = "rom" ]; then if [ -d "/sys/block/$name/device" ]; then if [ -f "/sys/block/$name/device/vendor" ]; then vendor=$(cat "/sys/block/$name/device/vendor" 2>/dev/null | tr -d ' '); fi; if [ -f "/sys/block/$name/device/model" ]; then model=$(cat "/sys/block/$name/device/model" 2>/dev/null | tr -d ' '); fi; if [ -f "/sys/block/$name/queue/scheduler" ]; then scheduler=$(cat "/sys/block/$name/queue/scheduler" 2>/dev/null | grep -o '\[.*\]' | tr -d '[]'); [ -z "$scheduler" ] && scheduler=$(cat "/sys/block/$name/queue/scheduler" 2>/dev/null | awk '{print $1}'); fi; if [ -f "/sys/block/$name/queue/rotational" ]; then rotational=$(cat "/sys/block/$name/queue/rotational" 2>/dev/null); [ "$rotational" = "0" ] && disk_type="SSD"; [ "$rotational" = "1" ] && disk_type="HDD"; fi; if [ -f "/sys/block/$name/queue/write_cache" ]; then wcache=$(cat "/sys/block/$name/queue/write_cache" 2>/dev/null); [ "$wcache" = "write back" ] && wcache="WriteBack"; [ "$wcache" = "1" ] && wcache="WriteBack"; [ "$wcache" = "write through" ] && wcache="WriteThrough"; [ "$wcache" = "0" ] && wcache="WriteThrough"; fi; fi; fi; [ -z "$fstype" ] && fstype="-"; [ -z "$mountpoint" ] && mountpoint="-"; [ -z "$vendor" ] && vendor="-"; [ -z "$model" ] && model="-"; [ -z "$scheduler" ] && scheduler="-"; [ -z "$wcache" ] && wcache="-"; echo "$name|$size|$type|$fstype|$mountpoint|$disk_type|$vendor|$model|$scheduler|$wcache"; done; else echo "N/A"; fi; }
 get_cpu_model() { if [ -f /proc/cpuinfo ]; then grep -m 1 'model name' /proc/cpuinfo | sed 's/model name\s*: //' 2>/dev/null || echo "N/A"; else echo "N/A"; fi; }
-get_cpu_physical_cores() { if [ -f /proc/cpuinfo ]; then local cores=$(grep -c 'physical id' /proc/cpuinfo 2>/dev/null); if [ -n "$cores" ]; then echo "$cores"; else echo "N/A"; fi; else echo "N/A"; fi; }
+get_cpu_physical_cores() { if [ -f /proc/cpuinfo ]; then local cores=$(grep -c 'physical id' /proc/cpuinfo 2>/dev/null); if [ -n "$cores" ] && [ "$cores" -gt 0 ] 2>/dev/null; then echo "$cores"; else nproc 2>/dev/null || echo "N/A"; fi; else echo "N/A"; fi; }
 get_cpu_logical_cores() { nproc 2>/dev/null || grep -c ^processor /proc/cpuinfo 2>/dev/null || echo "N/A"; }
-get_cpu_freq() { if [ -f /proc/cpuinfo ]; then local freq=$(grep -m 1 'cpu MHz' /proc/cpuinfo | awk '{print $4}'); if [ -n "$freq" ]; then awk "BEGIN {printf \"%.2f\", $freq / 1000}"; return; fi; freq=$(grep -m 1 'BogoMIPS' /proc/cpuinfo | awk '{print $3}'); if [ -n "$freq" ]; then awk "BEGIN {printf \"%.2f\", $freq / 1000}"; return; fi; freq=$(cat /sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq 2>/dev/null); if [ -n "$freq" ]; then awk "BEGIN {printf \"%.2f\", $freq / 1000000}"; return; fi; echo "N/A"; else echo "N/A"; fi; }
+get_cpu_freq() { if [ -f /proc/cpuinfo ]; then local freq=$(grep -m 1 'cpu MHz' /proc/cpuinfo | awk '{print $4}'); if [ -n "$freq" ]; then awk "BEGIN {printf \"%.2f\", $freq / 1000}"; return; fi; fi; freq=$(cat /sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq 2>/dev/null); if [ -n "$freq" ] && [ "$freq" != "0" ]; then awk "BEGIN {printf \"%.2f\", $freq / 1000000}"; return; fi; if command -v lscpu &>/dev/null; then freq=$(lscpu 2>/dev/null | grep -i 'CPU max MHz' | awk '{print $NF}'); if [ -n "$freq" ] && [ "$freq" != "0" ]; then awk "BEGIN {printf \"%.2f\", $freq / 1000}"; return; fi; fi; if [ -f /proc/cpuinfo ]; then freq=$(grep -m 1 'BogoMIPS' /proc/cpuinfo | awk '{print $3}'); if [ -n "$freq" ]; then awk "BEGIN {printf \"%.2f\", $freq / 1000}"; return; fi; fi; echo "N/A"; }
 get_memory_size_mb() { if [ -f /proc/meminfo ]; then awk '/MemTotal/ {printf "%.0f", $2/1024}' /proc/meminfo 2>/dev/null || echo "N/A"; else echo "N/A"; fi; }
 get_memory_available_mb() { if [ -f /proc/meminfo ]; then awk '/MemAvailable/ {printf "%.0f", $2/1024}' /proc/meminfo 2>/dev/null || echo "N/A"; else echo "N/A"; fi; }
 get_memory_type() { local machine_type=$(get_machine_type 2>/dev/null); if echo "$machine_type" | grep -qi "virtual"; then echo "N/A (virtual machine)"; return; fi; if command -v dmidecode &>/dev/null; then local mem_type=$(dmidecode -t memory 2>/dev/null | grep -m 1 'Type:' | sed 's/Type:\s*//' | sed 's/^[ \t]*//' | sed 's/[ \t]*$//' 2>/dev/null); if [ -n "$mem_type" ] && [ "$mem_type" != "Unknown" ] && [ "$mem_type" != "Error" ]; then echo "$mem_type"; return; fi; fi; local dmesg_type=$(dmesg 2>/dev/null | grep -i 'DDR' | head -1 | grep -o 'DDR[0-9]*' | head -1); if [ -n "$dmesg_type" ]; then echo "$dmesg_type"; return; fi; echo "unknown (requires root)"; }
@@ -3470,7 +3479,7 @@ check_ssh() {
 
 # Port allocation management for network tests
 declare -A PORT_ALLOCATION=()
-CURRENT_PORT="${NETWORK_PORT:-$NETWORK_PORT_DEFAULT}"
+CURRENT_PORT="$NETWORK_PORT"
 
 # Allocate a unique port for a target host
 # Returns: allocated port number
@@ -3498,7 +3507,7 @@ cleanup_residual_processes() {
     echo "  Checking and cleaning up residual processes (fio, iperf3, sysbench)..."
     
     local local_ip=$(get_machine_ip)
-    local port="${NETWORK_PORT:-$NETWORK_PORT_DEFAULT}"
+    local port="$NETWORK_PORT"
     local total_cleaned=0
     local server_count=0
     local current_user=$(whoami)
@@ -3638,7 +3647,7 @@ parse_cpu_result() {
     local max_latency=$(grep -A5 "Latency (ms):" "$result_file" 2>/dev/null | grep "max:" | awk '{print $NF}' | tr -d ',' || echo "N/A")
     
     # Calculate Sum Latency: events_per_sec * duration * avg_latency (approximation)
-    local cpu_duration="${DURATION:-60}"
+    local cpu_duration="$DURATION"
     local sum_latency="N/A"
     if [ -n "$events_per_sec" ] && [ "$events_per_sec" != "0" ] && [ -n "$avg_latency" ] && [ "$avg_latency" != "0" ]; then
         sum_latency=$(awk -v eps="$events_per_sec" -v dur="$cpu_duration" -v avg="$avg_latency" 'BEGIN {printf "%.2f", eps * dur * avg}')
@@ -3771,7 +3780,7 @@ run_io_test() {
     echo "=== IO Performance Test ==="
     
     local io_tool="${IO_TOOL:-sysbench}"
-    local duration="${DURATION:-60}"
+    local duration="$DURATION"
     
     if [ "$io_tool" = "fio" ]; then
         FIO_DURATION="${FIO_DURATION:-$duration}" run_fio_test
@@ -3832,7 +3841,7 @@ run_sysbench_fileio() {
         local sysbench_run_cmd="sysbench fileio \
             --file-total-size=${IO_TOTAL_SIZE:-1G} \
             --file-test-mode=$test_mode \
-            --time=${SYSBENCH_DURATION:-${DURATION:-60}} \
+            --time=${SYSBENCH_DURATION:-$DURATION} \
             --file-num=${SYSBENCH_FILE_NUM:-4} \
             --file-block-size=${SYSBENCH_BLOCK_SIZE:-16K} \
             --file-io-mode=${SYSBENCH_IO_MODE:-sync} \
@@ -3945,7 +3954,7 @@ run_fio_test() {
 ioengine=${ioengine}
 direct=${direct}
 size=${per_file_size}
-runtime=${FIO_DURATION:-${DURATION:-60}}
+runtime=${FIO_DURATION:-$DURATION}
 time_based
 group_reporting
 thread
@@ -4310,8 +4319,8 @@ run_network_test() {
 # Supports both local and remote server: uses first host as server
 run_serial_network_test() {
     start_timer "network_test_serial"
-    local port="${NETWORK_PORT:-$NETWORK_PORT_DEFAULT}"
-    local duration="${DURATION:-60}"
+    local port="$NETWORK_PORT"
+    local duration="$DURATION"
     local parallel="${NETWORK_PARALLEL:-1}"
     
     # Create temp directory if it doesn't exist
@@ -4896,8 +4905,8 @@ run_matrix_network_test() {
     # Get local IP address
     local LOCAL_IP=$(hostname -I | awk '{print $1}')
     
-    local port="${NETWORK_PORT:-$NETWORK_PORT_DEFAULT}"
-    local duration="${DURATION:-60}"
+    local port="$NETWORK_PORT"
+    local duration="$DURATION"
     local parallel="${NETWORK_PARALLEL:-1}"
     
     # Create output directory if it doesn't exist
@@ -5151,8 +5160,8 @@ run_parallel_network_test() {
     start_timer "network_test_parallel"
     echo "=== Parallel Network Performance Test ==="
     
-    local port="${NETWORK_PORT:-$NETWORK_PORT_DEFAULT}"
-    local duration="${DURATION:-60}"
+    local port="$NETWORK_PORT"
+    local duration="$DURATION"
     local parallel="${NETWORK_PARALLEL:-1}"
     
     # Create output directory if it doesn't exist
@@ -5291,7 +5300,7 @@ generate_parallel_report() {
 ================================================================================
 
 Test Time: $(date '+%Y-%m-%d %H:%M:%S')
-Test Duration: ${DURATION:-60}s
+Test Duration: $DURATIONs
 Parallel Connections: ${NETWORK_PARALLEL:-1}
 Server: $server_ip
 
@@ -5426,7 +5435,7 @@ generate_matrix_report() {
 ================================================================================
 
 Test Time: $(date '+%Y-%m-%d %H:%M:%S')
-Test Duration: ${DURATION:-60}s per pair
+Test Duration: $DURATIONs per pair
 Parallel Connections: ${NETWORK_PARALLEL:-1}
 
 Hosts: ${hosts_arr[*]}
@@ -5777,7 +5786,7 @@ run_threads_test() {
         local cores=$(get_cpu_cores 2>/dev/null || echo "4")
         threads=$((cores * 4))
     fi
-    local duration="${DURATION:-60}"
+    local duration="$DURATION"
     
     # Only display test info in non-remote mode
     if [ "$REMOTE" != "true" ]; then
@@ -5872,7 +5881,7 @@ run_mutex_test() {
     if [ "$threads" -eq 0 ]; then
         threads=$(get_cpu_cores)
     fi
-    local duration="${DURATION:-60}"
+    local duration="$DURATION"
     
     # Only display test info in non-remote mode
     if [ "$REMOTE" != "true" ]; then
@@ -5950,7 +5959,7 @@ run_cpu_test() {
         threads=$(get_cpu_cores)
         echo "Auto-detected CPU cores: $threads"
     fi
-    local duration="${DURATION:-60}"
+    local duration="$DURATION"
     
     # Only display test info in non-remote mode
     if [ "$REMOTE" != "true" ]; then
@@ -5991,7 +6000,7 @@ run_memory_test() {
     if [ "$threads" -eq 0 ]; then
         threads=$(get_cpu_cores)
     fi
-    local duration="${DURATION:-60}"
+    local duration="$DURATION"
     
     # Only display test info in non-remote mode
     if [ "$REMOTE" != "true" ]; then
@@ -6040,7 +6049,7 @@ generate_report() {
     local local_ip=$(get_machine_ip 2>/dev/null || echo "127.0.0.1")
     
     # Unified duration
-    local unified_duration="${DURATION:-60}"
+    local unified_duration="$DURATION"
 
 
     # Get server list info (detailed or simple)
@@ -6114,7 +6123,7 @@ generate_report() {
     printf -- "%-28s %-20s %-25s\n" "Output Directory" "OUTPUT_DIR" "$OUTPUT_DIR" >> "$report_file"
     printf -- "%-28s %-20s %-25s\n" "Cleanup After Test" "CLEANUP" "${CLEANUP:-true}" >> "$report_file"
     printf -- "%-28s %-20s %-25s\n" "Execution Mode" "EXEC_MODE" "${EXEC_MODE:-parallel}" >> "$report_file"
-    printf -- "%-28s %-20s %-25s\n" "SSH Port" "SSH_PORT" "${SSH_PORT:-$SSH_PORT_DEFAULT}" >> "$report_file"
+    printf -- "%-28s %-20s %-25s\n" "SSH Port" "SSH_PORT" "$SSH_PORT" >> "$report_file"
     printf -- "%-28s %-20s %-25s\n" "Report Hardware Info" "REPORT_HARDWARE_INFO" "${REPORT_HARDWARE_INFO:-true}" >> "$report_file"
     printf -- "\n" >> "$report_file"
     
@@ -6205,7 +6214,7 @@ generate_report() {
     printf -- "%-28s %-20s %-25s\n" "Enabled" "NETWORK_ENABLED" "${NETWORK_ENABLED:-true}" >> "$report_file"
     printf -- "%-28s %-20s %-25s\n" "Tool" "NETWORK_TOOL" "${NETWORK_TOOL:-iperf3}" >> "$report_file"
     printf -- "%-28s %-20s %-25s\n" "Test Mode" "NETWORK_MODE" "${NETWORK_MODE:-matrix}" >> "$report_file"
-    printf -- "%-28s %-20s %-25s\n" "Port" "NETWORK_PORT" "${NETWORK_PORT:-$NETWORK_PORT_DEFAULT}" >> "$report_file"
+    printf -- "%-28s %-20s %-25s\n" "Port" "NETWORK_PORT" "$NETWORK_PORT" >> "$report_file"
     printf -- "%-28s %-20s %-25s\n" "Duration" "DURATION" "${unified_duration}s" >> "$report_file"
     printf -- "%-28s %-20s %-25s\n" "Parallel Connections" "NETWORK_PARALLEL" "${NETWORK_PARALLEL:-1}" >> "$report_file"
     printf -- "\n" >> "$report_file"
@@ -8200,7 +8209,15 @@ install_ethtool() {
     echo "[Step 1/2] Compiling ethtool..."
     
     echo "  Checking build dependencies..."
-    if ! command -v gcc &> /dev/null || ! command -v make &> /dev/null || ! command -v automake &> /dev/null || ! command -v autoconf &> /dev/null || ! command -v libtool &> /dev/null || ! command -v pkg-config &> /dev/null || ! pkg-config --exists libmnl 2>/dev/null; then
+    # Check if libmnl-devel (RPM) or libmnl-dev (DEB) is installed
+    local has_libmnl_dev=false
+    if command -v rpm &> /dev/null && rpm -q libmnl-devel &> /dev/null; then
+        has_libmnl_dev=true
+    elif command -v dpkg &> /dev/null && dpkg -l libmnl-dev 2>/dev/null | grep -q "^ii"; then
+        has_libmnl_dev=true
+    fi
+    
+    if ! command -v gcc &> /dev/null || ! command -v make &> /dev/null || ! command -v automake &> /dev/null || ! command -v autoconf &> /dev/null || ! command -v libtool &> /dev/null || ! command -v pkg-config &> /dev/null || [ "$has_libmnl_dev" = false ]; then
         install_build_dependencies "automake autoconf libtool gcc make pkg-config libmnl-devel" "automake autoconf libtool gcc make pkg-config libmnl-dev" "ethtool"
     else
         echo "  Build dependencies already installed"
