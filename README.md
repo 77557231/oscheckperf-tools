@@ -193,9 +193,9 @@ sudo apt install -y automake autoconf libtool gcc make
 
 ```bash
 # server_list 文件内容（格式：IP:username:password）
-192.168.1.101:user1:123456
-192.168.1.102:user1:123456
-192.168.1.103:user1:123456
+IP:username:password
+IP:username:password
+IP:username:password
 ```
 
 **运行测试**：
@@ -942,9 +942,9 @@ apt-get install -y sshpass
 
 ```bash
 # server_list file content (format: IP:username:password)
-192.168.1.101:user1:123456
-192.168.1.102:user1:123456
-192.168.1.103:user1:123456
+IP:username:password
+IP:username:password
+IP:username:password
 ```
 
 **Run Test**:
