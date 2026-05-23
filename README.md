@@ -134,10 +134,12 @@ sudo yum install ethtool numactl
 **服务器列表文件格式**：
 
 ```bash
-# server_list 文件内容（格式：IP:username:password）
-IP:username:xxxx
-IP:username:xxxx
-IP:username:xxxx
+# server_list 文件内容（格式：IP username password，支持多空格或 tab 分隔）
+# 密码可以包含任意特殊字符（包括冒号）
+IP username xxxx
+IP username "p@ss:word:with:colons"
+IP username "p@ss word with spaces"
+192.168.1.103   root    secret123    # 多空格或 tab 也支持
 ```
 
 **运行测试**：
