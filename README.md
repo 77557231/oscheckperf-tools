@@ -2,12 +2,7 @@
 
 # oscheckperf - 系统性能基准测试工具
 
-**oscheckperf** 是一款专为数据库场景设计的系统级性能基准测试工具，提供一站式的服务器硬件性能评估能力。通过自动化测试 CPU、内存、磁盘 IO、网络吞吐、线程调度、互斥锁六大核心维度，帮助用户快速评估服务器性能边界，识别潜在瓶颈。
-
-**核心价值**：
-
-- 一站式服务器硬件性能测试，结果汇总，快速分辨集群性能指标差异，便于问题定位
-- 助力数据库（Vastbase、openGauss、PostgreSQL、MySQL）服务器硬件底层性能验证
+**oscheckperf** 是一款专为数据库场景设计的系统级性能基准测试工具，提供一站式的服务器硬件性能评估能力。通过测试 CPU、内存、磁盘 IO、网络吞吐、线程调度、互斥锁六大核心维度，帮助用户快速评估服务器性能边界，识别潜在瓶颈。
 
 ## 核心特性
 
@@ -15,10 +10,9 @@
 
 - **一站式性能评估**：覆盖 CPU、内存、磁盘 IO、网络吞吐、线程调度、互斥锁六大核心维度
 - **双引擎 IO 测试**：同时支持 sysbench 和 fio，满足不同场景下的 IO 性能评估需求
-- **多维网络测试**：支持串行、全矩阵两种网络测试模式，全面评估集群网络性能
-- **自动分发依赖包**：自动编译并分发 sysbench等到远程服务器
-- **灵活认证方式**：同时支持 SSH 免密登录和密码认证，适应不同运维场景
-- **灵活配置**：支持命令行参数、配置文件 parameter.conf、混合使用多种配置方式
+- **多维网络测试**：支持串行、全矩阵两种网络测试模式,综合评估集群网络性能
+- **自动分发依赖包**：自动编译并分发依赖包等到远程服务器，减少测试机依赖包安装
+- **灵活认证方式**：支持免密登录和密码认证，适应不同测试场景
 
 ### 📊 结果汇总
 
@@ -38,21 +32,13 @@
 - **调试与预览**：支持 `--debug` 调试模式和 `--dry-run` 命令预览模式
 - **灵活参数控制**：支持命令行参数、环境变量、配置文件三种参数传递方式
 
-
 ### 文件类型说明
 
-| 文件类型            | 存放位置                                        | 说明                   |
-| --------------- | ------------------------------------------- | -------------------- |
-| **原始测试数据**      | `./output/original_data_*`                  | 所有测试的原始输出汇总          |
-| **解析结果**        | `./output/data_*`                           | 解析后的结构化测试结果          |
-| **最终报告**        | `./output/report_benchmark_*`               | 格式化的性能报告             |
-
-### 路径配置
-
-可以通过参数或配置文件 `BASE_DIR` 统一修改基础目录：
-
-- `IO_PATH` > 默认值 `$BASE_DIR/io_test`
-- `OUTPUT_DIR` > 默认值 `./output`
+| 文件类型       | 存放位置                          | 说明          |
+| ---------- | ----------------------------- | ----------- |
+| **原始测试数据** | `./output/original_data_*`    | 所有测试的原始输出汇总 |
+| **解析结果**   | `./output/data_*`             | 解析后的结构化测试结果 |
+| **最终报告**   | `./output/report_benchmark_*` | 格式化的性能报告    |
 
 ## 快速开始
 
@@ -73,37 +59,30 @@ sudo yum install -y sshpass
 sudo yum install ethtool numactl
 ```
 
-**方式二：工具自动安装依赖**
+**方式二：工具自动编译安装**
 
 **编译安装说明**：
 
-编译安装仅需在**编译机（脚本所在服务器）上安装编译依赖，其它远程服务器**无需安装编译工具，工具会自动推送。
+编译安装仅需在\*\*编译机（脚本所在服务器）上安装编译依赖，其它远程服务器无需安装编译工具，工具会自动推送。
 
-```bash
-# CentOS/RHEL 系列（仅编译机需要）
-sudo yum install -y automake autoconf libtool gcc make
-```
-
-> **注意**：编译 ethtool 前需手动安装 libmnl 依赖：
+> **重要**：必须先手动安装编译依赖库：
 >
-> - CentOS/RHEL: `sudo yum install -y libmnl-devel`
-> - Ubuntu/Debian: `sudo apt-get install -y libmnl-dev`
+> - CentOS/RHEL: `sudo yum install -y automake autoconf libtool gcc make libmnl-devel`
+> - Ubuntu/Debian: `sudo apt-get install -y automake autoconf libtool libtool-bin gcc make libmnl-dev`
 
-**自动编译安装组件**
+**编译安装组件**
 
 ```bash
-# 单机时安装-i 参数编译安装组件（使用本地离线安装包，无需联网）
+# 单机时使用 -i 参数编译安装（使用本地离线安装包，无需联网）
+# -i all: 删除旧目录并重新编译所有组件
 ./oscheckperf -i all
 
-# 多机时自动编译并分发到远程服务器（无需root权限）
-./oscheckperf -i -f server_list all
+# -i oscheckperf: 仅更新 oscheckperf 脚本
+./oscheckperf -i oscheckperf
 
-# 可以指定安装组件
-./oscheckperf -i sysbench   # 编译安装 sysbench
-./oscheckperf -i fio        # 编译安装 fio
-./oscheckperf -i iperf3     # 编译安装 iperf3
-./oscheckperf -i numactl    # 编译安装 numactl
-./oscheckperf -i ethtool    # 编译安装 ethtool
+# 多机时自动编译并分发到远程服务器（无需 root 权限）
+./oscheckperf -i all -f server_list
+./oscheckperf -i oscheckperf -f server_list
 ```
 
 ### 2. 运行测试
@@ -150,7 +129,7 @@ sudo yum install -y automake autoconf libtool gcc make
 ./oscheckperf network -f server_list
 ```
 
-#### 方式二：密码认证（非免密）
+#### 方式二：密码认证
 
 **服务器列表文件格式**：
 
@@ -173,19 +152,13 @@ IP:username:xxxx
 # 方法一：配置文件里设置SSH_PORT=2222
 ./oscheckperf network -f server_list -p parameter.conf
 
-# 方法二：使用环境变量
-export SSH_PORT=2222
-./oscheckperf network -f server_list
-
-# 方法三：直接使用参数
+# 方法二：直接使用参数
 ./oscheckperf network -f server_list SSH_PORT=2222
 ```
 
 ### 5. 干运行模式（预览底层运行的原始命令）
 
 ```bash
-# 预览所有测试命令
-./oscheckperf --dry-run
 
 # 预览指定测试命令
 ./oscheckperf io --dry-run
@@ -294,42 +267,9 @@ cat output/original_data_*_all_results.log
 - **P95 Latency**：95 百分位延迟（越低越好）
 - **Sum Latency**：累计延迟（越低越好）
 
-### IO 压测详细说明
+## 常用参数
 
-#### Sysbench fileio 工作流程
-
-Sysbench 的 fileio 测试分为三个阶段：
-
-1. **prepare 阶段**：创建测试文件
-   - 在 `IO_PATH` 指定的目录中创建测试文件
-   - 默认文件大小为 1G（可通过 `IO_TOTAL_SIZE` 调整）
-   - 默认创建 1 个文件（可通过 `SYSBENCH_FILE_NUM` 调整）
-2. **run 阶段**：执行实际压测
-   - `DURATION` 参数仅控制此阶段的执行时间
-   - 对 prepare 阶段创建的文件进行随机读写操作
-   - 测试模式默认为 `rndrw`（随机读写），可通过 `SYSBENCH_PROFILES` 调整
-3. **cleanup 阶段**：自动清理测试文件
-   - 删除 prepare 阶段创建的所有测试文件
-   - 测试目录本身不会被删除
-
-#### FIO 工作流程
-
-FIO 测试采用不同的工作方式：
-
-1. **配置生成**：根据参数生成 `.fio` 配置文件
-2. **执行测试**：FIO 在运行时自动创建测试文件
-3. **文件处理**：测试完成后 FIO 不会自动删除文件，脚本会保留结果文件
-
-#### 重要注意事项
-
-**IO\_PATH 参数说明**：
-
-- 默认测试路径为 `$HOME/oscheckperf/io_test`
-- 确保目标分区有足够的可用空间（至少大于 `IO_TOTAL_SIZE`）
-
-**常用参数**：
-
-##### sysbench 参数
+#### sysbench 参数
 
 | 参数                     | 默认值        | 说明                                                        |
 | ---------------------- | ---------- | --------------------------------------------------------- |
@@ -341,7 +281,7 @@ FIO 测试采用不同的工作方式：
 | `SYSBENCH_THREADS`     | `4`        | sysbench 线程数                                              |
 | `SYSBENCH_DURATION`    | `DURATION` | sysbench IO 测试时长                                          |
 
-##### fio 参数
+#### fio 参数
 
 | 参数             | 默认值        | 说明                                                                             |
 | -------------- | ---------- | ------------------------------------------------------------------------------ |
@@ -354,7 +294,7 @@ FIO 测试采用不同的工作方式：
 | `FIO_IOENGINE` | `libaio`   | fio IO 引擎（libaio/sync/posixaio）                                                |
 | `FIO_DURATION` | `DURATION` | fio 测试时长                                                                       |
 
-##### Threads 参数
+#### Threads 参数
 
 | 参数               | 默认值              | 说明                                  |
 | ---------------- | ---------------- | ----------------------------------- |
@@ -362,7 +302,7 @@ FIO 测试采用不同的工作方式：
 | `THREADS_YIELDS` | `100`            | 每个线程的 yield 次数                      |
 | `THREADS_LOCKS`  | `4`              | 锁数量                                 |
 
-##### Memory 参数
+#### Memory 参数
 
 | 参数                  | 默认值    | 说明                      |
 | ------------------- | ------ | ----------------------- |
@@ -371,22 +311,22 @@ FIO 测试采用不同的工作方式：
 | `MEMORY_TOTAL_SIZE` | `20G`  | 内存测试总大小（测试数据量）          |
 | `MEMORY_OPER`       | `read` | 内存操作类型（read/write）      |
 
-##### Mutex 参数
+#### Mutex 参数
 
 | 参数              | 默认值    | 说明            |
 | --------------- | ------ | ------------- |
 | `MUTEX_THREADS` | `0`    | 互斥锁测试线程数，0=自动 |
 | `MUTEX_NUM`     | `1024` | 互斥锁数量         |
 
-##### 通用参数
+#### 通用参数
 
-| 参数              | 默认值                         | 说明                         |
-| --------------- | --------------------------- | -------------------------- |
-| `IO_PATH`       | `$HOME/oscheckperf/io_test` | 测试文件目录（替代IO\_TEST\_PATH）   |
-| `IO_TOTAL_SIZE` | `1G`                        | 测试文件总大小（sysbench 和 fio 通用） |
-| `IO_TOOL`       | `sysbench`                  | IO 测试工具（sysbench/fio）      |
+| 参数              | 默认值                         | 说明                                   |
+| --------------- | --------------------------- | ------------------------------------ |
+| `IO_PATH`       | `$HOME/oscheckperf/io_test` | 测试文件目录，默认`$HOME/oscheckperf/io_test` |
+| `IO_TOTAL_SIZE` | `1G`                        | 测试文件总大小（sysbench 和 fio 通用）           |
+| `IO_TOOL`       | `sysbench`                  | IO 测试工具（sysbench/fio）                |
 
-##### 参数说明
+#### 参数说明
 
 **FIO\_FILE\_NUM 说明**：
 
@@ -417,7 +357,7 @@ FIO 测试采用不同的工作方式：
 | 文件类型            | 路径                              | 说明            | 用途        |
 | --------------- | ------------------------------- | ------------- | --------- |
 | **原始测试数据**      | `output/original_data_*.log`    | 所有测试的完整原始输出   | 问题排查、追溯   |
-| **命令输出结果**        | `output/data_*.log`             | 结构化的测试结果      | 数据处理、二次分析 |
+| **命令输出结果**      | `output/data_*.log`             | 结构化的测试结果      | 数据处理、二次分析 |
 | **最终报告**        | `output/report_benchmark_*.log` | 格式化的性能报告      | 直接查看、分享   |
 | **sysbench 输出** | `tmp/vb_fileio_*.txt`           | sysbench 文本输出 | 调试、详细分析   |
 | **fio 配置**      | `tmp/fio_*.fio`                 | fio 配置文件      | 调试配置      |
@@ -498,7 +438,7 @@ FIO 测试采用不同的工作方式：
 **A**:
 
 - **NETWORK\_MODE**：控制网络测试的模式
-  - `serial`：串行模式，使用server_list文件IP列表中第一个主机作为服务器，其余主机作为客户端依次测试
+  - `serial`：串行模式，使用server\_list文件IP列表中第一个主机作为服务器，其余主机作为客户端依次测试
     - 支持本地和远程服务器（自动检测）
     - 第一个主机为本机时直接执行，无需SSH开销
   - `matrix`：执行全矩阵交叉测试（每对服务器之间都进行测试）
@@ -522,3 +462,4 @@ FIO 测试采用不同的工作方式：
 # 矩阵模式，通过 parameter.conf设置 NETWORK_MODE=matrix
 ./oscheckperf network -f server_list  -p parameter.conf
 ```
+
