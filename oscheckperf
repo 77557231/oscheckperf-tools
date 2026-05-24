@@ -238,9 +238,9 @@ parse_cpu_report() {
     fi
     
     echo "  CPU Test Results" >> "$output_file"
-    echo "  -------------------------------------------------------------------------------------------------------------------------------------------" >> "$output_file"
-    printf "  %-16s %-12s %-14s %-14s %-14s %-18s %-18s %-15s\n" "Server IP" "Events/sec" "Avg Lat(ms)" "P95 Lat(ms)" "Max Lat(ms)" "Min Lat(ms)" "Sum Lat(ms)" "Fairness(avg)" >> "$output_file"
-    echo "  -------------------------------------------------------------------------------------------------------------------------------------------" >> "$output_file"
+    echo "  ---------------------------------------------------------------------------------------------------------------" >> "$output_file"
+    printf "  %-18s %-12s %-12s %-12s %-12s %-12s %-14s %-10s\n" "Server IP" "Events/sec" "Avg Lat(ms)" "P95 Lat(ms)" "Max Lat(ms)" "Min Lat(ms)" "Sum Lat(ms)" "Fairness(avg)" >> "$output_file"
+    echo "  ---------------------------------------------------------------------------------------------------------------" >> "$output_file"
     
     local in_section=false
     local current_server_ip=""
@@ -255,7 +255,7 @@ parse_cpu_report() {
     while IFS= read -r line; do
         if [[ "$line" =~ "CPU TEST RESULTS" ]]; then
             if [ "$in_section" = true ] && [ -n "$current_server_ip" ]; then
-                printf "  %-16s %-12s %-14s %-14s %-14s %-18s %-18s %-15s\n" "$current_server_ip" "${current_eps:-N/A}" "${current_avg_lat:-N/A}" "${current_p95_lat:-N/A}" "${current_max_lat:-N/A}" "${current_min_lat:-N/A}" "${current_sum_lat:-N/A}" "${current_fairness:-N/A}" >> "$output_file"
+                printf "  %-18s %-12s %-12s %-12s %-12s %-12s %-14s %-10s\n" "$current_server_ip" "${current_eps:-N/A}" "${current_avg_lat:-N/A}" "${current_p95_lat:-N/A}" "${current_max_lat:-N/A}" "${current_min_lat:-N/A}" "${current_sum_lat:-N/A}" "${current_fairness:-N/A}" >> "$output_file"
             fi
             in_section=true
             current_server_ip=$(echo "$line" | grep -oP 'Server: \K[0-9.]+' || echo "N/A")
@@ -268,7 +268,7 @@ parse_cpu_report() {
             current_fairness=""
         elif [[ "$line" =~ "MEMORY TEST RESULTS" || "$line" =~ "SYSBENCH FILEIO TEST RESULTS" || "$line" =~ "THREADS TEST RESULTS" || "$line" =~ "MUTEX TEST RESULTS" || "$line" =~ "NETWORK TEST RESULTS" ]]; then
             if [ "$in_section" = true ] && [ -n "$current_server_ip" ]; then
-                printf "  %-16s %-12s %-14s %-14s %-14s %-18s %-18s %-15s\n" "$current_server_ip" "${current_eps:-N/A}" "${current_avg_lat:-N/A}" "${current_p95_lat:-N/A}" "${current_max_lat:-N/A}" "${current_min_lat:-N/A}" "${current_sum_lat:-N/A}" "${current_fairness:-N/A}" >> "$output_file"
+                printf "  %-18s %-12s %-12s %-12s %-12s %-12s %-14s %-10s\n" "$current_server_ip" "${current_eps:-N/A}" "${current_avg_lat:-N/A}" "${current_p95_lat:-N/A}" "${current_max_lat:-N/A}" "${current_min_lat:-N/A}" "${current_sum_lat:-N/A}" "${current_fairness:-N/A}" >> "$output_file"
             fi
             in_section=false
         elif [ "$in_section" = true ]; then
@@ -291,7 +291,7 @@ parse_cpu_report() {
     done < "$input_file"
     
     if [ "$in_section" = true ] && [ -n "$current_server_ip" ]; then
-        printf "  %-16s %-12s %-14s %-14s %-14s %-18s %-18s %-15s\n" "$current_server_ip" "${current_eps:-N/A}" "${current_avg_lat:-N/A}" "${current_p95_lat:-N/A}" "${current_max_lat:-N/A}" "${current_min_lat:-N/A}" "${current_sum_lat:-N/A}" "${current_fairness:-N/A}" >> "$output_file"
+        printf "  %-18s %-12s %-12s %-12s %-12s %-12s %-14s %-10s\n" "$current_server_ip" "${current_eps:-N/A}" "${current_avg_lat:-N/A}" "${current_p95_lat:-N/A}" "${current_max_lat:-N/A}" "${current_min_lat:-N/A}" "${current_sum_lat:-N/A}" "${current_fairness:-N/A}" >> "$output_file"
     fi
 }
 
@@ -310,9 +310,9 @@ parse_memory_report() {
     fi
     
     echo "  Memory Test Results" >> "$output_file"
-    echo "  ----------------------------------------------------------------------------------------------------------------------------------------" >> "$output_file"
-    printf "  %-18s %-15s %-15s %-15s %-14s %-14s %-14s %-18s %-15s\n" "Server IP" "Ops/sec" "MiB/sec" "Avg Lat(ms)" "Min Lat(ms)" "Max Lat(ms)" "P95 Lat(ms)" "Sum Lat(ms)" "Fairness(avg)" >> "$output_file"
-    echo "  ----------------------------------------------------------------------------------------------------------------------------------------" >> "$output_file"
+    echo "  -----------------------------------------------------------------------------------------------------------------------" >> "$output_file"
+    printf "  %-18s %-12s %-12s %-12s %-10s %-10s %-10s %-12s %-10s\n" "Server IP" "Ops/sec" "MiB/sec" "Avg Lat(ms)" "Min Lat(ms)" "Max Lat(ms)" "P95 Lat(ms)" "Sum Lat(ms)" "Fairness(avg)" >> "$output_file"
+    echo "  -----------------------------------------------------------------------------------------------------------------------" >> "$output_file"
     
     local in_section=false
     local current_server_ip=""
@@ -328,7 +328,7 @@ parse_memory_report() {
     while IFS= read -r line; do
         if [[ "$line" =~ "MEMORY TEST RESULTS" ]]; then
             if [ "$in_section" = true ] && [ -n "$current_server_ip" ]; then
-                printf "  %-18s %-15s %-15s %-15s %-14s %-14s %-14s %-18s %-15s\n" "$current_server_ip" "${current_ops_sec:-N/A}" "${current_mib_sec:-N/A}" "${current_mem_avg_lat:-N/A}" "${current_mem_min_lat:-N/A}" "${current_mem_max_lat:-N/A}" "${current_mem_p95_lat:-N/A}" "${current_mem_sum_lat:-N/A}" "${current_mem_fairness:-N/A}" >> "$output_file"
+                printf "  %-18s %-12s %-12s %-12s %-10s %-10s %-10s %-12s %-10s\n" "$current_server_ip" "${current_ops_sec:-N/A}" "${current_mib_sec:-N/A}" "${current_mem_avg_lat:-N/A}" "${current_mem_min_lat:-N/A}" "${current_mem_max_lat:-N/A}" "${current_mem_p95_lat:-N/A}" "${current_mem_sum_lat:-N/A}" "${current_mem_fairness:-N/A}" >> "$output_file"
             fi
             in_section=true
             current_server_ip=$(echo "$line" | grep -oP 'Server: \K[0-9.]+' || echo "N/A")
@@ -342,7 +342,7 @@ parse_memory_report() {
             current_mem_fairness=""
         elif [[ "$line" =~ "SYSBENCH FILEIO TEST RESULTS" || "$line" =~ "THREADS TEST RESULTS" || "$line" =~ "MUTEX TEST RESULTS" || "$line" =~ "NETWORK TEST RESULTS" ]]; then
             if [ "$in_section" = true ] && [ -n "$current_server_ip" ]; then
-                printf "  %-18s %-15s %-15s %-15s %-14s %-14s %-14s %-18s %-15s\n" "$current_server_ip" "${current_ops_sec:-N/A}" "${current_mib_sec:-N/A}" "${current_mem_avg_lat:-N/A}" "${current_mem_min_lat:-N/A}" "${current_mem_max_lat:-N/A}" "${current_mem_p95_lat:-N/A}" "${current_mem_sum_lat:-N/A}" "${current_mem_fairness:-N/A}" >> "$output_file"
+                printf "  %-18s %-12s %-12s %-12s %-10s %-10s %-10s %-12s %-10s\n" "$current_server_ip" "${current_ops_sec:-N/A}" "${current_mib_sec:-N/A}" "${current_mem_avg_lat:-N/A}" "${current_mem_min_lat:-N/A}" "${current_mem_max_lat:-N/A}" "${current_mem_p95_lat:-N/A}" "${current_mem_sum_lat:-N/A}" "${current_mem_fairness:-N/A}" >> "$output_file"
             fi
             in_section=false
         elif [ "$in_section" = true ]; then
@@ -367,7 +367,7 @@ parse_memory_report() {
     done < "$input_file"
     
     if [ "$in_section" = true ] && [ -n "$current_server_ip" ]; then
-        printf "  %-18s %-15s %-15s %-15s %-14s %-14s %-14s %-18s %-15s\n" "$current_server_ip" "${current_ops_sec:-N/A}" "${current_mib_sec:-N/A}" "${current_mem_avg_lat:-N/A}" "${current_mem_min_lat:-N/A}" "${current_mem_max_lat:-N/A}" "${current_mem_p95_lat:-N/A}" "${current_mem_sum_lat:-N/A}" "${current_mem_fairness:-N/A}" >> "$output_file"
+        printf "  %-18s %-12s %-12s %-12s %-10s %-10s %-10s %-12s %-10s\n" "$current_server_ip" "${current_ops_sec:-N/A}" "${current_mib_sec:-N/A}" "${current_mem_avg_lat:-N/A}" "${current_mem_min_lat:-N/A}" "${current_mem_max_lat:-N/A}" "${current_mem_p95_lat:-N/A}" "${current_mem_sum_lat:-N/A}" "${current_mem_fairness:-N/A}" >> "$output_file"
     fi
 }
 
@@ -386,9 +386,9 @@ parse_threads_report() {
     fi
     
     echo "  Threads Test Results" >> "$output_file"
-    echo "  ---------------------------------------------------------------------------------------------------------------------------" >> "$output_file"
-    printf "  %-18s %-15s %-18s %-18s %-14s %-14s %-18s %-15s\n" "Server IP" "Events/sec" "Avg Latency (ms)" "P95 Latency (ms)" "Min Lat(ms)" "Max Lat(ms)" "Sum Lat(ms)" "Fairness(avg)" >> "$output_file"
-    echo "  ---------------------------------------------------------------------------------------------------------------------------" >> "$output_file"
+    echo "  ------------------------------------------------------------------------------------------------------------" >> "$output_file"
+    printf "  %-18s %-12s %-12s %-12s %-10s %-10s %-12s %-10s\n" "Server IP" "Events/sec" "Avg Lat(ms)" "P95 Lat(ms)" "Min Lat(ms)" "Max Lat(ms)" "Sum Lat(ms)" "Fairness(avg)" >> "$output_file"
+    echo "  ------------------------------------------------------------------------------------------------------------" >> "$output_file"
     
     local in_section=false
     local current_server_ip=""
@@ -407,7 +407,7 @@ parse_threads_report() {
         if [[ "$line" =~ "THREADS TEST RESULTS" ]]; then
             if [ "$in_section" = true ] && [ -n "$current_server_ip" ]; then
                 current_eps=$(calc_eps "$current_events" "$current_time")
-                printf "  %-18s %-15s %-18s %-18s %-14s %-14s %-18s %-15s\n" "$current_server_ip" "${current_eps:-N/A}" "${current_threads_avg_lat:-N/A}" "${current_threads_p95_lat:-N/A}" "${current_threads_min_lat:-N/A}" "${current_threads_max_lat:-N/A}" "${current_threads_sum_lat:-N/A}" "${current_threads_fairness:-N/A}" >> "$output_file"
+                printf "  %-18s %-12s %-12s %-12s %-10s %-10s %-12s %-10s\n" "$current_server_ip" "${current_eps:-N/A}" "${current_threads_avg_lat:-N/A}" "${current_threads_p95_lat:-N/A}" "${current_threads_min_lat:-N/A}" "${current_threads_max_lat:-N/A}" "${current_threads_sum_lat:-N/A}" "${current_threads_fairness:-N/A}" >> "$output_file"
             fi
             in_section=true
             current_server_ip=$(echo "$line" | grep -oP 'Server: \K[0-9.]+' || echo "N/A")
@@ -425,7 +425,7 @@ parse_threads_report() {
             last_testing_ip=$(echo "$line" | grep -oP 'Testing server [0-9]+/[0-9]+: \K[0-9.]+' || echo "")
             if [ "$in_section" = true ] && [ -n "$current_server_ip" ]; then
                 current_eps=$(calc_eps "$current_events" "$current_time")
-                printf "  %-18s %-15s %-18s %-18s %-14s %-14s %-18s %-15s\n" "$current_server_ip" "${current_eps:-N/A}" "${current_threads_avg_lat:-N/A}" "${current_threads_p95_lat:-N/A}" "${current_threads_min_lat:-N/A}" "${current_threads_max_lat:-N/A}" "${current_threads_sum_lat:-N/A}" "${current_threads_fairness:-N/A}" >> "$output_file"
+                printf "  %-18s %-12s %-12s %-12s %-10s %-10s %-12s %-10s\n" "$current_server_ip" "${current_eps:-N/A}" "${current_threads_avg_lat:-N/A}" "${current_threads_p95_lat:-N/A}" "${current_threads_min_lat:-N/A}" "${current_threads_max_lat:-N/A}" "${current_threads_sum_lat:-N/A}" "${current_threads_fairness:-N/A}" >> "$output_file"
             fi
             in_section=false
             current_server_ip=""
@@ -453,7 +453,7 @@ parse_threads_report() {
         elif [ "$in_section" = true ] && [[ "$line" =~ "TEST RESULTS" ]] && [[ ! "$line" =~ "THREADS TEST RESULTS" ]] && [[ ! "$line" =~ "Threads test summary:" ]]; then
             if [ -n "$current_server_ip" ]; then
                 current_eps=$(calc_eps "$current_events" "$current_time")
-                printf "  %-18s %-15s %-18s %-18s %-14s %-14s %-18s %-15s\n" "$current_server_ip" "${current_eps:-N/A}" "${current_threads_avg_lat:-N/A}" "${current_threads_p95_lat:-N/A}" "${current_threads_min_lat:-N/A}" "${current_threads_max_lat:-N/A}" "${current_threads_sum_lat:-N/A}" "${current_threads_fairness:-N/A}" >> "$output_file"
+                printf "  %-18s %-12s %-12s %-12s %-10s %-10s %-12s %-10s\n" "$current_server_ip" "${current_eps:-N/A}" "${current_threads_avg_lat:-N/A}" "${current_threads_p95_lat:-N/A}" "${current_threads_min_lat:-N/A}" "${current_threads_max_lat:-N/A}" "${current_threads_sum_lat:-N/A}" "${current_threads_fairness:-N/A}" >> "$output_file"
             fi
             in_section=false
             current_server_ip=""
@@ -480,7 +480,7 @@ parse_threads_report() {
     
     if [ "$in_section" = true ] && [ -n "$current_server_ip" ]; then
         current_eps=$(calc_eps "$current_events" "$current_time")
-        printf "  %-18s %-15s %-18s %-18s %-14s %-14s %-18s %-15s\n" "$current_server_ip" "${current_eps:-N/A}" "${current_threads_avg_lat:-N/A}" "${current_threads_p95_lat:-N/A}" "${current_threads_min_lat:-N/A}" "${current_threads_max_lat:-N/A}" "${current_threads_sum_lat:-N/A}" "${current_threads_fairness:-N/A}" >> "$output_file"
+        printf "  %-18s %-12s %-12s %-12s %-10s %-10s %-12s %-10s\n" "$current_server_ip" "${current_eps:-N/A}" "${current_threads_avg_lat:-N/A}" "${current_threads_p95_lat:-N/A}" "${current_threads_min_lat:-N/A}" "${current_threads_max_lat:-N/A}" "${current_threads_sum_lat:-N/A}" "${current_threads_fairness:-N/A}" >> "$output_file"
     fi
 }
 
@@ -499,9 +499,9 @@ parse_mutex_report() {
     fi
     
     echo "  Mutex Test Results" >> "$output_file"
-    echo "  ------------------------------------------------------------------------------------------------------------------------------" >> "$output_file"
-    printf "  %-18s %-15s %-15s %-18s %-14s %-14s %-14s %-18s\n" "Server IP" "Transactions" "TPS" "Avg Lat(ms)" "Min Lat(ms)" "Max Lat(ms)" "P95 Lat(ms)" "Sum Lat(ms)" >> "$output_file"
-    echo "  ------------------------------------------------------------------------------------------------------------------------------" >> "$output_file"
+    echo "  ------------------------------------------------------------------------------------------------------------" >> "$output_file"
+    printf "  %-18s %-12s %-12s %-12s %-12s %-12s %-14s %-12s\n" "Server IP" "Transactions" "TPS" "Avg Lat(ms)" "Min Lat(ms)" "Max Lat(ms)" "P95 Lat(ms)" "Sum Lat(ms)" >> "$output_file"
+    echo "  ------------------------------------------------------------------------------------------------------------" >> "$output_file"
     
     local in_section=false
     local current_server_ip=""
@@ -521,14 +521,14 @@ parse_mutex_report() {
             last_testing_ip=$(echo "$line" | grep -oP 'Testing server [0-9]+/[0-9]+: \K[0-9.]+' || echo "")
             if [ "$in_section" = true ] && [ -n "$current_server_ip" ]; then
                 current_tps=$(calc_eps "$current_events" "$current_time")
-                printf "  %-18s %-15s %-15s %-18s %-14s %-14s %-14s %-18s\n" "$current_server_ip" "${current_events:-N/A}" "${current_tps:-N/A}" "${current_mutex_avg_lat:-N/A}" "${current_mutex_min_lat:-N/A}" "${current_mutex_max_lat:-N/A}" "${current_mutex_p95_lat:-N/A}" "${current_mutex_sum_lat:-N/A}" >> "$output_file"
+                printf "  %-18s %-12s %-12s %-12s %-12s %-12s %-14s %-12s\n" "$current_server_ip" "${current_events:-N/A}" "${current_tps:-N/A}" "${current_mutex_avg_lat:-N/A}" "${current_mutex_min_lat:-N/A}" "${current_mutex_max_lat:-N/A}" "${current_mutex_p95_lat:-N/A}" "${current_mutex_sum_lat:-N/A}" >> "$output_file"
             fi
             in_section=false
             current_server_ip=""
         elif [[ "$line" =~ "MUTEX TEST RESULTS" ]]; then
             if [ "$in_section" = true ] && [ -n "$current_server_ip" ]; then
                 current_tps=$(calc_eps "$current_events" "$current_time")
-                printf "  %-18s %-15s %-15s %-18s %-14s %-14s %-14s %-18s\n" "$current_server_ip" "${current_events:-N/A}" "${current_tps:-N/A}" "${current_mutex_avg_lat:-N/A}" "${current_mutex_min_lat:-N/A}" "${current_mutex_max_lat:-N/A}" "${current_mutex_p95_lat:-N/A}" "${current_mutex_sum_lat:-N/A}" >> "$output_file"
+                printf "  %-18s %-12s %-12s %-12s %-12s %-12s %-14s %-12s\n" "$current_server_ip" "${current_events:-N/A}" "${current_tps:-N/A}" "${current_mutex_avg_lat:-N/A}" "${current_mutex_min_lat:-N/A}" "${current_mutex_max_lat:-N/A}" "${current_mutex_p95_lat:-N/A}" "${current_mutex_sum_lat:-N/A}" >> "$output_file"
             fi
             in_section=true
             current_server_ip=$(echo "$line" | grep -oP 'Server: \K[0-9.]+' || echo "N/A")
@@ -556,7 +556,7 @@ parse_mutex_report() {
         elif [ "$in_section" = true ] && [[ "$line" =~ "TEST RESULTS" ]] && [[ ! "$line" =~ "MUTEX TEST RESULTS" ]] && [[ ! "$line" =~ "Mutex test summary:" ]]; then
             if [ -n "$current_server_ip" ]; then
                 current_tps=$(calc_eps "$current_events" "$current_time")
-                printf "  %-18s %-15s %-15s %-18s %-14s %-14s %-14s %-18s\n" "$current_server_ip" "${current_events:-N/A}" "${current_tps:-N/A}" "${current_mutex_avg_lat:-N/A}" "${current_mutex_min_lat:-N/A}" "${current_mutex_max_lat:-N/A}" "${current_mutex_p95_lat:-N/A}" "${current_mutex_sum_lat:-N/A}" >> "$output_file"
+                printf "  %-18s %-12s %-12s %-12s %-12s %-12s %-14s %-12s\n" "$current_server_ip" "${current_events:-N/A}" "${current_tps:-N/A}" "${current_mutex_avg_lat:-N/A}" "${current_mutex_min_lat:-N/A}" "${current_mutex_max_lat:-N/A}" "${current_mutex_p95_lat:-N/A}" "${current_mutex_sum_lat:-N/A}" >> "$output_file"
             fi
             in_section=false
         elif [ "$in_section" = true ]; then
@@ -582,7 +582,7 @@ parse_mutex_report() {
     
     if [ "$in_section" = true ] && [ -n "$current_server_ip" ]; then
         current_tps=$(calc_eps "$current_events" "$current_time")
-        printf "  %-18s %-15s %-15s %-18s %-14s %-14s %-14s %-18s\n" "$current_server_ip" "${current_events:-N/A}" "${current_tps:-N/A}" "${current_mutex_avg_lat:-N/A}" "${current_mutex_min_lat:-N/A}" "${current_mutex_max_lat:-N/A}" "${current_mutex_p95_lat:-N/A}" "${current_mutex_sum_lat:-N/A}" >> "$output_file"
+        printf "  %-18s %-12s %-12s %-12s %-12s %-12s %-14s %-12s\n" "$current_server_ip" "${current_events:-N/A}" "${current_tps:-N/A}" "${current_mutex_avg_lat:-N/A}" "${current_mutex_min_lat:-N/A}" "${current_mutex_max_lat:-N/A}" "${current_mutex_p95_lat:-N/A}" "${current_mutex_sum_lat:-N/A}" >> "$output_file"
     fi
 }
 
