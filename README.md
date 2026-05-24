@@ -1,6 +1,6 @@
 # oscheckperf - 系统性能基准测试工具
 
-**oscheckperf** 是一款专为数据库场景设计的系统级性能基准测试工具，提供一站式的服务器硬件性能评估能力。通过测试 CPU、内存、磁盘 IO、网络吞吐、线程调度、互斥锁六大核心维度，帮助用户快速评估服务器性能边界，识别潜在瓶颈。
+**oscheckperf** 是一款专为数据库场景设计的系统级性能基准测试工具，支持单机和多机，提供一站式的服务器硬件性能评估能力。通过测试 CPU、内存、磁盘 IO、网络吞吐、线程调度、互斥锁六大核心维度，帮助用户快速评估服务器性能边界，识别潜在瓶颈。
 
 ## 快速开始
 
@@ -11,26 +11,26 @@
 #### CentOS 系统为例
 
 ```bash
-#  （fio可选、多IP压测）
-sudo yum install -y sysbench iperf3 fio jq 
+# 基础安装包
+yum install -y sysbench iperf3 fio jq
 
 # 非免密环境需额外安装
-sudo yum install -y sshpass
+yum install -y sshpass
 
 # 扩展查看更多硬件资源安装
-sudo yum install ethtool numactl
+yum install ethtool numactl
 ```
 
 **方式二：工具自动编译安装**
 
 **编译安装说明**：
 
-编译安装仅需在\*\*编译机（脚本所在服务器）上安装编译依赖，其它远程服务器无需安装编译工具，工具会自动推送。
+编译安装仅需在\*\*编译机（脚本所在服务器）上安装编译依赖，其它远程服务器无需安装编译工具，工具会自动推送到多机。
 
 > **重要**：必须先手动安装编译依赖库：
 >
-> - CentOS/RHEL: `sudo yum install -y automake autoconf libtool gcc make libmnl-devel libaio-devel`
-> - Ubuntu/Debian: `sudo apt-get install -y automake autoconf libtool libtool-bin gcc make libmnl-dev libaio-dev`
+> - CentOS/RHEL: `yum install -y automake autoconf libtool gcc make libmnl-devel libaio-devel`
+> - Ubuntu/Debian: `apt-get install -y automake autoconf libtool libtool-bin gcc make libmnl-dev libaio-dev`
 
 **编译安装组件**
 
@@ -51,7 +51,7 @@ sudo yum install ethtool numactl
 
 ```bash
 #单机运行
-# 所有测试项目（默认值）
+# 等同于执行./oscheckperf all 根据默认值执行所有测试项（不包括网络）
 ./oscheckperf
 # 单机运行，例如：
 ./oscheckperf cpu           # 仅 CPU 测试
@@ -98,10 +98,9 @@ sudo yum install ethtool numactl
 ```bash
 # server_list 文件内容（格式：IP username password，支持多空格或 tab 分隔）
 # 密码可以包含任意特殊字符（包括冒号）
-IP username xxxx
-IP username "p@ss:word:with:colons"
-IP username "p@ss word with spaces"
-192.168.1.103   root    secret123    # 多空格或 tab 也支持
+192.168.1.101 username secret123 
+192.168.1.102 username secret123 
+192.168.1.103 username secret123
 ```
 
 **运行测试**：
@@ -120,10 +119,9 @@ IP username "p@ss word with spaces"
 ./oscheckperf network -f server_list SSH_PORT=2222
 ```
 
-### 5. 干运行模式（预览底层运行的原始命令）
+### 5. 干运行模式（预览底层运行的原始命令，不实际执行）
 
 ```bash
-
 # 预览指定测试命令
 ./oscheckperf io --dry-run
 
@@ -131,9 +129,7 @@ IP username "p@ss word with spaces"
 ./oscheckperf network -f server_list --dry-run
 ```
 
-### 6. 查看报告
-
-测试完成后，报告默认保存在 `./output` 目录：
+<br />
 
 ```bash
 # 查看最终性能报告
@@ -316,17 +312,13 @@ cat output/original_data_*_all_results.log
 - **TPS**：每秒事务数（越高越好）
 - **latency**：锁等待延迟（越低越好）
 
-### 输出文件说明
+### 输出文件说明（`output` 可通过参数修改）：
 
-| 文件类型            | 路径                              | 说明            | 用途        |
-| --------------- | ------------------------------- | ------------- | --------- |
-| **原始测试数据**      | `output/original_data_*.log`    | 所有测试的完整原始输出   | 问题排查、追溯   |
-| **命令输出结果**      | `output/data_*.log`             | 结构化的测试结果      | 数据处理、二次分析 |
-| **最终报告**        | `output/report_benchmark_*.log` | 格式化的性能报告      | 直接查看、分享   |
-| **sysbench 输出** | `tmp/vb_fileio_*.txt`           | sysbench 文本输出 | 调试、详细分析   |
-| **fio 配置**      | `tmp/fio_*.fio`                 | fio 配置文件      | 调试配置      |
-| **fio JSON**    | `tmp/fio_*_result_*.json`       | fio JSON 结果   | 程序解析      |
-| **网络 JSON**     | `tmp/network_*.json`            | 网络测试结果        | 程序解析      |
+| 文件类型       | 路径                              | 说明          | 用途        |
+| ---------- | ------------------------------- | ----------- | --------- |
+| **原始测试数据** | `output/original_data_*.log`    | 所有测试的完整原始输出 | 问题排查、追溯   |
+| **命令输出结果** | `output/data_*.log`             | 结构化的测试结果    | 数据处理、二次分析 |
+| **最终报告**   | `output/report_benchmark_*.log` | 格式化的性能报告    | 直接查看、分享   |
 
 ## 实用场景示例
 
@@ -383,15 +375,14 @@ cat output/original_data_*_all_results.log
 
 ### Q1: 测试需要 root 权限吗？
 
-**A**: 大多数测试不需要 root 权限。脚本支持普通用户运行，但以下情况建议使用 `sudo`：
+**A**: 压测不需要root权限，以下情况需要：
 
-- 部分硬件信息采集需要root ，如：dmidecode 查看内存槽信息，没有root权限会不显示
+- 部分硬件信息采集需要root ，如：dmidecode 查看内存槽信息，没有root权限会不显示相关内容
 - 安装依赖包/或者编译依赖包时需要 root 权限
-- 建议在测试前使用 `./oscheckperf check` 检查系统环境
 
-### Q2: 测试会删除数据吗？
+### Q2: IO测试完会删除测试文件吗？
 
-**A**: 测试文件仅写入指定目录（默认 `$HOME/oscheckperf/io_test`），测试完成后可自动清理
+**A**: IO压测写入指定IO\_PATH参数目录（默认 `$HOME/oscheckperf/io_test`）测试完成后会自动清理
 
 ### Q3: 如何自定义 IO 测试路径？
 
@@ -420,10 +411,7 @@ cat output/original_data_*_all_results.log
 # 串行模式，每个测试使用 4 个并行连接
 ./oscheckperf network -f server_list NETWORK_MODE=serial NETWORK_PARALLEL=4
 
-# 矩阵模式
-./oscheckperf network -f server_list NETWORK_MODE=matrix 
-
-# 矩阵模式，通过 parameter.conf设置 NETWORK_MODE=matrix
+# 矩阵模式，通过参数或这通过配置文件设置 NETWORK_MODE=matrix
 ./oscheckperf network -f server_list  -p parameter.conf
 ```
 
