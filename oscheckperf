@@ -1,7 +1,7 @@
 #!/bin/bash
 #--------------------------------------------------------------------------------
 #-- File name:   oscheckperf
-#-- Version:     v1.1.0
+#-- Version:     v1.1.1
 #-- Purpose:     Database System Benchmark Tool
 #-- Author:      Wanping Pan 
 #-- Description: One-click system benchmarking tool, supports configuration via config file or command line parameters
@@ -15,10 +15,27 @@
 # ================================================================================
 
 # Base directory for all oscheckperf data - can be modified here for all paths
-BASE_DIR=""
+BASE_DIR="${BASE_DIR:-$HOME/oscheckperf}"
+
+# Set library search path to include bundled libs as fallback
+if [ -d "$BASE_DIR/lib" ]; then
+    if [ -z "$LD_LIBRARY_PATH" ]; then
+        export LD_LIBRARY_PATH="$BASE_DIR/lib"
+    else
+        # Avoid duplicate paths
+        if [[ ":$LD_LIBRARY_PATH:" != *":$BASE_DIR/lib:"* ]]; then
+            export LD_LIBRARY_PATH="$BASE_DIR/lib:$LD_LIBRARY_PATH"
+        fi
+    fi
+fi
+
+# Set PATH to prioritize bundled tools (fio, sysbench, iperf3)
+if [[ ":$PATH:" != *":$BASE_DIR/bin:"* ]]; then
+    export PATH="$BASE_DIR/bin:$PATH"
+fi
 
 # Temporary files directory (logs, intermediate data, network test results)
-TMP_DIR=""
+TMP_DIR="$BASE_DIR/tmp"
 
 # IO test data directory (sysbench/fio test files)
 IO_PATH=""
@@ -693,11 +710,13 @@ build_auth_prefix() {
 }
 
 # Get SSH command prefix for a server
-# Returns: SSH command prefix (with or without sshpass)
+# Returns: SSH command prefix (with or without sshpass), with remote PATH/LD_LIBRARY_PATH set
 # Side effect: sets SSHPASS environment variable if password auth is used
 get_ssh_command() {
     set_ssh_password "$1"
-    build_auth_prefix "$1" "ssh"
+    local ssh_prefix=$(build_auth_prefix "$1" "ssh")
+    # Inject PATH and LD_LIBRARY_PATH on remote side to ensure bundled tools are found
+    echo "${ssh_prefix} PATH=$BASE_DIR/bin:\$PATH LD_LIBRARY_PATH=$BASE_DIR/lib:\$LD_LIBRARY_PATH"
 }
 
 # Get SCP command prefix for a server
@@ -829,7 +848,7 @@ parse_args() {
                 exit 0
                 ;;
             --version)
-                echo "Version: 1.1.0"
+                echo "Version: 1.1.1"
                 exit 0
                 ;;
             --dry-run)
@@ -7113,20 +7132,10 @@ main() {
     DURATION="${DURATION:-60}"
     
     # Set defaults for global path/port parameters if not set by config file
-    BASE_DIR="${BASE_DIR:-$HOME/oscheckperf}"
     OUTPUT_DIR="${OUTPUT_DIR:-./output}"
     NETWORK_PORT="${NETWORK_PORT:-25201}"
     SSH_PORT="${SSH_PORT:-22}"
     IO_PATH="${IO_PATH:-$BASE_DIR/io_test}"
-    TMP_DIR="$BASE_DIR/tmp"
-    
-    # Set library search path to include bundled libs as fallback
-    if [ -d "$BASE_DIR/lib" ]; then
-        export LD_LIBRARY_PATH="$LD_LIBRARY_PATH:$BASE_DIR/lib"
-    fi
-    
-    # Set PATH to prioritize bundled tools (fio, sysbench, iperf3)
-    export PATH="$BASE_DIR/bin:$PATH"
     
     # Save config file ENABLED flags BEFORE parse_args resets them
     local config_cpu_enabled="${CPU_ENABLED:-false}"
@@ -7915,12 +7924,21 @@ check_build_dependencies() {
         fi
     done
     
-    # Check libmnl library
-    if ! ldconfig -p | grep -q "libmnl"; then
+    # Check libmnl library using pkg-config (cross-platform)
+    if ! pkg-config --exists libmnl; then
         if [ $is_ubuntu -eq 1 ]; then
             missing+=("libmnl-dev")
         else
             missing+=("libmnl-devel")
+        fi
+    fi
+
+    # Check libaio library (for fio libaio engine) using pkg-config or header check
+    if ! pkg-config --exists libaio && [ ! -f /usr/include/libaio.h ]; then
+        if [ $is_ubuntu -eq 1 ]; then
+            missing+=("libaio-dev")
+        else
+            missing+=("libaio-devel")
         fi
     fi
     
@@ -7928,12 +7946,12 @@ check_build_dependencies() {
         echo "  ✗ Error: Missing build dependencies: ${missing[*]}"
         echo "    Please install dependencies manually:"
         if command -v yum &> /dev/null; then
-            echo "      sudo yum install -y automake autoconf libtool gcc make libmnl-devel"
+            echo "      sudo yum install -y automake autoconf libtool gcc make libmnl-devel libaio-devel"
         elif command -v apt-get &> /dev/null; then
-            echo "      sudo apt-get install -y automake autoconf libtool libtool-bin gcc make libmnl-dev"
+            echo "      sudo apt-get install -y automake autoconf libtool libtool-bin gcc make libmnl-dev libaio-dev"
         else
-            echo "      - CentOS/RHEL: sudo yum install -y automake autoconf libtool gcc make libmnl-devel"
-            echo "      - Ubuntu/Debian: sudo apt-get install -y automake autoconf libtool libtool-bin gcc make libmnl-dev"
+            echo "      - CentOS/RHEL: sudo yum install -y automake autoconf libtool gcc make libmnl-devel libaio-devel"
+            echo "      - Ubuntu/Debian: sudo apt-get install -y automake autoconf libtool libtool-bin gcc make libmnl-dev libaio-dev"
         fi
         return 1
     fi
@@ -8228,7 +8246,7 @@ install_fio() {
     
     echo "  Checking build dependencies..."
     if ! command -v gcc &> /dev/null || ! command -v make &> /dev/null; then
-        install_build_dependencies "gcc make" "gcc make" "fio"
+        install_build_dependencies "gcc make libaio-devel" "gcc make libaio-dev" "fio"
     else
         echo "  Build dependencies already installed"
     fi

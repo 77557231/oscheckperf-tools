@@ -67,8 +67,8 @@ sudo yum install ethtool numactl
 
 > **重要**：必须先手动安装编译依赖库：
 >
-> - CentOS/RHEL: `sudo yum install -y automake autoconf libtool gcc make libmnl-devel`
-> - Ubuntu/Debian: `sudo apt-get install -y automake autoconf libtool libtool-bin gcc make libmnl-dev`
+> - CentOS/RHEL: `sudo yum install -y automake autoconf libtool gcc make libmnl-devel libaio-devel`
+> - Ubuntu/Debian: `sudo apt-get install -y automake autoconf libtool libtool-bin gcc make libmnl-dev libaio-dev`
 
 **编译安装组件**
 
