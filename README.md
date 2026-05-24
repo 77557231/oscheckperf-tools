@@ -25,12 +25,12 @@ yum install ethtool numactl
 
 **编译安装说明**：
 
-编译安装仅需在\*\*编译机（脚本所在服务器）上安装编译依赖，其它远程服务器无需安装编译工具，工具会自动推送到多机。
+编译安装仅需在**编译机（脚本所在服务器）上安装编译依赖，其它远程服务器无需安装编译工具，工具会自动推送到多机。
 
 > **重要**：必须先手动安装编译依赖库：
 >
-> - CentOS/RHEL: `yum install -y automake autoconf libtool gcc make libmnl-devel libaio-devel`
-> - Ubuntu/Debian: `apt-get install -y automake autoconf libtool libtool-bin gcc make libmnl-dev libaio-dev`
+> - CentOS/RHEL: `sudo yum install -y automake autoconf libtool gcc make libaio-devel pkg-config`
+> - Ubuntu/Debian: `sudo apt-get install -y automake autoconf libtool libtool-bin gcc make libaio-dev pkg-config`
 
 **编译安装组件**
 

@@ -7923,15 +7923,6 @@ check_build_dependencies() {
             missing+=("$dep")
         fi
     done
-    
-    # Check libmnl library using pkg-config (cross-platform)
-    if ! pkg-config --exists libmnl; then
-        if [ $is_ubuntu -eq 1 ]; then
-            missing+=("libmnl-dev")
-        else
-            missing+=("libmnl-devel")
-        fi
-    fi
 
     # Check libaio library (for fio libaio engine) using pkg-config or header check
     if ! pkg-config --exists libaio && [ ! -f /usr/include/libaio.h ]; then
@@ -7946,12 +7937,12 @@ check_build_dependencies() {
         echo "  ✗ Error: Missing build dependencies: ${missing[*]}"
         echo "    Please install dependencies manually:"
         if command -v yum &> /dev/null; then
-            echo "      sudo yum install -y automake autoconf libtool gcc make libmnl-devel libaio-devel"
+            echo "      sudo yum install -y automake autoconf libtool gcc make libaio-devel"
         elif command -v apt-get &> /dev/null; then
-            echo "      sudo apt-get install -y automake autoconf libtool libtool-bin gcc make libmnl-dev libaio-dev"
+            echo "      sudo apt-get install -y automake autoconf libtool libtool-bin gcc make libaio-dev"
         else
-            echo "      - CentOS/RHEL: sudo yum install -y automake autoconf libtool gcc make libmnl-devel libaio-devel"
-            echo "      - Ubuntu/Debian: sudo apt-get install -y automake autoconf libtool libtool-bin gcc make libmnl-dev libaio-dev"
+            echo "      - CentOS/RHEL: sudo yum install -y automake autoconf libtool gcc make libaio-devel"
+            echo "      - Ubuntu/Debian: sudo apt-get install -y automake autoconf libtool libtool-bin gcc make libaio-dev"
         fi
         return 1
     fi
@@ -8334,25 +8325,14 @@ install_ethtool() {
     echo "[Step 1/2] Compiling ethtool..."
     
     echo "  Checking build dependencies..."
-    # Check if libmnl-devel (RPM) or libmnl-dev (DEB) is installed
-    local has_libmnl_dev=false
-    if command -v rpm &> /dev/null && rpm -q libmnl-devel &> /dev/null; then
-        has_libmnl_dev=true
-    elif command -v dpkg &> /dev/null && dpkg -l libmnl-dev 2>/dev/null | grep -q "^ii"; then
-        has_libmnl_dev=true
-    fi
-    
-    if ! command -v gcc &> /dev/null || ! command -v make &> /dev/null || ! command -v automake &> /dev/null || ! command -v autoconf &> /dev/null || ! command -v libtool &> /dev/null || ! command -v pkg-config &> /dev/null || [ "$has_libmnl_dev" = false ]; then
-        install_build_dependencies "automake autoconf libtool gcc make pkg-config libmnl-devel" "automake autoconf libtool gcc make pkg-config libmnl-dev" "ethtool"
+    if ! command -v gcc &> /dev/null || ! command -v make &> /dev/null || ! command -v automake &> /dev/null || ! command -v autoconf &> /dev/null || ! command -v libtool &> /dev/null || ! command -v pkg-config &> /dev/null; then
+        install_build_dependencies "automake autoconf libtool gcc make pkg-config" "automake autoconf libtool gcc make pkg-config" "ethtool"
     else
         echo "  Build dependencies already installed"
     fi
     
-    compile_package "ethtool" "tools/ethtool-6.10.tar.gz" "ethtool-6.10" "--exec-prefix=$install_dir --sbindir=$install_dir/bin --bindir=$install_dir/bin" "true"
+    compile_package "ethtool" "tools/ethtool-6.10.tar.gz" "ethtool-6.10" "--exec-prefix=$install_dir --sbindir=$install_dir/bin --bindir=$install_dir/bin --disable-netlink" "true"
     local compile_result=$?
-    
-    # Copy runtime dependency libs to lib/ for distribution
-    copy_dependency_libs "libmnl.so.*"
     
     if command -v ethtool &> /dev/null; then
         echo "  ✓ ethtool version: $(ethtool --version 2>&1 | head -1)"
