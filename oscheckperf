@@ -1,7 +1,7 @@
 #!/bin/bash
 #--------------------------------------------------------------------------------
 #-- File name:   oscheckperf
-#-- Version:     v1.1.1
+#-- Version:     v1.1.2
 #-- Purpose:     Database System Benchmark Tool
 #-- Author:      Wanping Pan 
 #-- Description: One-click system benchmarking tool, supports configuration via config file or command line parameters
@@ -848,7 +848,7 @@ parse_args() {
                 exit 0
                 ;;
             --version)
-                echo "Version: 1.1.1"
+                echo "Version: 1.1.2"
                 exit 0
                 ;;
             --dry-run)
@@ -2846,7 +2846,7 @@ echo \"MOUNT_OPTIONS: \$(get_benchmark_mount_options)\"
 echo \"--- Network Advanced Info ---\"
 get_network_advanced_info"
         
-        local ssh_output=$(echo "$remote_script" | eval "$remote_ssh bash" 2>/dev/null)
+        local ssh_output=$(echo "$remote_script" | eval "$remote_ssh bash")
         echo "$ssh_output"
     fi
 }
@@ -3094,8 +3094,8 @@ run_command() {
     fi
     
     if [ -n "$output_file" ]; then
-        # Execute command and capture output
-        eval "$cmd" > "$output_file" 2>&1
+        # Execute command and capture output (stdout to file, stderr to terminal)
+        eval "$cmd" > "$output_file"
         local exit_code=$?
         
         return $exit_code
@@ -3425,7 +3425,7 @@ check_network() {
     echo "  Checking network connectivity..."
     
     # If can ping localhost, consider network OK
-    if ! ping -c 1 127.0.0.1 &> /dev/null; then
+    if ! ping -c 1 127.0.0.1 > /dev/null; then
         echo "Error: Network connectivity check failed"
         return 1
     else
@@ -3992,7 +3992,7 @@ bs=${bs}
 iodepth=${iodepth}
 numjobs=${numjobs}
 nrfiles=${file_num}
-filename="$IO_PATH/fio_test_${profile}_"
+filename=$IO_PATH/fio_test_${profile}_
 EOF
         
         # Show configuration file content (also shown in dry run mode)
@@ -4012,7 +4012,7 @@ EOF
             echo "[DRY RUN] Would execute: fio \"$fio_conf\" --output=\"$mixed_output\" --output-format=json,normal"
         else
             # Run fio once with both json and normal output
-            fio "$fio_conf" --output="$mixed_output" --output-format=json,normal > /dev/null 2>&1
+            fio "$fio_conf" --output="$mixed_output" --output-format=json,normal > /dev/null
             
             # Extract JSON section (everything from first { to last })
             awk 'BEGIN{found=0}{if($0~/^[{]/)found=1;if(found)print;if($0~/^[}]/)exit}' "$mixed_output" > "$json_output" 2>/dev/null
@@ -4424,7 +4424,7 @@ run_serial_network_test() {
             # Remote server: use SSH
             set_ssh_password "$server_ip"
             local server_ssh=$(get_ssh_command "$server_ip")
-            eval "$server_ssh 'iperf3 -s -p $port -D --idle-timeout $server_idle_timeout --rcv-timeout $server_rcv_timeout'" > /dev/null 2>&1
+            eval "$server_ssh 'iperf3 -s -p $port -D --idle-timeout $server_idle_timeout --rcv-timeout $server_rcv_timeout'"
             sleep 3
         fi
     fi
@@ -4679,7 +4679,7 @@ run_single_matrix_pair() {
     if [ "$DRY_RUN" = true ]; then
         echo "[DRY RUN] $dst_ssh 'iperf3 -s -p $port -D'"
     else
-        eval "$dst_ssh 'iperf3 -s -p $port -D'" > /dev/null 2>&1
+        eval "$dst_ssh 'iperf3 -s -p $port -D'"
         
         # Wait for remote server port to be ready
         if ! wait_for_iperf3_server "$dst_ssh" "$port" "true" 15 "true"; then
@@ -4796,7 +4796,7 @@ run_matrix_batch() {
                 local server_exit=$?
                 debug_log "SERVER_START_RESULT" "pair=$src|$dst" "port=$port" "exit_code=$server_exit" "output=$server_output"
             else
-                eval "$dst_ssh 'iperf3 -s -p $port -D --idle-timeout $server_idle_timeout --rcv-timeout $server_rcv_timeout'" > /dev/null 2>&1
+                eval "$dst_ssh 'iperf3 -s -p $port -D --idle-timeout $server_idle_timeout --rcv-timeout $server_rcv_timeout'"
             fi
             server_ports+=("$port")
             server_dsts+=("$dst")
@@ -4832,7 +4832,7 @@ run_matrix_batch() {
                     local port=$((base_port + pair_idx))
                     set_ssh_password "$dst"
                     local dst_ssh=$(get_ssh_command "$dst")
-                    eval "$dst_ssh 'iperf3 -s -p $port -D --idle-timeout $server_idle_timeout --rcv-timeout $server_rcv_timeout'" > /dev/null 2>&1
+                    eval "$dst_ssh 'iperf3 -s -p $port -D --idle-timeout $server_idle_timeout --rcv-timeout $server_rcv_timeout'"
                     pair_idx=$((pair_idx + 1))
                 done
                 sleep 2
@@ -5174,7 +5174,7 @@ run_matrix_network_test() {
             if [ "$DRY_RUN" = true ]; then
                 echo "[DRY RUN] $dst_ssh 'iperf3 -s -p $port -D --idle-timeout $server_idle_timeout --rcv-timeout $server_rcv_timeout'"
             else
-                eval "$dst_ssh 'iperf3 -s -p $port -D --idle-timeout $server_idle_timeout --rcv-timeout $server_rcv_timeout'" > /dev/null 2>&1
+                eval "$dst_ssh 'iperf3 -s -p $port -D --idle-timeout $server_idle_timeout --rcv-timeout $server_rcv_timeout'"
                 
                 # Wait for remote server port to be ready
                 if ! wait_for_iperf3_server "$dst_ssh" "$port" "true" 15 "true"; then
@@ -5503,7 +5503,7 @@ wait_for_iperf3_server() {
     
     while [ $waited -lt $timeout ]; do
         if [ "$is_remote" = "true" ]; then
-            if eval "$server_ssh 'netstat -tln 2>/dev/null | grep -q :$port || ss -tln 2>/dev/null | grep -q :$port'" > /dev/null 2>&1; then
+            if eval "$server_ssh 'netstat -tln 2>/dev/null | grep -q :$port || ss -tln 2>/dev/null | grep -q :$port'" > /dev/null; then
                 debug_log "IPERF3_SERVER_READY" "port=$port" "waited=${waited}s"
                 return 0
             fi
@@ -5524,7 +5524,7 @@ wait_for_iperf3_server() {
         # Print remote diagnostics for troubleshooting
         echo "    --- Remote diagnostics ---"
         local diag_cmd="echo '  iperf3 processes: '\$(ps aux 2>/dev/null | grep '[i]perf3' | wc -l); echo '  Port $port status: '\$(ss -tln 2>/dev/null | grep ':$port' || netstat -tln 2>/dev/null | grep ':$port' || echo '  not listening')"
-        eval "$server_ssh '$diag_cmd'" 2>/dev/null | sed 's/^/    /'
+        eval "$server_ssh '$diag_cmd'" | sed 's/^/    /'
         echo "    -----------------------------------"
     fi
     
@@ -6450,15 +6450,14 @@ EOF
                 declare -A fio_clat_avg
                 declare -A fio_iodepth_level
                 # Extended metrics for ctx and disk statistics
-                declare -A fio_ctx_read
-                declare -A fio_ctx_write
+                declare -A fio_ctx
                 declare -A fio_aggrios
                 declare -A fio_aggrticks
                 declare -A fio_aggrin_queue
                 declare -A fio_aggrutil
                 
                 # Pre-extract fio extended metrics from combined file
-                while IFS='|' read -r ip io_mode p99 disk cpu_usr cpu_sys slat clat iodepth ctx_r ctx_w aggrios aggrticks aggrinque aggrutil; do
+                while IFS='|' read -r ip io_mode p99 disk cpu_usr cpu_sys slat clat iodepth ctx aggrios aggrticks aggrinque aggrutil; do
                     if [[ "$ip" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]]; then
                         local key="${ip}_${io_mode}"
                         fio_p99_lat["$key"]="$p99"
@@ -6468,8 +6467,7 @@ EOF
                         fio_slat_avg["$key"]="$slat"
                         fio_clat_avg["$key"]="$clat"
                         fio_iodepth_level["$key"]="$iodepth"
-                        fio_ctx_read["$key"]="$ctx_r"
-                        fio_ctx_write["$key"]="$ctx_w"
+                        fio_ctx["$key"]="$ctx"
                         fio_aggrios["$key"]="$aggrios"
                         fio_aggrticks["$key"]="$aggrticks"
                         fio_aggrin_queue["$key"]="$aggrinque"
@@ -6477,7 +6475,7 @@ EOF
                     fi
                 done < <(awk 'BEGIN{OFS="|"} 
                     /RESULTS FROM SERVER:/ {match($0, /RESULTS FROM SERVER: ([0-9.]+)/, arr); current_server=arr[1]}
-                    /FIO TEST RESULTS/ {match($0, /Server: ([0-9.]+)/, arr); ip=arr[1]; if(ip=="") ip=current_server; match($0, /FIO TEST RESULTS \(([^)]+)\)/, mode_arr); io_mode=mode_arr[1]; p99="N/A"; disk="N/A"; cpu_usr="N/A"; cpu_sys="N/A"; slat="0"; clat="N/A"; iodepth="N/A"; ctx_r="N/A"; ctx_w="N/A"; aggrios="N/A"; aggrticks="N/A"; aggrinque="N/A"; aggrutil="N/A"; in_fio=1; ext_started=0} 
+                    /FIO TEST RESULTS/ {match($0, /Server: ([0-9.]+)/, arr); ip=arr[1]; if(ip=="") ip=current_server; match($0, /FIO TEST RESULTS \(([^)]+)\)/, mode_arr); io_mode=mode_arr[1]; p99="N/A"; disk="N/A"; cpu_usr="N/A"; cpu_sys="N/A"; slat="0"; clat="N/A"; iodepth="N/A"; ctx="N/A"; aggrios="N/A"; aggrticks="N/A"; aggrinque="N/A"; aggrutil="N/A"; in_fio=1; ext_started=0} 
                     in_fio && !ext_started && /slat \(usec\)/ {split($0, a, "avg="); split(a[2], b, ","); gsub(/ /, "", b[1]); slat=b[1]}
                     in_fio && !ext_started && /clat \(usec\)/ {split($0, a, "avg="); split(a[2], b, ","); gsub(/ /, "", b[1]); clat=b[1]}
                     in_fio && !ext_started && /IO depths/ {
@@ -6497,10 +6495,7 @@ EOF
                     in_fio && !ext_started && /cpu/ && /ctx=/ {
                         if(match($0, /usr=([0-9.]+)%/, m)) cpu_usr=m[1];
                         if(match($0, /sys=([0-9.]+)%/, m)) cpu_sys=m[1];
-                        if(match($0, /ctx=([0-9]+)/, m)) {
-                            if(io_mode ~ /read/) ctx_r=m[1];
-                            if(io_mode ~ /write/) ctx_w=m[1];
-                        }
+                        if(match($0, /ctx=([0-9]+)/, m)) ctx=m[1];
                     }
                     in_fio && !ext_started && /aggrios=/ {
                         if(match($0, /aggrios=([0-9\/]+)/, m)) aggrios=m[1];
@@ -6513,7 +6508,7 @@ EOF
                     in_fio && ext_started && /Disk Utilization:/ {disk=$3; sub(/%/, "", disk)} 
                     in_fio && ext_started && /CPU \(usr\):/ {cpu_usr=$3; sub(/%/, "", cpu_usr)} 
                     in_fio && ext_started && /CPU \(sys\):/ {cpu_sys=$3; sub(/%/, "", cpu_sys)}
-                    in_fio && ext_started && /^$/ && ip!="" {print ip "|" io_mode "|" p99 "|" disk "|" cpu_usr "|" cpu_sys "|" slat "|" clat "|" iodepth "|" ctx_r "|" ctx_w "|" aggrios "|" aggrticks "|" aggrinque "|" aggrutil; ip=""; in_fio=0}' "$combined_file")
+                    in_fio && ext_started && /^$/ && ip!="" {print ip "|" io_mode "|" p99 "|" disk "|" cpu_usr "|" cpu_sys "|" slat "|" clat "|" iodepth "|" ctx "|" aggrios "|" aggrticks "|" aggrinque "|" aggrutil; ip=""; in_fio=0}' "$combined_file")
                 
                 while IFS= read -r line; do
                     if [[ "$line" =~ "SYSBENCH FILEIO TEST RESULTS" ]]; then
@@ -6805,9 +6800,9 @@ EOF
                     if [ "$is_sysbench" = false ]; then
                         echo "" >> "$report_file"
                         echo "  # FIO Extended Metrics" >> "$report_file"
-                        echo "  -----------------------------------------------------------------------------------------------------------------------------------------------------------------------" >> "$report_file"
-                        printf "  %-15s %-10s %-11s %-8s %-9s %-9s %-8s %-8s %-6s %-12s %-12s %-14s %-14s %-8s %-8s\n" "Server IP" "slat(us)" "clat(us)" "IO Depth" "CPU(usr)" "CPU(sys)" "bw_min" "bw_max" "Mode" "ctx(read)" "ctx(write)" "aggrios" "aggrticks" "util" "aggrutil" >> "$report_file"
-                        echo "  -----------------------------------------------------------------------------------------------------------------------------------------------------------------------" >> "$report_file"
+                        echo "  -----------------------------------------------------------------------------------------------------------------------------------------" >> "$report_file"
+                        printf "  %-15s %-9s %-9s %-6s %-9s %-9s %-8s %-8s %-6s %-7s %-13s %-13s %-6s %-6s\n" "Server IP" "slat(us)" "clat(us)" "Depth" "CPU(usr)" "CPU(sys)" "bw_min" "bw_max" "Mode" "ctx" "aggrios" "aggrticks" "util" "aggrutil" >> "$report_file"
+                        echo "  -----------------------------------------------------------------------------------------------------------------------------------------" >> "$report_file"
                         
                         # Print extended metrics
                         while IFS='|' read -r server_ip read_iops write_iops total_iops read_bw write_bw total_bw avg_lat p95_lat min_lat max_lat io_mode fsync_iops tool; do
@@ -6823,8 +6818,7 @@ EOF
                             local cpu_sys="${fio_cpu_sys[$key]:-N/A}"
                             local b_min="${fio_bw_min[$server_ip]:-N/A}"
                             local b_max="${fio_bw_max[$server_ip]:-N/A}"
-                            local ctx_read="${fio_ctx_read[$key]:-N/A}"
-                            local ctx_write="${fio_ctx_write[$key]:-N/A}"
+                            local ctx="${fio_ctx[$key]:-N/A}"
                             local aggrios="${fio_aggrios[$key]:-N/A}"
                             local aggrticks="${fio_aggrticks[$key]:-N/A}"
                             local aggrutil="${fio_aggrutil[$key]:-N/A}"
@@ -6839,7 +6833,7 @@ EOF
                             local fmt_b_max=$(if [ "$b_max" != "N/A" ]; then awk "BEGIN {printf \"%.0f\", $b_max}" 2>/dev/null || echo "$b_max"; else echo "N/A"; fi)
                             local fmt_aggrutil=$(if [ "$aggrutil" != "N/A" ]; then awk "BEGIN {printf \"%.2f\", $aggrutil}" 2>/dev/null || echo "$aggrutil"; else echo "N/A"; fi)
                             
-                            printf "  %-15s %-10s %-11s %-8s %-9s %-9s %-8s %-8s %-6s %-12s %-12s %-14s %-14s %-8s %-8s\n" "$server_ip" "$fmt_slat" "$fmt_clat" "$iodepth" "$fmt_cpu_usr" "$fmt_cpu_sys" "$fmt_b_min" "$fmt_b_max" "$io_mode" "${ctx_read:-N/A}" "${ctx_write:-N/A}" "${aggrios:-N/A}" "${aggrticks:-N/A}" "$fmt_util" "$fmt_aggrutil" >> "$report_file"
+                            printf "  %-15s %-9s %-9s %-6s %-9s %-9s %-8s %-8s %-6s %-7s %-13s %-13s %-6s %-6s\n" "$server_ip" "$fmt_slat" "$fmt_clat" "$iodepth" "$fmt_cpu_usr" "$fmt_cpu_sys" "$fmt_b_min" "$fmt_b_max" "$io_mode" "${ctx:-N/A}" "${aggrios:-N/A}" "${aggrticks:-N/A}" "$fmt_util" "$fmt_aggrutil" >> "$report_file"
                         done < <(sort -t'|' -k1,1 "$results_temp_file")
                     fi
                     
