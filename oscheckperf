@@ -1269,10 +1269,18 @@ get_cpu_freq() {
             return
         fi
     fi
-    # Last fallback: BogoMIPS (not reliable on aarch64)
+    # Fallback to dmidecode (reliable on ARM servers like Kunpeng)
+    if command -v dmidecode &>/dev/null; then
+        freq=$(dmidecode -t processor 2>/dev/null | grep -i 'Current Speed' | head -1 | awk '{print $3}')
+        if [ -n "$freq" ] && [ "$freq" != "0" ]; then
+            awk "BEGIN {printf \"%.2f\", $freq / 1000}"
+            return
+        fi
+    fi
+    # Last fallback: BogoMIPS (not reliable on aarch64, use only when all else fails)
     if [ -f /proc/cpuinfo ]; then
         freq=$(grep -m 1 'BogoMIPS' /proc/cpuinfo | awk '{print $3}')
-        if [ -n "$freq" ]; then
+        if [ -n "$freq" ] && [ "$freq" -gt 1000 ] 2>/dev/null; then
             awk "BEGIN {printf \"%.2f\", $freq / 1000}"
             return
         fi
@@ -1298,7 +1306,12 @@ get_memory_type() {
     fi
     
     if command -v dmidecode &>/dev/null; then
-        local mem_type=$(dmidecode -t memory 2>/dev/null | grep -m 1 'Type:' | sed 's/Type:\s*//' | sed 's/^[ \t]*//' | sed 's/[ \t]*$//' 2>/dev/null)
+        local mem_type=$(dmidecode -t memory 2>/dev/null | awk '/Memory Device/{in_device=1;next} in_device && /^[ \t]*Type:/{print $2;exit}')
+        if [ -n "$mem_type" ] && [ "$mem_type" != "Unknown" ]; then
+            echo "$mem_type"
+            return
+        fi
+        mem_type=$(dmidecode -t memory 2>/dev/null | grep -A5 'Memory Device' | grep -m 1 'Type:' | sed 's/Type:\s*//' | sed 's/^[ \t]*//' | sed 's/[ \t]*$//' 2>/dev/null)
         if [ -n "$mem_type" ] && [ "$mem_type" != "Unknown" ] && [ "$mem_type" != "Error" ]; then
             echo "$mem_type"
             return
@@ -2256,39 +2269,112 @@ get_thp_status() {
 
 # Get CPU minimum frequency
 get_cpu_freq_min() {
+    # Try standard path
     if [ -f /sys/devices/system/cpu/cpu0/cpufreq/scaling_min_freq ]; then
         local freq=$(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_min_freq 2>/dev/null)
         if [ -n "$freq" ] && [ "$freq" != "0" ]; then
-            awk "BEGIN {printf \"%.2f\", $freq / 1000}"
-        else
-            echo "N/A"
+            # Check if frequency is in kHz (most common) or MHz
+            if [ "$freq" -gt 10000 ]; then
+                awk "BEGIN {printf \"%.2f\", $freq / 1000000}"
+            else
+                awk "BEGIN {printf \"%.2f\", $freq / 1000}"
+            fi
+            return
         fi
-    else
-        echo "N/A"
     fi
+    # Try system-wide cpufreq path
+    if [ -f /sys/devices/system/cpu/cpufreq/scaling_min_freq ]; then
+        local freq=$(cat /sys/devices/system/cpu/cpufreq/scaling_min_freq 2>/dev/null)
+        if [ -n "$freq" ] && [ "$freq" != "0" ]; then
+            if [ "$freq" -gt 10000 ]; then
+                awk "BEGIN {printf \"%.2f\", $freq / 1000000}"
+            else
+                awk "BEGIN {printf \"%.2f\", $freq / 1000}"
+            fi
+            return
+        fi
+    fi
+    # Try other CPU frequency information from dmidecode (for ARM)
+    if command -v dmidecode &>/dev/null; then
+        local speed=$(dmidecode -t processor 2>/dev/null | grep -i 'current speed\|max speed' | head -1 | grep -o '[0-9]\+' | head -1)
+        if [ -n "$speed" ] && [ "$speed" != "0" ]; then
+            awk "BEGIN {printf \"%.2f\", $speed / 1000}"
+            return
+        fi
+    fi
+    echo "N/A"
 }
 
 # Get CPU maximum frequency
 get_cpu_freq_max() {
+    # Try standard path
     if [ -f /sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq ]; then
         local freq=$(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq 2>/dev/null)
         if [ -n "$freq" ] && [ "$freq" != "0" ]; then
-            awk "BEGIN {printf \"%.2f\", $freq / 1000}"
-        else
-            echo "N/A"
+            if [ "$freq" -gt 10000 ]; then
+                awk "BEGIN {printf \"%.2f\", $freq / 1000000}"
+            else
+                awk "BEGIN {printf \"%.2f\", $freq / 1000}"
+            fi
+            return
         fi
-    else
-        echo "N/A"
     fi
+    # Try system-wide cpufreq path
+    if [ -f /sys/devices/system/cpu/cpufreq/scaling_max_freq ]; then
+        local freq=$(cat /sys/devices/system/cpu/cpufreq/scaling_max_freq 2>/dev/null)
+        if [ -n "$freq" ] && [ "$freq" != "0" ]; then
+            if [ "$freq" -gt 10000 ]; then
+                awk "BEGIN {printf \"%.2f\", $freq / 1000000}"
+            else
+                awk "BEGIN {printf \"%.2f\", $freq / 1000}"
+            fi
+            return
+        fi
+    fi
+    # Try CPU frequency information from dmidecode (for ARM)
+    if command -v dmidecode &>/dev/null; then
+        local speed=$(dmidecode -t processor 2>/dev/null | grep -i 'max speed\|current speed' | head -1 | grep -o '[0-9]\+' | head -1)
+        if [ -n "$speed" ] && [ "$speed" != "0" ]; then
+            awk "BEGIN {printf \"%.2f\", $speed / 1000}"
+            return
+        fi
+    fi
+    echo "N/A"
 }
 
 # Get CPU frequency governor
 get_cpu_governor() {
+    # Try standard path
     if [ -f /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor ]; then
-        cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor 2>/dev/null || echo "N/A"
-    else
-        echo "N/A"
+        local governor=$(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor 2>/dev/null)
+        if [ -n "$governor" ]; then
+            echo "$governor"
+            return
+        fi
     fi
+    # Try system-wide cpufreq path
+    if [ -f /sys/devices/system/cpu/cpufreq/scaling_governor ]; then
+        local governor=$(cat /sys/devices/system/cpu/cpufreq/scaling_governor 2>/dev/null)
+        if [ -n "$governor" ]; then
+            echo "$governor"
+            return
+        fi
+    fi
+    # Try lscpu if available
+    if command -v lscpu &>/dev/null; then
+        local governor=$(lscpu 2>/dev/null | grep -i 'governor' | head -1 | awk -F: '{print $2}' | sed 's/^ *//' | sed 's/ *$//')
+        if [ -n "$governor" ]; then
+            echo "$governor"
+            return
+        fi
+    fi
+    # For ARM/Kunpeng, indicate fixed frequency
+    local arch=$(uname -m 2>/dev/null)
+    if [ "$arch" = "aarch64" ]; then
+        echo "performance (fixed frequency)"
+        return
+    fi
+    echo "N/A"
 }
 
 # Get memory usage rate
@@ -2744,10 +2830,10 @@ get_disk_info_detailed() { if command -v lsblk &>/dev/null; then lsblk -no NAME,
 get_cpu_model() { if [ -f /proc/cpuinfo ]; then grep -m 1 'model name' /proc/cpuinfo | sed 's/model name\s*: //' 2>/dev/null || echo "N/A"; else echo "N/A"; fi; }
 get_cpu_physical_cores() { if [ -f /proc/cpuinfo ]; then local cores=$(grep -c 'physical id' /proc/cpuinfo 2>/dev/null); if [ -n "$cores" ] && [ "$cores" -gt 0 ] 2>/dev/null; then echo "$cores"; else nproc 2>/dev/null || echo "N/A"; fi; else echo "N/A"; fi; }
 get_cpu_logical_cores() { nproc 2>/dev/null || grep -c ^processor /proc/cpuinfo 2>/dev/null || echo "N/A"; }
-get_cpu_freq() { if [ -f /proc/cpuinfo ]; then local freq=$(grep -m 1 'cpu MHz' /proc/cpuinfo | awk '{print $4}'); if [ -n "$freq" ]; then awk "BEGIN {printf \"%.2f\", $freq / 1000}"; return; fi; fi; freq=$(cat /sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq 2>/dev/null); if [ -n "$freq" ] && [ "$freq" != "0" ]; then awk "BEGIN {printf \"%.2f\", $freq / 1000000}"; return; fi; if command -v lscpu &>/dev/null; then freq=$(lscpu 2>/dev/null | grep -i 'CPU max MHz' | awk '{print $NF}'); if [ -n "$freq" ] && [ "$freq" != "0" ]; then awk "BEGIN {printf \"%.2f\", $freq / 1000}"; return; fi; fi; if [ -f /proc/cpuinfo ]; then freq=$(grep -m 1 'BogoMIPS' /proc/cpuinfo | awk '{print $3}'); if [ -n "$freq" ]; then awk "BEGIN {printf \"%.2f\", $freq / 1000}"; return; fi; fi; echo "N/A"; }
+get_cpu_freq() { if [ -f /proc/cpuinfo ]; then local freq=$(grep -m 1 'cpu MHz' /proc/cpuinfo | awk '{print $4}'); if [ -n "$freq" ]; then awk "BEGIN {printf \"%.2f\", $freq / 1000}"; return; fi; fi; freq=$(cat /sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq 2>/dev/null); if [ -n "$freq" ] && [ "$freq" != "0" ]; then awk "BEGIN {printf \"%.2f\", $freq / 1000000}"; return; fi; if command -v lscpu &>/dev/null; then freq=$(lscpu 2>/dev/null | grep -i 'CPU max MHz' | awk '{print $NF}'); if [ -n "$freq" ] && [ "$freq" != "0" ]; then awk "BEGIN {printf \"%.2f\", $freq / 1000}"; return; fi; fi; if command -v dmidecode &>/dev/null; then freq=$(dmidecode -t processor 2>/dev/null | grep -i 'Current Speed' | head -1 | awk '{print $3}'); if [ -n "$freq" ] && [ "$freq" != "0" ]; then awk "BEGIN {printf \"%.2f\", $freq / 1000}"; return; fi; fi; if [ -f /proc/cpuinfo ]; then freq=$(grep -m 1 'BogoMIPS' /proc/cpuinfo | awk '{print $3}'); if [ -n "$freq" ] && [ "$freq" -gt 1000 ] 2>/dev/null; then awk "BEGIN {printf \"%.2f\", $freq / 1000}"; return; fi; fi; echo "unknown"; }
 get_memory_size_mb() { if [ -f /proc/meminfo ]; then awk '/MemTotal/ {printf "%.0f", $2/1024}' /proc/meminfo 2>/dev/null || echo "N/A"; else echo "N/A"; fi; }
 get_memory_available_mb() { if [ -f /proc/meminfo ]; then awk '/MemAvailable/ {printf "%.0f", $2/1024}' /proc/meminfo 2>/dev/null || echo "N/A"; else echo "N/A"; fi; }
-get_memory_type() { local machine_type=$(get_machine_type 2>/dev/null); if echo "$machine_type" | grep -qi "virtual"; then echo "N/A (virtual machine)"; return; fi; if command -v dmidecode &>/dev/null; then local mem_type=$(dmidecode -t memory 2>/dev/null | grep -m 1 'Type:' | sed 's/Type:\s*//' | sed 's/^[ \t]*//' | sed 's/[ \t]*$//' 2>/dev/null); if [ -n "$mem_type" ] && [ "$mem_type" != "Unknown" ] && [ "$mem_type" != "Error" ]; then echo "$mem_type"; return; fi; fi; local dmesg_type=$(dmesg 2>/dev/null | grep -i 'DDR' | head -1 | grep -o 'DDR[0-9]*' | head -1); if [ -n "$dmesg_type" ]; then echo "$dmesg_type"; return; fi; echo "unknown (requires root)"; }
+get_memory_type() { local machine_type=$(get_machine_type 2>/dev/null); if echo "$machine_type" | grep -qi "virtual"; then echo "N/A (virtual machine)"; return; fi; if command -v dmidecode &>/dev/null; then local mem_type=$(dmidecode -t memory 2>/dev/null | awk '/Memory Device/{in_device=1;next} in_device && /^[ \t]*Type:/{print $2;exit}'); if [ -n "$mem_type" ] && [ "$mem_type" != "Unknown" ]; then echo "$mem_type"; return; fi; mem_type=$(dmidecode -t memory 2>/dev/null | grep -A5 'Memory Device' | grep -m 1 'Type:' | sed 's/Type:\s*//' | sed 's/^[ \t]*//' | sed 's/[ \t]*$//' 2>/dev/null); if [ -n "$mem_type" ] && [ "$mem_type" != "Unknown" ] && [ "$mem_type" != "Error" ]; then echo "$mem_type"; return; fi; fi; local dmesg_type=$(dmesg 2>/dev/null | grep -i 'DDR' | head -1 | grep -o 'DDR[0-9]*' | head -1); if [ -n "$dmesg_type" ]; then echo "$dmesg_type"; return; fi; echo "unknown (requires root)"; }
 get_memory_channels() { if command -v dmidecode &>/dev/null; then local channels=$(dmidecode -t memory 2>/dev/null | grep -c 'Channel' 2>/dev/null); if [ "$channels" -gt 0 ]; then echo "$channels"; return; fi; fi; if [ -d /sys/devices/system/node/ ]; then local node_count=$(ls /sys/devices/system/node/ | grep -c '^node[0-9]*$'); if [ "$node_count" -gt 0 ]; then echo "$node_count"; return; fi; fi; echo "unknown (requires root)"; }
 get_memory_freq() { local machine_type=$(get_machine_type 2>/dev/null); if echo "$machine_type" | grep -qi "virtual"; then echo "N/A (virtual machine)"; return; fi; if command -v dmidecode &>/dev/null; then local freq=$(dmidecode -t memory 2>/dev/null | grep -m 1 'Configured Clock Speed' | awk '{print $4}' 2>/dev/null); if [ -n "$freq" ] && [ "$freq" -gt 0 ] 2>/dev/null; then echo "${freq} MHz"; return; fi; freq=$(dmidecode -t memory 2>/dev/null | grep -m 1 'Speed' | awk '{print $2}' 2>/dev/null); if [ -n "$freq" ] && [ "$freq" != "Unknown" ] && [ "$freq" -gt 0 ] 2>/dev/null; then echo "${freq} MHz"; return; fi; fi; echo "unknown (requires root)"; }
 get_cpu_arch() { uname -m 2>/dev/null || echo "unknown"; }
@@ -2767,9 +2853,9 @@ get_cpu_features() { if [ -f /proc/cpuinfo ]; then grep -m 1 'flags' /proc/cpuin
 get_numa_node_count() { if command -v numactl &>/dev/null; then numactl --hardware 2>/dev/null | grep 'available' | awk '{print $2}' || echo "N/A"; else echo "N/A"; fi; }
 get_numa_topology() { if command -v numactl &>/dev/null; then numactl --hardware 2>/dev/null || echo "N/A"; else echo "N/A"; fi; }
 get_thp_status() { if [ -f /sys/kernel/mm/transparent_hugepage/enabled ]; then cat /sys/kernel/mm/transparent_hugepage/enabled 2>/dev/null || echo "N/A"; else echo "N/A"; fi; }
-get_cpu_freq_min() { if [ -f /sys/devices/system/cpu/cpu0/cpufreq/scaling_min_freq ]; then local freq=$(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_min_freq 2>/dev/null); if [ -n "$freq" ] && [ "$freq" != "0" ]; then awk "BEGIN {printf \"%.2f\", $freq / 1000}"; else echo "N/A"; fi; else echo "N/A"; fi; }
-get_cpu_freq_max() { if [ -f /sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq ]; then local freq=$(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq 2>/dev/null); if [ -n "$freq" ] && [ "$freq" != "0" ]; then awk "BEGIN {printf \"%.2f\", $freq / 1000}"; else echo "N/A"; fi; else echo "N/A"; fi; }
-get_cpu_governor() { if [ -f /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor ]; then cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor 2>/dev/null || echo "N/A"; else echo "N/A"; fi; }
+get_cpu_freq_min() { if [ -f /sys/devices/system/cpu/cpu0/cpufreq/scaling_min_freq ]; then local freq=$(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_min_freq 2>/dev/null); if [ -n "$freq" ] && [ "$freq" != "0" ]; then if [ "$freq" -gt 10000 ]; then awk "BEGIN {printf \"%.2f\", $freq / 1000000}"; else awk "BEGIN {printf \"%.2f\", $freq / 1000}"; fi; return; fi; fi; if [ -f /sys/devices/system/cpu/cpufreq/scaling_min_freq ]; then local freq=$(cat /sys/devices/system/cpu/cpufreq/scaling_min_freq 2>/dev/null); if [ -n "$freq" ] && [ "$freq" != "0" ]; then if [ "$freq" -gt 10000 ]; then awk "BEGIN {printf \"%.2f\", $freq / 1000000}"; else awk "BEGIN {printf \"%.2f\", $freq / 1000}"; fi; return; fi; fi; if command -v dmidecode &>/dev/null; then local speed=$(dmidecode -t processor 2>/dev/null | grep -i 'current speed\|max speed' | head -1 | grep -o '[0-9]\+' | head -1); if [ -n "$speed" ] && [ "$speed" != "0" ]; then awk "BEGIN {printf \"%.2f\", $speed / 1000}"; return; fi; fi; echo "N/A"; }
+get_cpu_freq_max() { if [ -f /sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq ]; then local freq=$(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq 2>/dev/null); if [ -n "$freq" ] && [ "$freq" != "0" ]; then if [ "$freq" -gt 10000 ]; then awk "BEGIN {printf \"%.2f\", $freq / 1000000}"; else awk "BEGIN {printf \"%.2f\", $freq / 1000}"; fi; return; fi; fi; if [ -f /sys/devices/system/cpu/cpufreq/scaling_max_freq ]; then local freq=$(cat /sys/devices/system/cpu/cpufreq/scaling_max_freq 2>/dev/null); if [ -n "$freq" ] && [ "$freq" != "0" ]; then if [ "$freq" -gt 10000 ]; then awk "BEGIN {printf \"%.2f\", $freq / 1000000}"; else awk "BEGIN {printf \"%.2f\", $freq / 1000}"; fi; return; fi; fi; if command -v dmidecode &>/dev/null; then local speed=$(dmidecode -t processor 2>/dev/null | grep -i 'max speed\|current speed' | head -1 | grep -o '[0-9]\+' | head -1); if [ -n "$speed" ] && [ "$speed" != "0" ]; then awk "BEGIN {printf \"%.2f\", $speed / 1000}"; return; fi; fi; echo "N/A"; }
+get_cpu_governor() { if [ -f /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor ]; then local governor=$(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor 2>/dev/null); if [ -n "$governor" ]; then echo "$governor"; return; fi; fi; if [ -f /sys/devices/system/cpu/cpufreq/scaling_governor ]; then local governor=$(cat /sys/devices/system/cpu/cpufreq/scaling_governor 2>/dev/null); if [ -n "$governor" ]; then echo "$governor"; return; fi; fi; if command -v lscpu &>/dev/null; then local governor=$(lscpu 2>/dev/null | grep -i 'governor' | head -1 | awk -F: '{print $2}' | sed 's/^ *//' | sed 's/ *$//'); if [ -n "$governor" ]; then echo "$governor"; return; fi; fi; local arch=$(uname -m 2>/dev/null); if [ "$arch" = "aarch64" ]; then echo "performance (fixed frequency)"; return; fi; echo "N/A"; }
 get_memory_usage_rate() { if command -v free &>/dev/null; then local mem_line=$(free | grep 'Mem:'); if [ -n "$mem_line" ]; then local total=$(echo "$mem_line" | awk '{print $2}'); local used=$(echo "$mem_line" | awk '{print $3}'); if [ "$total" -gt 0 ] 2>/dev/null; then awk "BEGIN {printf \"%.1f%%\", $used / $total * 100}"; else echo "N/A"; fi; else echo "N/A"; fi; else echo "N/A"; fi; }
 get_hugepages_count() { if [ -f /proc/sys/vm/nr_hugepages ]; then cat /proc/sys/vm/nr_hugepages 2>/dev/null || echo "N/A"; else echo "N/A"; fi; }
 get_benchmark_disk_device() { local io_path="${IO_PATH:-.}"; local device=$(df "$io_path" 2>/dev/null | tail -1 | awk '{print $1}'); if [ -n "$device" ]; then local basename_dev=$(basename "$device"); if [ -d "/sys/block/$basename_dev" ]; then echo "$basename_dev"; return; fi; if command -v lsblk &>/dev/null; then local disk=$(lsblk -ndo pkname "$device" 2>/dev/null | grep -v "^$" | head -1); if [ -n "$disk" ]; then echo "$disk"; return; fi; fi; for dm_dir in /sys/block/dm-*; do if [ -d "$dm_dir/slaves" ]; then local dev_name=$(cat "$dm_dir/dm/name" 2>/dev/null); if [ -n "$dev_name" ] && echo "$basename_dev" | grep -q "$dev_name"; then local slave=$(ls "$dm_dir/slaves/" 2>/dev/null | head -1); if [ -n "$slave" ]; then echo "$slave" | sed 's/[0-9]*$//; s/p[0-9]*$//'; return; fi; fi; fi; done; echo "$basename_dev" | sed 's/[0-9]*$//; s/p[0-9]*$//; s/-[0-9]*$//'; else echo ""; fi; }
