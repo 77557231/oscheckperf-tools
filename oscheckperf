@@ -1568,7 +1568,7 @@ print_system_info() {
     printf -- "\n" >> "$report_file"
 }
 
-# Print disk information section (filtered: only swap and IO_PATH related device)
+# Print disk information section (filtered: only IO_PATH related device)
 print_disk_info_section() {
     local report_file="$1"
     local prefix="$2"
@@ -1576,90 +1576,229 @@ print_disk_info_section() {
     shift 3
     local disk_lines=("$@")
     
-    # Get IO_PATH device name and mount point for filtering
-    local io_device=""
+    # Get IO_PATH mount point for filtering
     local io_mount=""
     if [ -n "$io_path" ] && command -v df &>/dev/null; then
-        io_device=$(df "$io_path" 2>/dev/null | tail -1 | awk '{print $1}' | sed 's|/dev/||; s|^mapper/||')
         io_mount=$(df "$io_path" 2>/dev/null | tail -1 | awk '{print $6}')
     fi
-    
-    # Fallback: if IO_PATH doesn't exist, use root directory
-    if [ -z "$io_device" ] && command -v df &>/dev/null; then
-        io_device=$(df / 2>/dev/null | tail -1 | awk '{print $1}' | sed 's|/dev/||; s|^mapper/||')
+    if [ -z "$io_mount" ] && command -v df &>/dev/null; then
         io_mount="/"
     fi
     
-    # Filter relevant lines
-    local filtered_lines=()
+    # Collect all disk information (preserve original name with hierarchy)
+    declare -A disk_by_name
+    declare -A disk_type_by_name
+    declare -A disk_display_name
     for disk_line in "${disk_lines[@]}"; do
         if [ -n "$disk_line" ] && [ "$disk_line" != "N/A" ]; then
             IFS='|' read -r name size type fstype mountpoint disk_type vendor model scheduler wcache <<< "$disk_line"
-            # Clean up name (remove tree characters and leading spaces)
             local clean_name=$(echo "$name" | sed 's/^[├└─ ]*//; s/^[│ ]*//')
-            local show=false
-            # Show disk and rom types directly
-            if [ "$type" = "disk" ] || [ "$type" = "rom" ]; then
-                show=true
-            fi
-            # Show all partition and LVM devices
-            if [ "$type" = "part" ] || [ "$type" = "lvm" ]; then
-                show=true
-            fi
-            if $show; then
-                filtered_lines+=("$disk_line")
+            disk_by_name["$clean_name"]="$disk_line"
+            disk_type_by_name["$clean_name"]="$type"
+            disk_display_name["$clean_name"]="$name"  # Store original name with hierarchy
+        fi
+    done
+    
+    # Find relevant devices using universal logic
+    local relevant_names=()
+    local seen=()
+    local main_device=""
+    local main_device_found=false
+    
+    add_device() {
+        local dev_name="$1"
+        local found=false
+        for s in "${seen[@]}"; do [ "$s" = "$dev_name" ] && found=true && break; done
+        if [ "$found" = false ] && [ -n "${disk_by_name["$dev_name"]}" ]; then
+            seen+=("$dev_name")
+            relevant_names+=("$dev_name")
+        fi
+    }
+    
+    # Step 1: Find the device that mounts our IO_PATH (universal approach)
+    for disk_line in "${disk_lines[@]}"; do
+        if [ -n "$disk_line" ] && [ "$disk_line" != "N/A" ]; then
+            IFS='|' read -r name size type fstype mountpoint disk_type vendor model scheduler wcache <<< "$disk_line"
+            local clean_name=$(echo "$name" | sed 's/^[├└─ ]*//; s/^[│ ]*//')
+            
+            if [ "$mountpoint" = "$io_mount" ]; then
+                main_device="$clean_name"
+                add_device "$clean_name"
+                main_device_found=true
             fi
         fi
     done
     
-    if [ ${#filtered_lines[@]} -gt 0 ]; then
-        printf -- "%s[Disk Information]\n" "$prefix" >> "$report_file"
-        printf -- "%s------------------------------------------------------------------------------------------------------\n" "$prefix" >> "$report_file"
+    # Step 2: Build device hierarchy based on actual mount relationship
+    if [ "$main_device_found" = true ]; then
+        # Universal logic: Find all related devices through parent-child relationships
+        if [[ "$main_device" == *"-"* ]]; then
+            # LVM device: find the specific VG and its physical disks
+            local vg_name=$(echo "$main_device" | cut -d'-' -f1)
+            
+            # Find all LVM devices belonging to the same VG
+            for lvm_name in "${!disk_type_by_name[@]}"; do
+                local lvm_type="${disk_type_by_name["$lvm_name"]}"
+                if [ "$lvm_type" = "lvm" ] && [[ "$lvm_name" == "$vg_name"* ]]; then
+                    add_device "$lvm_name"
+                fi
+            done
+            
+            # Find the boot disk first (has /boot or /boot/efi and LVM)
+            local boot_disk_found=false
+            local boot_disk=""
+            for disk_name in "${!disk_type_by_name[@]}"; do
+                local type="${disk_type_by_name["$disk_name"]}"
+                if [ "$type" = "disk" ]; then
+                    local is_boot_disk=false
+                    local has_lvm=false
+                    for part_name in "${!disk_type_by_name[@]}"; do
+                        local part_type="${disk_type_by_name["$part_name"]}"
+                        if [ "$part_type" = "part" ] && [[ "$part_name" == "$disk_name"* ]]; then
+                            local part_line="${disk_by_name["$part_name"]}"
+                            if [[ "$part_line" == *"/boot"* ]]; then
+                                is_boot_disk=true
+                            fi
+                            if [[ "$part_line" == *"LVM2_member"* ]]; then
+                                has_lvm=true
+                            fi
+                        fi
+                    done
+                    if [ "$is_boot_disk" = true ] && [ "$has_lvm" = true ]; then
+                        boot_disk="$disk_name"
+                        boot_disk_found=true
+                        break
+                    fi
+                fi
+            done
+            
+            # Use boot disk if found, otherwise find any disk with LVM
+            local vg_disks=()
+            if [ "$boot_disk_found" = true ]; then
+                vg_disks=("$boot_disk")
+            else
+                # Fallback: find the first disk with LVM partition
+                for disk_name in "${!disk_type_by_name[@]}"; do
+                    local type="${disk_type_by_name["$disk_name"]}"
+                    if [ "$type" = "disk" ]; then
+                        for part_name in "${!disk_type_by_name[@]}"; do
+                            local part_type="${disk_type_by_name["$part_name"]}"
+                            if [ "$part_type" = "part" ] && [[ "$part_name" == "$disk_name"* ]]; then
+                                local part_line="${disk_by_name["$part_name"]}"
+                                if [[ "$part_line" == *"LVM2_member"* ]]; then
+                                    vg_disks=("$disk_name")
+                                    break 2
+                                fi
+                            fi
+                        done
+                    fi
+                done
+            fi
+            
+            # Add the disks and their partitions
+            for disk_name in "${vg_disks[@]}"; do
+                add_device "$disk_name"
+                for part_name in "${!disk_type_by_name[@]}"; do
+                    local part_type="${disk_type_by_name["$part_name"]}"
+                    if [ "$part_type" = "part" ] && [[ "$part_name" == "$disk_name"* ]]; then
+                        add_device "$part_name"
+                    fi
+                done
+            done
+        else
+            # Non-LVM: find parent disk and its partitions
+            local main_prefix=$(echo "$main_device" | sed 's/[0-9]*$//; s/p[0-9]*$//')
+            
+            for disk_name in "${!disk_type_by_name[@]}"; do
+                local type="${disk_type_by_name["$disk_name"]}"
+                if [ "$type" = "disk" ] && [[ "$main_prefix" == "$disk_name" ]]; then
+                    add_device "$disk_name"
+                    for part_name in "${!disk_type_by_name[@]}"; do
+                        local part_type="${disk_type_by_name["$part_name"]}"
+                        if [ "$part_type" = "part" ] && [[ "$part_name" == "$disk_name"* ]]; then
+                            add_device "$part_name"
+                        fi
+                    done
+                fi
+            done
+        fi
+    fi
+    
+    # Sort by hierarchy (disks first, then partitions, then LVM)
+    local sorted_names=()
+    local disk_names=()
+    local part_names=()
+    local lvm_names=()
+    
+    for name in "${relevant_names[@]}"; do
+        local type="${disk_type_by_name["$name"]}"
+        if [ "$type" = "disk" ]; then
+            disk_names+=("$name")
+        elif [ "$type" = "part" ]; then
+            part_names+=("$name")
+        elif [ "$type" = "lvm" ]; then
+            lvm_names+=("$name")
+        else
+            sorted_names+=("$name")
+        fi
+    done
+    
+    # Sort partitions by their disk prefix
+    IFS=$'\n' part_names=($(sort <<<"${part_names[*]}")); unset IFS
+    IFS=$'\n' lvm_names=($(sort <<<"${lvm_names[*]}")); unset IFS
+    
+    # Build final sorted list
+    sorted_names=("${disk_names[@]}" "${part_names[@]}" "${lvm_names[@]}")
+    
+    # Build and display the filtered list with hierarchy (using spaces for indentation)
+    if [ ${#sorted_names[@]} -gt 0 ]; then
+        printf -- "%s[Disk Information (IO Benchmark Only)]\n" "$prefix" >> "$report_file"
+        printf -- "%s--------------------------------------------------------------------------------------------------------\n" "$prefix" >> "$report_file"
         printf -- "%s%-28s %-12s %-6s %-8s %-14s %-5s %-8s %-12s %-8s %-8s\n" "$prefix" "NAME" "SIZE" "TYPE" "FS" "MOUNTPOINT" "TYPE" "VENDOR" "MODEL" "SCHEDULER" "WCACHE" >> "$report_file"
-        printf -- "%s------------------------------------------------------------------------------------------------------\n" "$prefix" >> "$report_file"
-        for disk_line in "${filtered_lines[@]}"; do
-            IFS='|' read -r name size type fstype mountpoint disk_type vendor model scheduler wcache <<< "$disk_line"
-            # Clean up name for display
-            local display_name=$(echo "$name" | sed 's/^[├└─ ]*//; s/^[│ ]*//')
-            [ "$disk_type" = "Unknown" ] && disk_type="-"
-            printf -- "%s%-28s %-12s %-6s %-8s %-14s %-5s %-8s %-12s %-8s %-8s\n" "$prefix" "$display_name" "$size" "$type" "$fstype" "$mountpoint" "$disk_type" "$vendor" "$model" "$scheduler" "$wcache" >> "$report_file"
+        printf -- "%s--------------------------------------------------------------------------------------------------------\n" "$prefix" >> "$report_file"
+        for name in "${sorted_names[@]}"; do
+            local disk_line="${disk_by_name["$name"]}"
+            if [ -n "$disk_line" ]; then
+                IFS='|' read -r name size type fstype mountpoint disk_type vendor model scheduler wcache <<< "$disk_line"
+                local clean_name=$(echo "$name" | sed 's/^[├└─ ]*//; s/^[│ ]*//')
+                
+                local indent=""
+                if [ "$type" = "part" ]; then
+                    indent="  "
+                elif [ "$type" = "lvm" ]; then
+                    indent="    "
+                fi
+                
+                local combined_name="$indent$clean_name"
+                [ "$disk_type" = "Unknown" ] && disk_type="-"
+                printf -- "%s%-28s %-12s %-6s %-8s %-14s %-5s %-8s %-12s %-8s %-8s\n" "$prefix" "$combined_name" "$size" "$type" "$fstype" "$mountpoint" "$disk_type" "$vendor" "$model" "$scheduler" "$wcache" >> "$report_file"
+            fi
         done
         printf -- "\n" >> "$report_file"
     fi
 }
 
-# Print disk usage section (filtered: only tmpfs, swap, and IO_PATH mount)
+# Print disk usage section (show all)
 print_disk_usage_section() {
     local report_file="$1"
     local prefix="$2"
-    local io_path="$3"
-    shift 3
+    shift 2
     local disk_usage_lines=("$@")
     
-    # Resolve IO_PATH to its mount point for filtering
-    local io_mount=""
-    if [ -n "$io_path" ]; then
-        io_mount=$(df "$io_path" 2>/dev/null | tail -1 | awk '{print $6}')
-    fi
-    
-    # Filter relevant lines
-    local filtered_lines=()
+    # Show all disk usage information
+    local all_lines=()
     for disk_usage_line in "${disk_usage_lines[@]}"; do
         if [ -n "$disk_usage_line" ] && [ "$disk_usage_line" != "N/A" ]; then
-            IFS='|' read -r fs size used avail pct mount <<< "$disk_usage_line"
-            # Show: tmpfs, swap, or IO_PATH mount point
-            if [[ "$fs" == tmpfs* ]] || [[ "$fs" == *swap* ]] || [ "$mount" = "$io_mount" ]; then
-                filtered_lines+=("$disk_usage_line")
-            fi
+            all_lines+=("$disk_usage_line")
         fi
     done
     
-    if [ ${#filtered_lines[@]} -gt 0 ]; then
+    if [ ${#all_lines[@]} -gt 0 ]; then
         printf -- "%s[Disk Usage Information]\n" "$prefix" >> "$report_file"
         printf -- "%s--------------------------------------------------------------------------------\n" "$prefix" >> "$report_file"
         printf -- "%s%-30s %-14s %-8s %-8s %-6s %-14s\n" "$prefix" "FILESYSTEM" "SIZE" "USED" "AVAIL" "USE%" "MOUNTED ON" >> "$report_file"
         printf -- "%s--------------------------------------------------------------------------------\n" "$prefix" >> "$report_file"
-        for disk_usage_line in "${filtered_lines[@]}"; do
+        for disk_usage_line in "${all_lines[@]}"; do
             IFS='|' read -r fs size used avail pct mount <<< "$disk_usage_line"
             printf -- "%s%-30s %-14s %-8s %-8s %-6s %-14s\n" "$prefix" "$fs" "$size" "$used" "$avail" "$pct" "$mount" >> "$report_file"
         done
@@ -1667,38 +1806,27 @@ print_disk_usage_section() {
     fi
 }
 
-# Print inode information section (filtered: only tmpfs, swap, and IO_PATH mount)
+# Print inode information section (show all)
 print_inode_section() {
     local report_file="$1"
     local prefix="$2"
-    local io_path="$3"
-    shift 3
+    shift 2
     local inode_lines=("$@")
     
-    # Resolve IO_PATH to its mount point for filtering
-    local io_mount=""
-    if [ -n "$io_path" ]; then
-        io_mount=$(df "$io_path" 2>/dev/null | tail -1 | awk '{print $6}')
-    fi
-    
-    # Filter relevant lines
-    local filtered_lines=()
+    # Show all inode information
+    local all_lines=()
     for inode_line in "${inode_lines[@]}"; do
         if [ -n "$inode_line" ] && [ "$inode_line" != "N/A" ]; then
-            IFS='|' read -r fs inodes used avail pct mount <<< "$inode_line"
-            # Show: tmpfs, swap, or IO_PATH mount point
-            if [[ "$fs" == tmpfs* ]] || [[ "$fs" == *swap* ]] || [ "$mount" = "$io_mount" ]; then
-                filtered_lines+=("$inode_line")
-            fi
+            all_lines+=("$inode_line")
         fi
     done
     
-    if [ ${#filtered_lines[@]} -gt 0 ]; then
+    if [ ${#all_lines[@]} -gt 0 ]; then
         printf -- "%s[Inode Information]\n" "$prefix" >> "$report_file"
         printf -- "%s--------------------------------------------------------------------------------\n" "$prefix" >> "$report_file"
         printf -- "%s%-30s %-14s %-8s %-8s %-6s %-14s\n" "$prefix" "FILESYSTEM" "INODES" "USED" "AVAIL" "USE%" "MOUNTED ON" >> "$report_file"
         printf -- "%s--------------------------------------------------------------------------------\n" "$prefix" >> "$report_file"
-        for inode_line in "${filtered_lines[@]}"; do
+        for inode_line in "${all_lines[@]}"; do
             IFS='|' read -r fs inodes used avail pct mount <<< "$inode_line"
             printf -- "%s%-30s %-14s %-8s %-8s %-6s %-14s\n" "$prefix" "$fs" "$inodes" "$used" "$avail" "$pct" "$mount" >> "$report_file"
         done
@@ -1764,6 +1892,20 @@ print_memory_info() {
     fi
 }
 
+# Print mount options (for benchmark FS only)
+print_mount_options() {
+    local report_file="$1"
+    local prefix="$2"
+    local mount_opts="$3"
+    
+    if [ -n "$mount_opts" ] && [ "$mount_opts" != "N/A" ]; then
+        printf -- "%s[Filesystem Mount Options (Benchmark FS Only)]\n" "$prefix" >> "$report_file"
+        printf -- "%s--------------------------------------------------------------------------------\n" "$prefix" >> "$report_file"
+        printf -- "%s%s\n" "$prefix" "$mount_opts" >> "$report_file"
+        printf -- "%s\n" "$prefix" >> "$report_file"
+    fi
+}
+
 # Print disk IO settings (for benchmark disk only)
 print_disk_io_settings() {
     local report_file="$1"
@@ -1772,14 +1914,6 @@ print_disk_io_settings() {
     local read_ahead="$4"
     local trim="$5"
     local max_sectors="$6"
-    local mount_opts="$7"
-    
-    if [ -n "$mount_opts" ] && [ "$mount_opts" != "N/A" ]; then
-        printf -- "%s[Mount Options (Benchmark FS Only)]\n" "$prefix" >> "$report_file"
-        printf -- "%s--------------------------------------------------------------------------------\n" "$prefix" >> "$report_file"
-        printf -- "%s%s\n" "$prefix" "$mount_opts" >> "$report_file"
-        printf -- "%s\n" "$prefix" >> "$report_file"
-    fi
     
     if [ "$queue_depth" != "N/A" ] || [ "$read_ahead" != "N/A" ] || [ "$trim" != "N/A" ] || [ "$max_sectors" != "N/A" ]; then
         printf -- "%s[Disk IO Settings (Benchmark Disk Only)]\n" "$prefix" >> "$report_file"
@@ -2034,10 +2168,11 @@ print_node_hardware_info() {
         "$mem_slots_detail" "$numa_node_count" "$numa_detail_lines" \
         "$mem_usage_rate" "$thp_status" "$hugepages_count"
     local resolved_io_path="$IO_PATH"
+    print_mount_options "$report_file" "$prefix" "$mount_options"
     print_disk_info_section "$report_file" "$prefix" "$resolved_io_path" "${disk_lines[@]}"
-    print_disk_usage_section "$report_file" "$prefix" "$resolved_io_path" "${disk_usage_lines[@]}"
-    print_inode_section "$report_file" "$prefix" "$resolved_io_path" "${inode_lines[@]}"
-    print_disk_io_settings "$report_file" "$prefix" "$disk_queue_depth" "$disk_read_ahead" "$disk_trim" "$disk_max_sectors" "$mount_options"
+    print_disk_usage_section "$report_file" "$prefix" "${disk_usage_lines[@]}"
+    print_inode_section "$report_file" "$prefix" "${inode_lines[@]}"
+    print_disk_io_settings "$report_file" "$prefix" "$disk_queue_depth" "$disk_read_ahead" "$disk_trim" "$disk_max_sectors"
     print_network_info "$report_file" "$prefix" "$net_count" "$net_bond" "${all_network_lines[@]}"
 }
 
@@ -2145,6 +2280,10 @@ generate_hardware_report_unified() {
             "$mem_usage_rate" "$thp_status" "$hugepages"
         
         local resolved_io_path="$IO_PATH"
+        
+        # Print mount options before disk information
+        print_mount_options "$report_file" "" "$mount_opts"
+        
         local disk_lines=()
         while IFS= read -r line; do
             disk_lines+=("$line")
@@ -2155,14 +2294,14 @@ generate_hardware_report_unified() {
         while IFS= read -r line; do
             disk_usage_lines+=("$line")
         done < <(get_disk_usage_info 2>/dev/null)
-        print_disk_usage_section "$report_file" "" "$resolved_io_path" "${disk_usage_lines[@]}"
+        print_disk_usage_section "$report_file" "" "${disk_usage_lines[@]}"
         
         local inode_lines=()
         while IFS= read -r line; do
             inode_lines+=("$line")
         done < <(get_inode_info 2>/dev/null)
-        print_inode_section "$report_file" "" "$resolved_io_path" "${inode_lines[@]}"
-        print_disk_io_settings "$report_file" "" "$disk_queue" "$disk_ra" "$disk_trim_val" "$disk_ms" "$mount_opts"
+        print_inode_section "$report_file" "" "${inode_lines[@]}"
+        print_disk_io_settings "$report_file" "" "$disk_queue" "$disk_ra" "$disk_trim_val" "$disk_ms"
         print_network_info "$report_file" "" "$net_count" "$net_bond" "${all_network_lines[@]}"
     fi
     
@@ -2627,6 +2766,7 @@ get_disk_info_detailed() {
     if command -v lsblk &>/dev/null; then
         while read -r line; do
             name=$(echo "$line" | awk '{print $1}' | sed 's/^[├└─ ]*//')
+#            name=$(echo "$line" | awk '{print $1}')  # Keep hierarchy symbols
             size=$(echo "$line" | awk '{print $2}')
             type=$(echo "$line" | awk '{print $3}')
             fstype=$(echo "$line" | awk '{print $4}')
@@ -2826,7 +2966,8 @@ get_hardware_info_output() {
 # Get hardware info functions for remote execution (minified inline version)
 get_hardware_functions_for_remote() {
     cat << 'REMOTE_EOF'
-get_disk_info_detailed() { if command -v lsblk &>/dev/null; then lsblk -no NAME,SIZE,TYPE,FSTYPE,MOUNTPOINT 2>/dev/null | grep -v "^loop" | grep -v "^NAME" | grep -v "^sr" | while read -r line; do name=$(echo "$line" | awk '{print $1}' | sed 's/^[├└─ ]*//'); size=$(echo "$line" | awk '{print $2}'); type=$(echo "$line" | awk '{print $3}'); fstype=$(echo "$line" | awk '{print $4}'); mountpoint=$(echo "$line" | awk '{print $5}'); vendor="-"; model="-"; scheduler="-"; disk_type="-"; wcache="-"; if [ "$type" = "disk" ] || [ "$type" = "rom" ]; then if [ -d "/sys/block/$name/device" ]; then if [ -f "/sys/block/$name/device/vendor" ]; then vendor=$(cat "/sys/block/$name/device/vendor" 2>/dev/null | tr -d ' '); fi; if [ -f "/sys/block/$name/device/model" ]; then model=$(cat "/sys/block/$name/device/model" 2>/dev/null | tr -d ' '); fi; if [ -f "/sys/block/$name/queue/scheduler" ]; then scheduler=$(cat "/sys/block/$name/queue/scheduler" 2>/dev/null | grep -o '\[.*\]' | tr -d '[]'); [ -z "$scheduler" ] && scheduler=$(cat "/sys/block/$name/queue/scheduler" 2>/dev/null | awk '{print $1}'); fi; if [ -f "/sys/block/$name/queue/rotational" ]; then rotational=$(cat "/sys/block/$name/queue/rotational" 2>/dev/null); [ "$rotational" = "0" ] && disk_type="SSD"; [ "$rotational" = "1" ] && disk_type="HDD"; fi; if [ -f "/sys/block/$name/queue/write_cache" ]; then wcache=$(cat "/sys/block/$name/queue/write_cache" 2>/dev/null); [ "$wcache" = "write back" ] && wcache="WriteBack"; [ "$wcache" = "1" ] && wcache="WriteBack"; [ "$wcache" = "write through" ] && wcache="WriteThrough"; [ "$wcache" = "0" ] && wcache="WriteThrough"; fi; fi; fi; [ -z "$fstype" ] && fstype="-"; [ -z "$mountpoint" ] && mountpoint="-"; [ -z "$vendor" ] && vendor="-"; [ -z "$model" ] && model="-"; [ -z "$scheduler" ] && scheduler="-"; [ -z "$wcache" ] && wcache="-"; echo "$name|$size|$type|$fstype|$mountpoint|$disk_type|$vendor|$model|$scheduler|$wcache"; done; else echo "N/A"; fi; }
+#get_disk_info_detailed() { if command -v lsblk &>/dev/null; then lsblk -no NAME,SIZE,TYPE,FSTYPE,MOUNTPOINT 2>/dev/null | grep -v "^loop" | grep -v "^NAME" | grep -v "^sr" | while read -r line; do name=$(echo "$line" | awk '{print $1}' | sed 's/^[├└─ ]*//'); size=$(echo "$line" | awk '{print $2}'); type=$(echo "$line" | awk '{print $3}'); fstype=$(echo "$line" | awk '{print $4}'); mountpoint=$(echo "$line" | awk '{print $5}'); vendor="-"; model="-"; scheduler="-"; disk_type="-"; wcache="-"; if [ "$type" = "disk" ] || [ "$type" = "rom" ]; then if [ -d "/sys/block/$name/device" ]; then if [ -f "/sys/block/$name/device/vendor" ]; then vendor=$(cat "/sys/block/$name/device/vendor" 2>/dev/null | tr -d ' '); fi; if [ -f "/sys/block/$name/device/model" ]; then model=$(cat "/sys/block/$name/device/model" 2>/dev/null | tr -d ' '); fi; if [ -f "/sys/block/$name/queue/scheduler" ]; then scheduler=$(cat "/sys/block/$name/queue/scheduler" 2>/dev/null | grep -o '\[.*\]' | tr -d '[]'); [ -z "$scheduler" ] && scheduler=$(cat "/sys/block/$name/queue/scheduler" 2>/dev/null | awk '{print $1}'); fi; if [ -f "/sys/block/$name/queue/rotational" ]; then rotational=$(cat "/sys/block/$name/queue/rotational" 2>/dev/null); [ "$rotational" = "0" ] && disk_type="SSD"; [ "$rotational" = "1" ] && disk_type="HDD"; fi; if [ -f "/sys/block/$name/queue/write_cache" ]; then wcache=$(cat "/sys/block/$name/queue/write_cache" 2>/dev/null); [ "$wcache" = "write back" ] && wcache="WriteBack"; [ "$wcache" = "1" ] && wcache="WriteBack"; [ "$wcache" = "write through" ] && wcache="WriteThrough"; [ "$wcache" = "0" ] && wcache="WriteThrough"; fi; fi; fi; [ -z "$fstype" ] && fstype="-"; [ -z "$mountpoint" ] && mountpoint="-"; [ -z "$vendor" ] && vendor="-"; [ -z "$model" ] && model="-"; [ -z "$scheduler" ] && scheduler="-"; [ -z "$wcache" ] && wcache="-"; echo "$name|$size|$type|$fstype|$mountpoint|$disk_type|$vendor|$model|$scheduler|$wcache"; done; else echo "N/A"; fi; }
+get_disk_info_detailed() { if command -v lsblk &>/dev/null; then lsblk -no NAME,SIZE,TYPE,FSTYPE,MOUNTPOINT 2>/dev/null | grep -v "^loop" | grep -v "^NAME" | grep -v "^sr" | while read -r line; do name=$(echo "$line" | awk '{print $1}'); size=$(echo "$line" | awk '{print $2}'); type=$(echo "$line" | awk '{print $3}'); fstype=$(echo "$line" | awk '{print $4}'); mountpoint=$(echo "$line" | awk '{print $5}'); vendor="-"; model="-"; scheduler="-"; disk_type="-"; wcache="-"; if [ "$type" = "disk" ] || [ "$type" = "rom" ]; then clean_name=$(echo "$name" | sed 's/^[├└─ ]*//'); if [ -d "/sys/block/$clean_name/device" ]; then if [ -f "/sys/block/$clean_name/device/vendor" ]; then vendor=$(cat "/sys/block/$clean_name/device/vendor" 2>/dev/null | tr -d ' '); fi; if [ -f "/sys/block/$clean_name/device/model" ]; then model=$(cat "/sys/block/$clean_name/device/model" 2>/dev/null | tr -d ' '); fi; if [ -f "/sys/block/$clean_name/queue/scheduler" ]; then scheduler=$(cat "/sys/block/$clean_name/queue/scheduler" 2>/dev/null | grep -o '\[.*\]' | tr -d '[]'); [ -z "$scheduler" ] && scheduler=$(cat "/sys/block/$clean_name/queue/scheduler" 2>/dev/null | awk '{print $1}'); fi; if [ -f "/sys/block/$clean_name/queue/rotational" ]; then rotational=$(cat "/sys/block/$clean_name/queue/rotational" 2>/dev/null); [ "$rotational" = "0" ] && disk_type="SSD"; [ "$rotational" = "1" ] && disk_type="HDD"; fi; if [ -f "/sys/block/$clean_name/queue/write_cache" ]; then wcache=$(cat "/sys/block/$clean_name/queue/write_cache" 2>/dev/null); [ "$wcache" = "write back" ] && wcache="WriteBack"; [ "$wcache" = "1" ] && wcache="WriteBack"; [ "$wcache" = "write through" ] && wcache="WriteThrough"; [ "$wcache" = "0" ] && wcache="WriteThrough"; fi; fi; fi; [ -z "$fstype" ] && fstype="-"; [ -z "$mountpoint" ] && mountpoint="-"; [ -z "$vendor" ] && vendor="-"; [ -z "$model" ] && model="-"; [ -z "$scheduler" ] && scheduler="-"; [ -z "$wcache" ] && wcache="-"; echo "$name|$size|$type|$fstype|$mountpoint|$disk_type|$vendor|$model|$scheduler|$wcache"; done; else echo "N/A"; fi; }
 get_cpu_model() { if [ -f /proc/cpuinfo ]; then grep -m 1 'model name' /proc/cpuinfo | sed 's/model name\s*: //' 2>/dev/null || echo "N/A"; else echo "N/A"; fi; }
 get_cpu_physical_cores() { if [ -f /proc/cpuinfo ]; then local cores=$(grep -c 'physical id' /proc/cpuinfo 2>/dev/null); if [ -n "$cores" ] && [ "$cores" -gt 0 ] 2>/dev/null; then echo "$cores"; else nproc 2>/dev/null || echo "N/A"; fi; else echo "N/A"; fi; }
 get_cpu_logical_cores() { nproc 2>/dev/null || grep -c ^processor /proc/cpuinfo 2>/dev/null || echo "N/A"; }
