@@ -1,7 +1,7 @@
 #!/bin/bash
 #--------------------------------------------------------------------------------
 #-- File name:   oscheckperf
-#-- Version:     v1.1.4
+#-- Version:     v1.1.5
 #-- Purpose:     Database System Benchmark Tool
 #-- Author:      Wanping Pan 
 #-- Description: One-click system benchmarking tool, supports configuration via config file or command line parameters
@@ -1062,7 +1062,6 @@ show_help() {
     echo "  Common parameters (KEY=VALUE format):"
     echo "  DURATION=<seconds>          Unified test duration (default: 60)"
     echo "  OUTPUT_DIR=<path>           Output directory (default: ./output)"
-    echo "  CLEANUP=true|false          Cleanup temp files after test (default: true)"
     echo "  SSH_PORT=<port>             SSH port for remote server connections (default: 22)"
     echo "  REPORT_HARDWARE_INFO=true|false  Include hardware information in report (default: true)"
     echo ""
@@ -1336,16 +1335,23 @@ get_memory_type() {
 get_memory_channels() {
     # Try dmidecode first (requires root)
     if command -v dmidecode &>/dev/null; then
-        local channels=$(dmidecode -t memory 2>/dev/null | grep -c 'Channel' 2>/dev/null)
-        if [ "$channels" -gt 0 ]; then
+        # Extract unique channel identifiers from Bank Locator strings (account for multiple sockets)
+        local channels=$(dmidecode -t memory 2>/dev/null | grep -i 'Bank Locator:' | grep -o 'SOCKET [0-9]* CHANNEL [0-9]*' | sort -u | wc -l)
+        if [ "$channels" -gt 0 ] && [ "$channels" -lt 100 ]; then
+            echo "$channels"
+            return
+        fi
+        # Fallback: just count unique channel numbers
+        channels=$(dmidecode -t memory 2>/dev/null | grep -i 'Bank Locator:' | grep -o 'CHANNEL [0-9]*' | sort -u | wc -l)
+        if [ "$channels" -gt 0 ] && [ "$channels" -lt 100 ]; then
             echo "$channels"
             return
         fi
     fi
-    # Try to detect from numactl (if available)
+    # Try to detect from numactl (if available) - this gives NUMA nodes, not channels
     if command -v numactl &>/dev/null; then
-        local nodes=$(numactl --hardware 2>/dev/null | grep -c 'node ' | awk '{print $1}')
-        if [ "$nodes" -gt 0 ]; then
+        local nodes=$(numactl --hardware 2>/dev/null | grep -c '^node ' 2>/dev/null)
+        if [ "$nodes" -gt 0 ] && [ "$nodes" -lt 100 ]; then
             echo "$nodes"
             return
         fi
@@ -1353,7 +1359,7 @@ get_memory_channels() {
     # Fallback to checking memory nodes in sysfs
     if [ -d /sys/devices/system/node/ ]; then
         local node_count=$(ls /sys/devices/system/node/ | grep -c '^node[0-9]*$')
-        if [ "$node_count" -gt 0 ]; then
+        if [ "$node_count" -gt 0 ] && [ "$node_count" -lt 100 ]; then
             echo "$node_count"
             return
         fi
@@ -1419,41 +1425,71 @@ get_memory_slots_detail() {
     fi
     
     local slot_results=$(echo "$slots_output" | awk '
-        BEGIN { slot_count=0; in_device=0 }
+        BEGIN { slot_count=0; in_device=0; used_count=0; found_size=0 }
         /Memory Device/ { 
-            if (in_device && size !~ /^(No Module Installed|Unknown)$/ && size != "" && size !~ /^0+\s*(MB|GB|bytes)$/) {
+            if (in_device) {
                 print "Slot " slot_count ":"
-                if (locator != "") print "  Locator: " locator
-                print "  Size: " size
-                if (mem_type != "") print "  Type: " mem_type
+                if (bank_locator != "") print "  Locator: " bank_locator
+                else if (locator != "") print "  Locator: " locator
+                if (found_size == 1) {
+                    print "  Size: " size
+                } else {
+                    print "  Size: None"
+                }
+                if (mem_type != "" && mem_type != "Unknown") print "  Type: " mem_type
+                else if (size ~ /No Module Installed/) print "  Type: Unknown"
                 if (speed != "" && speed != "Unknown") print "  Speed: " speed
                 if (manufacturer != "" && manufacturer != "Unknown") print "  Manufacturer: " manufacturer
+                else if (size ~ /No Module Installed/) print "  Manufacturer: NO DIMM"
                 if (part_num != "" && part_num != "Unknown") print "  Part Number: " part_num
+                else if (size ~ /No Module Installed/) print "  Part Number: NO DIMM"
+                if (size !~ /^(No Module Installed|Unknown)$/ && found_size == 1 && size !~ /^0+\s*(MB|GB|bytes)$/) {
+                    used_count++
+                }
             }
             slot_count++; 
             in_device=1; 
-            size=""; locator=""; mem_type=""; speed=""; manufacturer=""; part_num=""
+            size=""; locator=""; bank_locator=""; mem_type=""; speed=""; manufacturer=""; part_num=""; found_size=0
         }
-        in_device && /Locator:/ { locator = substr($0, index($0, $2)); gsub(/^[ \t]+/, "", locator); gsub(/^Locator:\s*/, "", locator) }
-        in_device && /Size:/ { size = substr($0, index($0, "Size:") + 5); gsub(/^[ \t]+/, "", size) }
-        in_device && /Type:/ { mem_type = substr($0, index($0, $2)); gsub(/^[ \t]+/, "", mem_type) }
-        in_device && /Speed:/ { speed = substr($0, index($0, $2)); gsub(/^[ \t]+/, "", speed); gsub(/^Memory Speed:\s*/, "", speed) }
-        in_device && /Manufacturer:/ { manufacturer = substr($0, index($0, $2)); gsub(/^[ \t]+/, "", manufacturer) }
-        in_device && /Part Number:/ { part_num = substr($0, index($0, $3)); gsub(/^[ \t]+/, "", part_num) }
+        in_device && /^[ \t]*Locator:/ { locator = substr($0, index($0, "Locator:") + 8); gsub(/^[ \t]+/, "", locator); gsub(/[ \t]+$/, "", locator) }
+        in_device && /^[ \t]*Bank Locator:/ { bank_locator = substr($0, index($0, "Bank Locator:") + 13); gsub(/^[ \t]+/, "", bank_locator); gsub(/[ \t]+$/, "", bank_locator) }
+        in_device && /^[ \t]*Size:/ && !/Non-Volatile/ && !/Volatile/ && !/Cache/ && !/Logical/ && found_size == 0 { 
+            size = substr($0, index($0, "Size:") + 5); 
+            gsub(/^[ \t]+/, "", size); 
+            gsub(/[ \t]+$/, "", size);
+            found_size=1 
+        }
+        in_device && /^[ \t]*Type:/ && !/Type Detail/ { mem_type = substr($0, index($0, "Type:") + 5); gsub(/^[ \t]+/, "", mem_type); gsub(/[ \t]+$/, "", mem_type) }
+        in_device && /^[ \t]*Speed:/ { speed = substr($0, index($0, "Speed:") + 6); gsub(/^[ \t]+/, "", speed); gsub(/[ \t]+$/, "", speed); gsub(/^Memory Speed:\s*/, "", speed) }
+        in_device && /^[ \t]*Manufacturer:/ { manufacturer = substr($0, index($0, "Manufacturer:") + 13); gsub(/^[ \t]+/, "", manufacturer); gsub(/[ \t]+$/, "", manufacturer) }
+        in_device && /^[ \t]*Part Number:/ { part_num = substr($0, index($0, "Part Number:") + 12); gsub(/^[ \t]+/, "", part_num); gsub(/[ \t]+$/, "", part_num) }
         END { 
-            if (in_device && size !~ /No Module Installed|0 MB|0 GB|0 bytes/ && size != "" && size != "No Module Installed" && size != "Unknown") {
+            if (in_device) {
                 print "Slot " slot_count ":"
-                if (locator != "") print "  Locator: " locator
-                print "  Size: " size
-                if (mem_type != "") print "  Type: " mem_type
+                if (bank_locator != "") print "  Locator: " bank_locator
+                else if (locator != "") print "  Locator: " locator
+                if (found_size == 1) {
+                    print "  Size: " size
+                } else {
+                    print "  Size: None"
+                }
+                if (mem_type != "" && mem_type != "Unknown") print "  Type: " mem_type
+                else if (size ~ /No Module Installed/) print "  Type: Unknown"
                 if (speed != "" && speed != "Unknown") print "  Speed: " speed
                 if (manufacturer != "" && manufacturer != "Unknown") print "  Manufacturer: " manufacturer
+                else if (size ~ /No Module Installed/) print "  Manufacturer: NO DIMM"
                 if (part_num != "" && part_num != "Unknown") print "  Part Number: " part_num
+                else if (size ~ /No Module Installed/) print "  Part Number: NO DIMM"
+                if (size !~ /^(No Module Installed|Unknown)$/ && found_size == 1 && size !~ /^0+\s*(MB|GB|bytes)$/) {
+                    used_count++
+                }
             }
+            print "USED_COUNT=" used_count
         }
     ')
     
-    local used_slots=$(echo "$slot_results" | grep -c '^Slot ')
+    local used_slots=$(echo "$slot_results" | grep 'USED_COUNT=' | awk -F'=' '{print $2}')
+    slot_results=$(echo "$slot_results" | grep -v 'USED_COUNT=')
     
     echo "Total Slots: $total_slots"
     echo "Used Slots: $used_slots"
@@ -2727,13 +2763,26 @@ get_machine_type() {
 
 # Get memory slots count (with sudo support)
 get_memory_slots() {
-    if command -v dmidecode &>/dev/null; then
-        # Try with sudo first
-        local slots=$((sudo dmidecode -t memory 2>/dev/null || dmidecode -t memory 2>/dev/null) | grep -c 'Memory Device' 2>/dev/null)
-        if [ "$slots" -gt 0 ]; then
-            echo "$slots"
-            return
-        fi
+    if ! command -v dmidecode &>/dev/null; then
+        echo "unknown (dmidecode not installed)"
+        return
+    fi
+    
+    local slots_output=""
+    
+    if [ "$(whoami)" = "root" ]; then
+        slots_output=$(dmidecode -t memory 2>/dev/null)
+    elif sudo -n true 2>/dev/null; then
+        slots_output=$(sudo -n dmidecode -t memory 2>/dev/null)
+    else
+        echo "unknown (requires root)"
+        return
+    fi
+    
+    local slots=$(echo "$slots_output" | grep -c 'Memory Device' 2>/dev/null)
+    if [ "$slots" -gt 0 ]; then
+        echo "$slots"
+        return
     fi
     echo "unknown (requires root)"
 }
@@ -2746,18 +2795,34 @@ get_memory_freq() {
         return
     fi
     
-    if command -v dmidecode &>/dev/null; then
-        local freq=$((sudo dmidecode -t memory 2>/dev/null || dmidecode -t memory 2>/dev/null) | grep -m 1 'Configured Clock Speed' | awk '{print $4}' 2>/dev/null)
-        if [ -n "$freq" ] && [ "$freq" -gt 0 ] 2>/dev/null; then
-            echo "${freq} MHz"
-            return
-        fi
-        freq=$((sudo dmidecode -t memory 2>/dev/null || dmidecode -t memory 2>/dev/null) | grep -m 1 'Speed' | awk '{print $2}' 2>/dev/null)
-        if [ -n "$freq" ] && [ "$freq" != "Unknown" ] && [ "$freq" -gt 0 ] 2>/dev/null; then
-            echo "${freq} MHz"
-            return
-        fi
+    if ! command -v dmidecode &>/dev/null; then
+        echo "unknown (dmidecode not installed)"
+        return
     fi
+    
+    local dmidecode_output=""
+    
+    if [ "$(whoami)" = "root" ]; then
+        dmidecode_output=$(dmidecode -t memory 2>/dev/null)
+    elif sudo -n true 2>/dev/null; then
+        dmidecode_output=$(sudo -n dmidecode -t memory 2>/dev/null)
+    else
+        echo "unknown (requires root)"
+        return
+    fi
+    
+    local freq=$(echo "$dmidecode_output" | grep -m 1 'Configured Clock Speed' | awk '{print $4}' 2>/dev/null)
+    if [ -n "$freq" ] && [ "$freq" -gt 0 ] 2>/dev/null; then
+        echo "${freq} MHz"
+        return
+    fi
+    
+    freq=$(echo "$dmidecode_output" | grep -m 1 'Speed' | awk '{print $2}' 2>/dev/null)
+    if [ -n "$freq" ] && [ "$freq" != "Unknown" ] && [ "$freq" -gt 0 ] 2>/dev/null; then
+        echo "${freq} MHz"
+        return
+    fi
+    
     echo "unknown (requires root)"
 }
 
@@ -2785,7 +2850,7 @@ get_disk_info_detailed() {
                         vendor=$(cat "/sys/block/$name/device/vendor" 2>/dev/null | tr -d ' ')
                     fi
                     if [ -f "/sys/block/$name/device/model" ]; then
-                        model=$(cat "/sys/block/$name/device/model" 2>/dev/null | tr -d ' ')
+                        model=$(cat "/sys/block/$name/device/model" 2>/dev/null | sed 's/^[ \t]*//;s/[ \t]*$//')
                     fi
                     if [ -f "/sys/block/$name/queue/scheduler" ]; then
                         scheduler=$(cat "/sys/block/$name/queue/scheduler" 2>/dev/null | grep -o '\[.*\]' | tr -d '[]')
@@ -2967,7 +3032,7 @@ get_hardware_info_output() {
 get_hardware_functions_for_remote() {
     cat << 'REMOTE_EOF'
 #get_disk_info_detailed() { if command -v lsblk &>/dev/null; then lsblk -no NAME,SIZE,TYPE,FSTYPE,MOUNTPOINT 2>/dev/null | grep -v "^loop" | grep -v "^NAME" | grep -v "^sr" | while read -r line; do name=$(echo "$line" | awk '{print $1}' | sed 's/^[├└─ ]*//'); size=$(echo "$line" | awk '{print $2}'); type=$(echo "$line" | awk '{print $3}'); fstype=$(echo "$line" | awk '{print $4}'); mountpoint=$(echo "$line" | awk '{print $5}'); vendor="-"; model="-"; scheduler="-"; disk_type="-"; wcache="-"; if [ "$type" = "disk" ] || [ "$type" = "rom" ]; then if [ -d "/sys/block/$name/device" ]; then if [ -f "/sys/block/$name/device/vendor" ]; then vendor=$(cat "/sys/block/$name/device/vendor" 2>/dev/null | tr -d ' '); fi; if [ -f "/sys/block/$name/device/model" ]; then model=$(cat "/sys/block/$name/device/model" 2>/dev/null | tr -d ' '); fi; if [ -f "/sys/block/$name/queue/scheduler" ]; then scheduler=$(cat "/sys/block/$name/queue/scheduler" 2>/dev/null | grep -o '\[.*\]' | tr -d '[]'); [ -z "$scheduler" ] && scheduler=$(cat "/sys/block/$name/queue/scheduler" 2>/dev/null | awk '{print $1}'); fi; if [ -f "/sys/block/$name/queue/rotational" ]; then rotational=$(cat "/sys/block/$name/queue/rotational" 2>/dev/null); [ "$rotational" = "0" ] && disk_type="SSD"; [ "$rotational" = "1" ] && disk_type="HDD"; fi; if [ -f "/sys/block/$name/queue/write_cache" ]; then wcache=$(cat "/sys/block/$name/queue/write_cache" 2>/dev/null); [ "$wcache" = "write back" ] && wcache="WriteBack"; [ "$wcache" = "1" ] && wcache="WriteBack"; [ "$wcache" = "write through" ] && wcache="WriteThrough"; [ "$wcache" = "0" ] && wcache="WriteThrough"; fi; fi; fi; [ -z "$fstype" ] && fstype="-"; [ -z "$mountpoint" ] && mountpoint="-"; [ -z "$vendor" ] && vendor="-"; [ -z "$model" ] && model="-"; [ -z "$scheduler" ] && scheduler="-"; [ -z "$wcache" ] && wcache="-"; echo "$name|$size|$type|$fstype|$mountpoint|$disk_type|$vendor|$model|$scheduler|$wcache"; done; else echo "N/A"; fi; }
-get_disk_info_detailed() { if command -v lsblk &>/dev/null; then lsblk -no NAME,SIZE,TYPE,FSTYPE,MOUNTPOINT 2>/dev/null | grep -v "^loop" | grep -v "^NAME" | grep -v "^sr" | while read -r line; do name=$(echo "$line" | awk '{print $1}'); size=$(echo "$line" | awk '{print $2}'); type=$(echo "$line" | awk '{print $3}'); fstype=$(echo "$line" | awk '{print $4}'); mountpoint=$(echo "$line" | awk '{print $5}'); vendor="-"; model="-"; scheduler="-"; disk_type="-"; wcache="-"; if [ "$type" = "disk" ] || [ "$type" = "rom" ]; then clean_name=$(echo "$name" | sed 's/^[├└─ ]*//'); if [ -d "/sys/block/$clean_name/device" ]; then if [ -f "/sys/block/$clean_name/device/vendor" ]; then vendor=$(cat "/sys/block/$clean_name/device/vendor" 2>/dev/null | tr -d ' '); fi; if [ -f "/sys/block/$clean_name/device/model" ]; then model=$(cat "/sys/block/$clean_name/device/model" 2>/dev/null | tr -d ' '); fi; if [ -f "/sys/block/$clean_name/queue/scheduler" ]; then scheduler=$(cat "/sys/block/$clean_name/queue/scheduler" 2>/dev/null | grep -o '\[.*\]' | tr -d '[]'); [ -z "$scheduler" ] && scheduler=$(cat "/sys/block/$clean_name/queue/scheduler" 2>/dev/null | awk '{print $1}'); fi; if [ -f "/sys/block/$clean_name/queue/rotational" ]; then rotational=$(cat "/sys/block/$clean_name/queue/rotational" 2>/dev/null); [ "$rotational" = "0" ] && disk_type="SSD"; [ "$rotational" = "1" ] && disk_type="HDD"; fi; if [ -f "/sys/block/$clean_name/queue/write_cache" ]; then wcache=$(cat "/sys/block/$clean_name/queue/write_cache" 2>/dev/null); [ "$wcache" = "write back" ] && wcache="WriteBack"; [ "$wcache" = "1" ] && wcache="WriteBack"; [ "$wcache" = "write through" ] && wcache="WriteThrough"; [ "$wcache" = "0" ] && wcache="WriteThrough"; fi; fi; fi; [ -z "$fstype" ] && fstype="-"; [ -z "$mountpoint" ] && mountpoint="-"; [ -z "$vendor" ] && vendor="-"; [ -z "$model" ] && model="-"; [ -z "$scheduler" ] && scheduler="-"; [ -z "$wcache" ] && wcache="-"; echo "$name|$size|$type|$fstype|$mountpoint|$disk_type|$vendor|$model|$scheduler|$wcache"; done; else echo "N/A"; fi; }
+get_disk_info_detailed() { if command -v lsblk &>/dev/null; then lsblk -no NAME,SIZE,TYPE,FSTYPE,MOUNTPOINT 2>/dev/null | grep -v "^loop" | grep -v "^NAME" | grep -v "^sr" | while read -r line; do name=$(echo "$line" | awk '{print $1}'); size=$(echo "$line" | awk '{print $2}'); type=$(echo "$line" | awk '{print $3}'); fstype=$(echo "$line" | awk '{print $4}'); mountpoint=$(echo "$line" | awk '{print $5}'); vendor="-"; model="-"; scheduler="-"; disk_type="-"; wcache="-"; if [ "$type" = "disk" ] || [ "$type" = "rom" ]; then clean_name=$(echo "$name" | sed 's/^[├└─ ]*//'); if [ -d "/sys/block/$clean_name/device" ]; then if [ -f "/sys/block/$clean_name/device/vendor" ]; then vendor=$(cat "/sys/block/$clean_name/device/vendor" 2>/dev/null | sed 's/^[ \t]*//;s/[ \t]*$//'); fi; if [ -f "/sys/block/$clean_name/device/model" ]; then model=$(cat "/sys/block/$clean_name/device/model" 2>/dev/null | sed 's/^[ \t]*//;s/[ \t]*$//'); fi; if [ -f "/sys/block/$clean_name/queue/scheduler" ]; then scheduler=$(cat "/sys/block/$clean_name/queue/scheduler" 2>/dev/null | grep -o '\[.*\]' | tr -d '[]'); [ -z "$scheduler" ] && scheduler=$(cat "/sys/block/$clean_name/queue/scheduler" 2>/dev/null | awk '{print $1}'); fi; if [ -f "/sys/block/$clean_name/queue/rotational" ]; then rotational=$(cat "/sys/block/$clean_name/queue/rotational" 2>/dev/null); [ "$rotational" = "0" ] && disk_type="SSD"; [ "$rotational" = "1" ] && disk_type="HDD"; fi; if [ -f "/sys/block/$clean_name/queue/write_cache" ]; then wcache=$(cat "/sys/block/$clean_name/queue/write_cache" 2>/dev/null); [ "$wcache" = "write back" ] && wcache="WriteBack"; [ "$wcache" = "1" ] && wcache="WriteBack"; [ "$wcache" = "write through" ] && wcache="WriteThrough"; [ "$wcache" = "0" ] && wcache="WriteThrough"; fi; fi; fi; [ -z "$fstype" ] && fstype="-"; [ -z "$mountpoint" ] && mountpoint="-"; [ -z "$vendor" ] && vendor="-"; [ -z "$model" ] && model="-"; [ -z "$scheduler" ] && scheduler="-"; [ -z "$wcache" ] && wcache="-"; echo "$name|$size|$type|$fstype|$mountpoint|$disk_type|$vendor|$model|$scheduler|$wcache"; done; else echo "N/A"; fi; }
 get_cpu_model() { if [ -f /proc/cpuinfo ]; then grep -m 1 'model name' /proc/cpuinfo | sed 's/model name\s*: //' 2>/dev/null || echo "N/A"; else echo "N/A"; fi; }
 get_cpu_physical_cores() { if [ -f /proc/cpuinfo ]; then local cores=$(grep -c 'physical id' /proc/cpuinfo 2>/dev/null); if [ -n "$cores" ] && [ "$cores" -gt 0 ] 2>/dev/null; then echo "$cores"; else nproc 2>/dev/null || echo "N/A"; fi; else echo "N/A"; fi; }
 get_cpu_logical_cores() { nproc 2>/dev/null || grep -c ^processor /proc/cpuinfo 2>/dev/null || echo "N/A"; }
@@ -2975,7 +3040,7 @@ get_cpu_freq() { if [ -f /proc/cpuinfo ]; then local freq=$(grep -m 1 'cpu MHz' 
 get_memory_size_mb() { if [ -f /proc/meminfo ]; then awk '/MemTotal/ {printf "%.0f", $2/1024}' /proc/meminfo 2>/dev/null || echo "N/A"; else echo "N/A"; fi; }
 get_memory_available_mb() { if [ -f /proc/meminfo ]; then awk '/MemAvailable/ {printf "%.0f", $2/1024}' /proc/meminfo 2>/dev/null || echo "N/A"; else echo "N/A"; fi; }
 get_memory_type() { local machine_type=$(get_machine_type 2>/dev/null); if echo "$machine_type" | grep -qi "virtual"; then echo "N/A (virtual machine)"; return; fi; if command -v dmidecode &>/dev/null; then local mem_type=$(dmidecode -t memory 2>/dev/null | awk '/Memory Device/{in_device=1;next} in_device && /^[ \t]*Type:/{print $2;exit}'); if [ -n "$mem_type" ] && [ "$mem_type" != "Unknown" ]; then echo "$mem_type"; return; fi; mem_type=$(dmidecode -t memory 2>/dev/null | grep -A5 'Memory Device' | grep -m 1 'Type:' | sed 's/Type:\s*//' | sed 's/^[ \t]*//' | sed 's/[ \t]*$//' 2>/dev/null); if [ -n "$mem_type" ] && [ "$mem_type" != "Unknown" ] && [ "$mem_type" != "Error" ]; then echo "$mem_type"; return; fi; fi; local dmesg_type=$(dmesg 2>/dev/null | grep -i 'DDR' | head -1 | grep -o 'DDR[0-9]*' | head -1); if [ -n "$dmesg_type" ]; then echo "$dmesg_type"; return; fi; echo "unknown (requires root)"; }
-get_memory_channels() { if command -v dmidecode &>/dev/null; then local channels=$(dmidecode -t memory 2>/dev/null | grep -c 'Channel' 2>/dev/null); if [ "$channels" -gt 0 ]; then echo "$channels"; return; fi; fi; if [ -d /sys/devices/system/node/ ]; then local node_count=$(ls /sys/devices/system/node/ | grep -c '^node[0-9]*$'); if [ "$node_count" -gt 0 ]; then echo "$node_count"; return; fi; fi; echo "unknown (requires root)"; }
+get_memory_channels() { if command -v dmidecode &>/dev/null; then local channels=$(dmidecode -t memory 2>/dev/null | grep -i 'Bank Locator:' | grep -o 'SOCKET [0-9]* CHANNEL [0-9]*' | sort -u | wc -l); if [ "$channels" -gt 0 ] && [ "$channels" -lt 100 ]; then echo "$channels"; return; fi; channels=$(dmidecode -t memory 2>/dev/null | grep -i 'Bank Locator:' | grep -o 'CHANNEL [0-9]*' | sort -u | wc -l); if [ "$channels" -gt 0 ] && [ "$channels" -lt 100 ]; then echo "$channels"; return; fi; fi; if command -v numactl &>/dev/null; then local nodes=$(numactl --hardware 2>/dev/null | grep -c '^node ' 2>/dev/null); if [ "$nodes" -gt 0 ] && [ "$nodes" -lt 100 ]; then echo "$nodes"; return; fi; fi; if [ -d /sys/devices/system/node/ ]; then local node_count=$(ls /sys/devices/system/node/ | grep -c '^node[0-9]*$'); if [ "$node_count" -gt 0 ] && [ "$node_count" -lt 100 ]; then echo "$node_count"; return; fi; fi; echo "unknown (requires root)"; }
 get_memory_freq() { local machine_type=$(get_machine_type 2>/dev/null); if echo "$machine_type" | grep -qi "virtual"; then echo "N/A (virtual machine)"; return; fi; if command -v dmidecode &>/dev/null; then local freq=$(dmidecode -t memory 2>/dev/null | grep -m 1 'Configured Clock Speed' | awk '{print $4}' 2>/dev/null); if [ -n "$freq" ] && [ "$freq" -gt 0 ] 2>/dev/null; then echo "${freq} MHz"; return; fi; freq=$(dmidecode -t memory 2>/dev/null | grep -m 1 'Speed' | awk '{print $2}' 2>/dev/null); if [ -n "$freq" ] && [ "$freq" != "Unknown" ] && [ "$freq" -gt 0 ] 2>/dev/null; then echo "${freq} MHz"; return; fi; fi; echo "unknown (requires root)"; }
 get_cpu_arch() { uname -m 2>/dev/null || echo "unknown"; }
 get_kernel_version() { uname -r 2>/dev/null || echo "unknown"; }
@@ -3006,7 +3071,7 @@ get_benchmark_disk_trim() { local disk=$(get_benchmark_disk_device); if [ -n "$d
 get_benchmark_disk_max_sectors() { local disk=$(get_benchmark_disk_device); if [ -n "$disk" ] && [ -f "/sys/block/$disk/queue/max_sectors_kb" ]; then cat "/sys/block/$disk/queue/max_sectors_kb" 2>/dev/null || echo "N/A"; else echo "N/A"; fi; }
 get_benchmark_mount_options() { local io_path="${IO_PATH:-.}"; if command -v findmnt &>/dev/null; then findmnt -T "$io_path" -o TARGET,FSTYPE,OPTIONS -n 2>/dev/null || echo "N/A"; else echo "N/A"; fi; }
 get_network_advanced_info() { local has_output=false; for iface in $(ls /sys/class/net/ 2>/dev/null | grep -v "^lo$"); do if command -v ethtool &>/dev/null; then local speed=$(ethtool "$iface" 2>/dev/null | grep 'Speed:' | awk '{print $2}'); local duplex=$(ethtool "$iface" 2>/dev/null | grep 'Duplex:' | awk '{print $2}'); local rx_usecs=$(ethtool -c "$iface" 2>/dev/null | grep 'rx-usecs:' | awk '{print $2}'); local tx_usecs=$(ethtool -c "$iface" 2>/dev/null | grep 'tx-usecs:' | awk '{print $2}'); local tso=$(ethtool -k "$iface" 2>/dev/null | grep 'tcp-segmentation-offload:' | awk '{print $2}'); local gro=$(ethtool -k "$iface" 2>/dev/null | grep 'generic-receive-offload:' | awk '{print $2}'); local driver=$(ethtool -i "$iface" 2>/dev/null | grep 'driver:' | awk '{print $2}'); [ -z "$speed" ] && speed="N/A"; [ -z "$duplex" ] && duplex="N/A"; [ -z "$rx_usecs" ] && rx_usecs="N/A"; [ -z "$tx_usecs" ] && tx_usecs="N/A"; [ -z "$tso" ] && tso="N/A"; [ -z "$gro" ] && gro="N/A"; [ -z "$driver" ] && driver="N/A"; echo "${iface}: Speed=${speed}, Duplex=${duplex}, rx-usecs=${rx_usecs}, tx-usecs=${tx_usecs}, TSO=${tso}, GRO=${gro}, Driver=${driver}"; has_output=true; fi; done; if [ "$has_output" = false ]; then echo "N/A"; fi; }
-get_memory_slots_detail() { if ! command -v dmidecode &>/dev/null; then if [ -x "/usr/sbin/dmidecode" ]; then local slots_output=$(/usr/sbin/dmidecode -t memory 2>&1); if echo "$slots_output" | grep -qi "permission denied"; then echo "N/A (permission denied, requires root)"; return; fi; echo "N/A (dmidecode execution failed)"; return; fi; echo "N/A (dmidecode not installed)"; return; fi; local slots_output=""; local success=0; if [ "$(whoami)" = "root" ]; then slots_output=$(/usr/sbin/dmidecode -t memory 2>&1); if echo "$slots_output" | grep -q "Memory Device\|Physical Memory Array"; then success=1; fi; fi; if [ $success -eq 0 ] && command -v sudo &>/dev/null; then slots_output=$(sudo -n /usr/sbin/dmidecode -t memory 2>&1); if echo "$slots_output" | grep -q "Memory Device\|Physical Memory Array"; then success=1; fi; fi; if [ $success -eq 0 ]; then if echo "$slots_output" | grep -qi "permission denied\|password is required"; then echo "N/A (permission denied, requires root)"; else echo "N/A (dmidecode execution failed)"; fi; return; fi; local total_slots=$(echo "$slots_output" | grep -A10 'Physical Memory Array' | grep -i 'Number Of Devices' | awk '{print $NF}'); if [ -z "$total_slots" ] || [ "$total_slots" = "0" ]; then total_slots=$(echo "$slots_output" | grep -c 'Memory Device'); fi; if [ -z "$total_slots" ] || [ "$total_slots" = "0" ]; then local machine_type=$(get_machine_type 2>/dev/null); if echo "$machine_type" | grep -qi "virtual"; then echo "N/A (virtual machine)"; else echo "N/A (no memory slots detected)"; fi; return; fi; local slot_results=$(echo "$slots_output" | awk 'BEGIN { slot_count=0; in_device=0 } /Memory Device/ { if (in_device && size !~ /^(No Module Installed|Unknown)$/ && size != "" && size !~ /^0+\s*(MB|GB|bytes)$/) { print "Slot " slot_count ":"; if (locator != "") print "  Locator: " locator; print "  Size: " size; if (mem_type != "") print "  Type: " mem_type; if (speed != "" && speed != "Unknown") print "  Speed: " speed; if (manufacturer != "" && manufacturer != "Unknown") print "  Manufacturer: " manufacturer; if (part_num != "" && part_num != "Unknown") print "  Part Number: " part_num; } slot_count++; in_device=1; size=""; locator=""; mem_type=""; speed=""; manufacturer=""; part_num="" } in_device && /Locator:/ { locator = substr($0, index($0, $2)); gsub(/^[ \t]+/, "", locator); gsub(/^Locator:\s*/, "", locator) } in_device && /Size:/ { size = substr($0, index($0, "Size:") + 5); gsub(/^[ \t]+/, "", size) } in_device && /Type:/ { mem_type = substr($0, index($0, $2)); gsub(/^[ \t]+/, "", mem_type) } in_device && /Speed:/ { speed = substr($0, index($0, $2)); gsub(/^[ \t]+/, "", speed); gsub(/^Memory Speed:\s*/, "", speed) } in_device && /Manufacturer:/ { manufacturer = substr($0, index($0, $2)); gsub(/^[ \t]+/, "", manufacturer) } in_device && /Part Number:/ { part_num = substr($0, index($0, $3)); gsub(/^[ \t]+/, "", part_num) } END { if (in_device && size !~ /^(No Module Installed|Unknown)$/ && size != "" && size !~ /^0+\s*(MB|GB|bytes)$/) { print "Slot " slot_count ":"; if (locator != "") print "  Locator: " locator; print "  Size: " size; if (mem_type != "") print "  Type: " mem_type; if (speed != "" && speed != "Unknown") print "  Speed: " speed; if (manufacturer != "" && manufacturer != "Unknown") print "  Manufacturer: " manufacturer; if (part_num != "" && part_num != "Unknown") print "  Part Number: " part_num; } }'); local used_slots=$(echo "$slot_results" | grep -c '^Slot '); echo "Total Slots: $total_slots"; echo "Used Slots: $used_slots"; echo "$slot_results"; }
+get_memory_slots_detail() { if ! command -v dmidecode &>/dev/null; then if [ -x "/usr/sbin/dmidecode" ]; then local slots_output=$(/usr/sbin/dmidecode -t memory 2>&1); if echo "$slots_output" | grep -qi "permission denied"; then echo "N/A (permission denied, requires root)"; return; fi; echo "N/A (dmidecode execution failed)"; return; fi; echo "N/A (dmidecode not installed)"; return; fi; local slots_output=""; local success=0; if [ "$(whoami)" = "root" ]; then slots_output=$(/usr/sbin/dmidecode -t memory 2>&1); if echo "$slots_output" | grep -q "Memory Device\|Physical Memory Array"; then success=1; fi; fi; if [ $success -eq 0 ] && command -v sudo &>/dev/null; then slots_output=$(sudo -n /usr/sbin/dmidecode -t memory 2>&1); if echo "$slots_output" | grep -q "Memory Device\|Physical Memory Array"; then success=1; fi; fi; if [ $success -eq 0 ]; then if echo "$slots_output" | grep -qi "permission denied\|password is required"; then echo "N/A (permission denied, requires root)"; else echo "N/A (dmidecode execution failed)"; fi; return; fi; local total_slots=$(echo "$slots_output" | grep -A10 'Physical Memory Array' | grep -i 'Number Of Devices' | awk '{print $NF}'); if [ -z "$total_slots" ] || [ "$total_slots" = "0" ]; then total_slots=$(echo "$slots_output" | grep -c 'Memory Device'); fi; if [ -z "$total_slots" ] || [ "$total_slots" = "0" ]; then local machine_type=$(get_machine_type 2>/dev/null); if echo "$machine_type" | grep -qi "virtual"; then echo "N/A (virtual machine)"; else echo "N/A (no memory slots detected)"; fi; return; fi; local slot_results=$(echo "$slots_output" | awk 'BEGIN { slot_count=0; in_device=0; used_count=0; found_size=0 } /Memory Device/ { if (in_device) { print "Slot " slot_count ":"; if (bank_locator != "") print "  Locator: " bank_locator; else if (locator != "") print "  Locator: " locator; if (found_size == 1) { print "  Size: " size; } else { print "  Size: None"; } if (mem_type != "" && mem_type != "Unknown") print "  Type: " mem_type; else if (size ~ /No Module Installed/) print "  Type: Unknown"; if (speed != "" && speed != "Unknown") print "  Speed: " speed; if (manufacturer != "" && manufacturer != "Unknown") print "  Manufacturer: " manufacturer; else if (size ~ /No Module Installed/) print "  Manufacturer: NO DIMM"; if (part_num != "" && part_num != "Unknown") print "  Part Number: " part_num; else if (size ~ /No Module Installed/) print "  Part Number: NO DIMM"; if (size !~ /^(No Module Installed|Unknown)$/ && found_size == 1 && size !~ /^0+\s*(MB|GB|bytes)$/) { used_count++; } } slot_count++; in_device=1; size=""; locator=""; bank_locator=""; mem_type=""; speed=""; manufacturer=""; part_num=""; found_size=0 } in_device && /^[ \t]*Locator:/ { locator = substr($0, index($0, "Locator:") + 8); gsub(/^[ \t]+/, "", locator); gsub(/[ \t]+$/, "", locator) } in_device && /^[ \t]*Bank Locator:/ { bank_locator = substr($0, index($0, "Bank Locator:") + 13); gsub(/^[ \t]+/, "", bank_locator); gsub(/[ \t]+$/, "", bank_locator) } in_device && /^[ \t]*Size:/ && !/Non-Volatile/ && !/Volatile/ && !/Cache/ && !/Logical/ && found_size == 0 { size = substr($0, index($0, "Size:") + 5); gsub(/^[ \t]+/, "", size); gsub(/[ \t]+$/, "", size); found_size=1 } in_device && /^[ \t]*Type:/ && !/Type Detail/ { mem_type = substr($0, index($0, "Type:") + 5); gsub(/^[ \t]+/, "", mem_type); gsub(/[ \t]+$/, "", mem_type) } in_device && /^[ \t]*Speed:/ { speed = substr($0, index($0, "Speed:") + 6); gsub(/^[ \t]+/, "", speed); gsub(/[ \t]+$/, "", speed); gsub(/^Memory Speed:\s*/, "", speed) } in_device && /^[ \t]*Manufacturer:/ { manufacturer = substr($0, index($0, "Manufacturer:") + 13); gsub(/^[ \t]+/, "", manufacturer); gsub(/[ \t]+$/, "", manufacturer) } in_device && /^[ \t]*Part Number:/ { part_num = substr($0, index($0, "Part Number:") + 12); gsub(/^[ \t]+/, "", part_num); gsub(/[ \t]+$/, "", part_num) } END { if (in_device) { print "Slot " slot_count ":"; if (bank_locator != "") print "  Locator: " bank_locator; else if (locator != "") print "  Locator: " locator; if (found_size == 1) { print "  Size: " size; } else { print "  Size: None"; } if (mem_type != "" && mem_type != "Unknown") print "  Type: " mem_type; else if (size ~ /No Module Installed/) print "  Type: Unknown"; if (speed != "" && speed != "Unknown") print "  Speed: " speed; if (manufacturer != "" && manufacturer != "Unknown") print "  Manufacturer: " manufacturer; else if (size ~ /No Module Installed/) print "  Manufacturer: NO DIMM"; if (part_num != "" && part_num != "Unknown") print "  Part Number: " part_num; else if (size ~ /No Module Installed/) print "  Part Number: NO DIMM"; if (size !~ /^(No Module Installed|Unknown)$/ && found_size == 1 && size !~ /^0+\s*(MB|GB|bytes)$/) { used_count++; } } print "USED_COUNT=" used_count; }'); local used_slots=$(echo "$slot_results" | grep 'USED_COUNT=' | awk -F'=' '{print $2}'); slot_results=$(echo "$slot_results" | grep -v 'USED_COUNT='); echo "Total Slots: $total_slots"; echo "Used Slots: $used_slots"; echo "$slot_results"; }
 REMOTE_EOF
 }
 
@@ -3247,22 +3312,6 @@ validate_all_paths() {
     if [ "$error_count" -gt 0 ]; then
         echo "Error: $error_count path validation error(s) found"
         exit 1
-    fi
-}
-
-# Cleanup test file
-cleanup_file() {
-    local file="$1"
-    if [ -f "$file" ]; then
-        rm -f "$file"
-    fi
-}
-
-# Cleanup test directory
-cleanup_dir() {
-    local dir="$1"
-    if [ -d "$dir" ]; then
-        rm -rf "$dir"
     fi
 }
 
@@ -6492,7 +6541,6 @@ generate_report() {
     printf -- "--------------------------------------------------------------------------------\n" >> "$report_file"
     printf -- "%-28s %-20s %-25s\n" "Unified Duration" "DURATION" "${unified_duration}s" >> "$report_file"
     printf -- "%-28s %-20s %-25s\n" "Output Directory" "OUTPUT_DIR" "$OUTPUT_DIR" >> "$report_file"
-    printf -- "%-28s %-20s %-25s\n" "Cleanup After Test" "CLEANUP" "${CLEANUP:-true}" >> "$report_file"
     printf -- "%-28s %-20s %-25s\n" "Execution Mode" "EXEC_MODE" "${EXEC_MODE:-parallel}" >> "$report_file"
     printf -- "%-28s %-20s %-25s\n" "SSH Port" "SSH_PORT" "$SSH_PORT" >> "$report_file"
     printf -- "%-28s %-20s %-25s\n" "Report Hardware Info" "REPORT_HARDWARE_INFO" "${REPORT_HARDWARE_INFO:-true}" >> "$report_file"
@@ -7399,7 +7447,6 @@ main() {
     
     # Set default values
     FORMAT="${FORMAT:-txt}"
-    CLEANUP="${CLEANUP:-true}"
     
     # Convert OUTPUT_DIR to absolute path to avoid issues when script changes directory
     case "$OUTPUT_DIR" in
@@ -8829,7 +8876,7 @@ validate_all_parameters() {
     fi
 
     # Validate BOOLEAN type parameters
-    for bool_param in "CLEANUP" "NO_CHECKS"; do
+    for bool_param in "NO_CHECKS"; do
         local param_val=$(eval echo \${$bool_param:-})
         if [ -n "$param_val" ]; then
             local valid_booleans="true false"

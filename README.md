@@ -25,7 +25,7 @@ yum install ethtool numactl
 
 **编译安装说明**：
 
-编译安装仅需在**编译机（脚本所在服务器）上安装编译依赖，其它远程服务器无需安装编译工具，工具会自动推送到多机。
+编译安装仅需在\*\*编译机（脚本所在服务器）上安装编译依赖，其它远程服务器无需安装编译工具，工具会自动推送到多机。
 
 > **重要**：必须先手动安装编译依赖库：
 >
@@ -337,28 +337,23 @@ cat output/original_data_*_all_results.log
 
 ### 多服务器网络测试
 
-```bash
-# 矩阵模式测试所有服务器间网络（主机数>3时自动分批并行）
-./oscheckperf network -f server_list NETWORK_MODE=matrix 
+- `serial`：串行模式，使用server\_list文件IP列表中第一个主机作为服务器，其余主机作为客户端依次测试
+  - 支持本地和远程服务器（自动检测）
+  - 第一个主机为本机时直接执行，无需SSH开销
+- `matrix`：执行全矩阵交叉测试（每对服务器之间都进行测试）
+  - **自动分批并行**：当主机数 > 3 时，自动启用分批并行执行（参考 gpcheckperf）
+  - **并行度**：自动计算为 `floor(主机数 / 2)`，无需手动配置
+  - **批次内**：多个主机对同时测试，无资源竞争
+  - **批次间**：顺序执行，确保测试准确性
+  - **端口偏移**：批次内不同主机对使用不同端口（NETWORK\_PORT + 序号）
 
-# 串行模式：第一个主机作为服务器，其余作为客户端（支持本地/远程服务器）
-./oscheckperf network -f server_list NETWORK_MODE=serial
-```
-
-**矩阵测试分批并行说明**：
-
-- **自动分批**：当主机数 > 3 时，矩阵模式自动启用分批并行执行
-- **并行度计算**：自动计算为 `floor(主机数 / 2)`，无需手动配置
-- **完美匹配算法**：每批次内所有主机都参与测试且无资源竞争
-- **端口偏移机制**：批次内不同主机对使用不同端口（NETWORK\_PORT + 序号）
-
-| 主机数 | 并行度 | 总测试对 | 总批次数 |
-| --- | --- | ---- | ---- |
-| 2   | 1   | 1    | 1    |
-| 3   | 1   | 3    | 3    |
-| 4   | 2   | 6    | 3    |
-| 6   | 3   | 15   | 5    |
-| 8   | 4   | 28   | 7    |
+| 主机数 | 并行度 | 总测试对 | 总批次数 | 所需端口数 |
+| --- | --- | ---- | ---- | ----- |
+| 2   | 1   | 1    | 1    | 1     |
+| 3   | 1   | 3    | 3    | 1     |
+| 4   | 2   | 6    | 3    | 2     |
+| 6   | 3   | 15   | 5    | 3     |
+| 8   | 4   | 28   | 7    | 4     |
 
 ### 硬件信息及检查
 
@@ -375,43 +370,53 @@ cat output/original_data_*_all_results.log
 
 ### Q1: 测试需要 root 权限吗？
 
-**A**: 压测不需要root权限，以下情况需要：
+非 root 用户运行时，硬件信息可能显示不完整（主要集中在dmidecode ），不影响测试功能。
 
-- 部分硬件信息采集需要root ，如：dmidecode 查看内存槽信息，没有root权限会不显示相关内容
-- 安装依赖包/或者编译依赖包时需要 root 权限
+### Q2: IO测试文件会自动清理吗？如何自定义测试路径？
 
-### Q2: IO测试完会删除测试文件吗？
+**A**: IO压测写入指定 `IO_PATH` 参数目录（默认 `$HOME/oscheckperf/io_test`），测试完成后会自动清理。可通过参数自定义路径：`./oscheckperf io IO_PATH=/data`
 
-**A**: IO压测写入指定IO\_PATH参数目录（默认 `$HOME/oscheckperf/io_test`）测试完成后会自动清理
+### Q3: 需要哪些端口？
 
-### Q3: 如何自定义 IO 测试路径？
+| 端口类型   | 参数名            | 默认值   | 用途         |
+| ------ | -------------- | ----- | ---------- |
+| SSH端口  | `SSH_PORT`     | 22    | 远程服务器SSH连接 |
+| 网络测试端口 | `NETWORK_PORT` | 25201 | iperf3网络测试 |
 
-**A**: 使用 `IO_PATH` 参数：`./oscheckperf io IO_PATH=/data`
+串行模式下，只需要25201端口
 
-### Q4: NETWORK\_MODE 和NETWORK\_PARALLEL具体指什么？
+矩阵模式下，当主机数 > 3 时会自动分配偏移端口（`NETWORK_PORT + 序号`），偏移量取决批次内主机个数，有防火墙时建议开发端口参考`matrix`部分所列端口数。
+
+### Q4: 执行工具的用户（协调机）与 server\_list 中的用户必须一致吗？
+
+需要保证一致性，路径等参数传递时依赖类似$HOME等参数
+
+### Q5: IO 压测文件大小如何计算？
+
+**A**: sysbench 和 fio 的文件大小计算方式不同：
+
+#### sysbench 文件大小
+
+```
+每个文件大小 = IO_TOTAL_SIZE / SYSBENCH_FILE_NUM
+```
+
+例如：`IO_TOTAL_SIZE=1G`，`SYSBENCH_FILE_NUM=4` → 每个文件 256M
+
+#### fio 文件大小
+
+```
+每个文件大小 = IO_TOTAL_SIZE / (FIO_FILE_NUM * FIO_NUMJOBS)
+总计 = 每个文件大小 × FIO_FILE_NUM × FIO_NUMJOBS = IO_TOTAL_SIZE
+```
+
+例如：`IO_TOTAL_SIZE=1G`，`FIO_FILE_NUM=4`，`FIO_NUMJOBS=4` → 每个文件 64M
+
+### Q6: IO\_TOTAL\_SIZE 和 DURATION 的关系？RAID 缓存有影响吗？
 
 **A**:
 
-- **NETWORK\_MODE**：控制网络测试的模式
-  - `serial`：串行模式，使用server\_list文件IP列表中第一个主机作为服务器，其余主机作为客户端依次测试
-    - 支持本地和远程服务器（自动检测）
-    - 第一个主机为本机时直接执行，无需SSH开销
-  - `matrix`：执行全矩阵交叉测试（每对服务器之间都进行测试）
-    - **自动分批并行**：当主机数 > 3 时，自动启用分批并行执行（参考 gpcheckperf）
-    - **并行度**：自动计算为 `floor(主机数 / 2)`，无需手动配置
-    - **批次内**：多个主机对同时测试，无资源竞争
-    - **批次间**：顺序执行，确保测试准确性
-    - **端口偏移**：批次内不同主机对使用不同端口（NETWORK\_PORT + 序号）
-- **NETWORK\_PARALLEL**：控制每个 iperf3 测试的并行连接数，在所有模式下都生效
-  - 例如：`NETWORK_PARALLEL=4` 表示每个测试使用 4 个并行连接
-
-**示例**：
-
-```bash
-# 串行模式，每个测试使用 4 个并行连接
-./oscheckperf network -f server_list NETWORK_MODE=serial NETWORK_PARALLEL=4
-
-# 矩阵模式，通过参数或这通过配置文件设置 NETWORK_MODE=matrix
-./oscheckperf network -f server_list  -p parameter.conf
-```
+- `IO_TOTAL_SIZE` 是测试文件总大小，`DURATION` 是测试持续时间，两者独立配置
+- 当`IO_TOTAL_SIZE`较小时，`DURATION`内工具会反复读或写`IO_PATH`文件；sysbench 和 fio 都支持此机制
+- `direct=1` 只绕过操作系统缓存，**无法绕过 RAID 卡缓存，**`IO_TOTAL_SIZE`和`DURATION`应合理设置大小，否则结果偏高。
 
