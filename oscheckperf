@@ -42,10 +42,10 @@ IO_PATH=""
 
 # Load hardware collection functions from separate file
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-if [ -f "$SCRIPT_DIR/lib/hw_functions" ]; then
-    source "$SCRIPT_DIR/lib/hw_functions"
-elif [ -f "$BASE_DIR/lib/hw_functions" ]; then
-    source "$BASE_DIR/lib/hw_functions"
+if [ -f "$SCRIPT_DIR/tools/hw_functions" ]; then
+    source "$SCRIPT_DIR/tools/hw_functions"
+elif [ -f "$BASE_DIR/tools/hw_functions" ]; then
+    source "$BASE_DIR/tools/hw_functions"
 else
     echo "Error: hw_functions not found" >&2
     exit 1
