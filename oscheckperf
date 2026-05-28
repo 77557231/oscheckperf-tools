@@ -1,7 +1,7 @@
 #!/bin/bash
 #--------------------------------------------------------------------------------
 #-- File name:   oscheckperf
-#-- Version:     v1.1.5
+#-- Version:     v1.1.6
 #-- Purpose:     Database System Benchmark Tool
 #-- Author:      Wanping Pan 
 #-- Description: One-click system benchmarking tool, supports configuration via config file or command line parameters
@@ -40,15 +40,12 @@ TMP_DIR="$BASE_DIR/tmp"
 # IO test data directory (sysbench/fio test files)
 IO_PATH=""
 
-# Load hardware collection functions from separate file
+# Load hardware collection functions from separate file (optional)
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 if [ -f "$SCRIPT_DIR/tools/hw_functions" ]; then
     source "$SCRIPT_DIR/tools/hw_functions"
 elif [ -f "$BASE_DIR/tools/hw_functions" ]; then
     source "$BASE_DIR/tools/hw_functions"
-else
-    echo "Error: hw_functions not found" >&2
-    exit 1
 fi
 
 # Output directory for final reports and logs (original_data*, data*, report_benchmark*)
@@ -277,7 +274,7 @@ parse_cpu_report() {
             current_min_lat=""
             current_sum_lat=""
             current_fairness=""
-        elif [[ "$line" =~ "MEMORY TEST RESULTS" || "$line" =~ "SYSBENCH FILEIO TEST RESULTS" || "$line" =~ "THREADS TEST RESULTS" || "$line" =~ "MUTEX TEST RESULTS" || "$line" =~ "NETWORK TEST RESULTS" ]]; then
+        elif [[ "$line" =~ "MEMORY.*TEST RESULTS" || "$line" =~ "SYSBENCH FILEIO TEST RESULTS" || "$line" =~ "THREADS TEST RESULTS" || "$line" =~ "MUTEX TEST RESULTS" || "$line" =~ "NETWORK TEST RESULTS" ]]; then
             if [ "$in_section" = true ] && [ -n "$current_server_ip" ]; then
                 printf "  %-18s %-12s %-12s %-12s %-12s %-12s %-14s %-10s\n" "$current_server_ip" "${current_eps:-N/A}" "${current_avg_lat:-N/A}" "${current_p95_lat:-N/A}" "${current_max_lat:-N/A}" "${current_min_lat:-N/A}" "${current_sum_lat:-N/A}" "${current_fairness:-N/A}" >> "$output_file"
             fi
@@ -315,18 +312,19 @@ parse_memory_report() {
         return
     fi
     
-    if ! grep -q "MEMORY TEST RESULTS" "$input_file" 2>/dev/null; then
+    if ! grep -q "MEMORY.*TEST RESULTS" "$input_file" 2>/dev/null; then
         echo "  Test not executed" >> "$output_file"
         return
     fi
     
     echo "  Memory Test Results" >> "$output_file"
-    echo "  -----------------------------------------------------------------------------------------------------------------------" >> "$output_file"
-    printf "  %-18s %-12s %-12s %-12s %-10s %-10s %-10s %-12s %-10s\n" "Server IP" "Ops/sec" "MiB/sec" "Avg Lat(ms)" "Min Lat(ms)" "Max Lat(ms)" "P95 Lat(ms)" "Sum Lat(ms)" "Fairness(avg)" >> "$output_file"
-    echo "  -----------------------------------------------------------------------------------------------------------------------" >> "$output_file"
+    echo "  ---------------------------------------------------------------------------------------------------------------------------------" >> "$output_file"
+    printf "  %-18s %-12s %-12s %-12s %-10s %-10s %-10s %-12s %-17s %-8s\n" "Server IP" "Ops/sec" "MiB/sec" "Avg Lat(ms)" "Min Lat(ms)" "Max Lat(ms)" "P95 Lat(ms)" "Sum Lat(ms)" "Fairness(avg)" "Mode" >> "$output_file"
+    echo "  ---------------------------------------------------------------------------------------------------------------------------------" >> "$output_file"
     
     local in_section=false
     local current_server_ip=""
+    local current_mode=""
     local current_ops_sec=""
     local current_mib_sec=""
     local current_mem_avg_lat=""
@@ -337,12 +335,13 @@ parse_memory_report() {
     local current_mem_fairness=""
     
     while IFS= read -r line; do
-        if [[ "$line" =~ "MEMORY TEST RESULTS" ]]; then
+        if [[ "$line" =~ MEMORY\ ([A-Z]+)\ TEST\ RESULTS ]]; then
             if [ "$in_section" = true ] && [ -n "$current_server_ip" ]; then
-                printf "  %-18s %-12s %-12s %-12s %-10s %-10s %-10s %-12s %-10s\n" "$current_server_ip" "${current_ops_sec:-N/A}" "${current_mib_sec:-N/A}" "${current_mem_avg_lat:-N/A}" "${current_mem_min_lat:-N/A}" "${current_mem_max_lat:-N/A}" "${current_mem_p95_lat:-N/A}" "${current_mem_sum_lat:-N/A}" "${current_mem_fairness:-N/A}" >> "$output_file"
+                printf "  %-18s %-12s %-12s %-12s %-10s %-10s %-10s %-12s %-20s %-8s\n" "$current_server_ip" "${current_ops_sec:-N/A}" "${current_mib_sec:-N/A}" "${current_mem_avg_lat:-N/A}" "${current_mem_min_lat:-N/A}" "${current_mem_max_lat:-N/A}" "${current_mem_p95_lat:-N/A}" "${current_mem_sum_lat:-N/A}" "${current_mem_fairness:-N/A}" "${current_mode:-N/A}" >> "$output_file"
             fi
             in_section=true
             current_server_ip=$(echo "$line" | grep -oP 'Server: \K[0-9.]+' || echo "N/A")
+            current_mode=$(echo "$line" | awk '{print $2}' | tr '[:upper:]' '[:lower:]')
             current_ops_sec=""
             current_mib_sec=""
             current_mem_avg_lat=""
@@ -353,7 +352,7 @@ parse_memory_report() {
             current_mem_fairness=""
         elif [[ "$line" =~ "SYSBENCH FILEIO TEST RESULTS" || "$line" =~ "THREADS TEST RESULTS" || "$line" =~ "MUTEX TEST RESULTS" || "$line" =~ "NETWORK TEST RESULTS" ]]; then
             if [ "$in_section" = true ] && [ -n "$current_server_ip" ]; then
-                printf "  %-18s %-12s %-12s %-12s %-10s %-10s %-10s %-12s %-10s\n" "$current_server_ip" "${current_ops_sec:-N/A}" "${current_mib_sec:-N/A}" "${current_mem_avg_lat:-N/A}" "${current_mem_min_lat:-N/A}" "${current_mem_max_lat:-N/A}" "${current_mem_p95_lat:-N/A}" "${current_mem_sum_lat:-N/A}" "${current_mem_fairness:-N/A}" >> "$output_file"
+                printf "  %-18s %-12s %-12s %-12s %-10s %-10s %-10s %-12s %-20s %-8s\n" "$current_server_ip" "${current_ops_sec:-N/A}" "${current_mib_sec:-N/A}" "${current_mem_avg_lat:-N/A}" "${current_mem_min_lat:-N/A}" "${current_mem_max_lat:-N/A}" "${current_mem_p95_lat:-N/A}" "${current_mem_sum_lat:-N/A}" "${current_mem_fairness:-N/A}" "${current_mode:-N/A}" >> "$output_file"
             fi
             in_section=false
         elif [ "$in_section" = true ]; then
@@ -378,7 +377,7 @@ parse_memory_report() {
     done < "$input_file"
     
     if [ "$in_section" = true ] && [ -n "$current_server_ip" ]; then
-        printf "  %-18s %-12s %-12s %-12s %-10s %-10s %-10s %-12s %-10s\n" "$current_server_ip" "${current_ops_sec:-N/A}" "${current_mib_sec:-N/A}" "${current_mem_avg_lat:-N/A}" "${current_mem_min_lat:-N/A}" "${current_mem_max_lat:-N/A}" "${current_mem_p95_lat:-N/A}" "${current_mem_sum_lat:-N/A}" "${current_mem_fairness:-N/A}" >> "$output_file"
+        printf "  %-18s %-12s %-12s %-12s %-10s %-10s %-10s %-12s %-20s %-8s\n" "$current_server_ip" "${current_ops_sec:-N/A}" "${current_mib_sec:-N/A}" "${current_mem_avg_lat:-N/A}" "${current_mem_min_lat:-N/A}" "${current_mem_max_lat:-N/A}" "${current_mem_p95_lat:-N/A}" "${current_mem_sum_lat:-N/A}" "${current_mem_fairness:-N/A}" "${current_mode:-N/A}" >> "$output_file"
     fi
 }
 
@@ -859,7 +858,7 @@ parse_args() {
                 exit 0
                 ;;
             --version)
-                echo "Version: 1.1.3"
+                echo "Version: 1.1.6"
                 exit 0
                 ;;
             --dry-run)
@@ -1084,7 +1083,7 @@ show_help() {
     echo "  MEMORY_THREADS=<number>     Memory test threads, 0=auto (default: 0)"
     echo "  MEMORY_BLOCK_SIZE=<size>    Block size, e.g. 8K (default: 8K)"
     echo "  MEMORY_TOTAL_SIZE=<size>    Total test size, e.g. 20G (default: 20G)"
-    echo "  MEMORY_OPER=read|write      Memory operation (default: read)"
+    echo "  MEMORY_OPER=read|write|read write  Memory operation(s) (default: read write)"
     echo ""
     echo "IO test parameters:"
     echo "  Common IO parameters:"
@@ -2209,6 +2208,7 @@ parse_cpu_result() {
 # Parse memory result
 parse_memory_result() {
     local result_file="$1"
+    local oper_type="$2"
     
     # Extract Total operations and operations per second
     local total_ops_line=$(grep "Total operations:" "$result_file" 2>/dev/null)
@@ -2232,7 +2232,7 @@ parse_memory_result() {
     
     # Display detailed summary
     echo ""
-    echo "Memory test summary:"
+    echo "Memory ${oper_type} test summary:"
     echo "  Total operations: ${total_ops} (${ops_per_sec} per second)"
     echo "  Transferred: ${transferred} MiB (${mib_per_sec} MiB/sec)"
     echo "  Avg Latency: ${avg_latency}ms"
@@ -4633,43 +4633,43 @@ run_cpu_test() {
 run_memory_test() {
     echo "=== Memory Performance Test ==="
     
-    local temp_output_file="$TMP_DIR/vb_memory_${TIMESTAMP}.log"
     local threads="${MEMORY_THREADS:-0}"
     if [ "$threads" -eq 0 ]; then
         threads=$(get_cpu_cores)
     fi
     local duration="$DURATION"
     
-    # Only display test info in non-remote mode
-    if [ "$REMOTE" != "true" ]; then
-        echo "Starting memory test..."
-        echo "  Threads: $threads, Duration: ${duration}s, Block size: ${MEMORY_BLOCK_SIZE:-8K}"
-    fi
+    local memory_oper_list="${MEMORY_OPER:-read write}"
+    local IFS=' '
+    read -ra oper_array <<< "$memory_oper_list"
     
-    run_command "sysbench memory \
-        --memory-block-size=\"${MEMORY_BLOCK_SIZE:-8K}\" \
-        --memory-total-size=\"${MEMORY_TOTAL_SIZE:-20G}\" \
-        --memory-oper=\"${MEMORY_OPER:-read}\" \
-        --threads=\"$threads\" \
-        --time=\"${duration}\" \
-        run" "$temp_output_file"
-    
-    # Parse result and display detailed output
-    if [ "$DRY_RUN" != true ] && [ -f "$temp_output_file" ]; then
-        # Display parsed output
-        parse_memory_result "$temp_output_file"
+    for oper in "${oper_array[@]}"; do
+        local temp_output_file="$TMP_DIR/vb_memory_${oper}_${TIMESTAMP}.log"
         
-        # Append to combined results file
-        append_to_original "MEMORY TEST RESULTS" "$temp_output_file"
-    fi
-    
-    # Cleanup temp file
-    rm -f "$temp_output_file"
-    
-    # Only display completion message in non-remote mode
-    if [ "$REMOTE" != "true" ]; then
-        echo "✓ Memory test completed"
-    fi
+        if [ "$REMOTE" != "true" ]; then
+            echo "Starting memory ${oper} test..."
+            echo "  Threads: $threads, Duration: ${duration}s, Block size: ${MEMORY_BLOCK_SIZE:-8K}"
+        fi
+        
+        run_command "sysbench memory \
+            --memory-block-size=\"${MEMORY_BLOCK_SIZE:-8K}\" \
+            --memory-total-size=\"${MEMORY_TOTAL_SIZE:-20G}\" \
+            --memory-oper=\"$oper\" \
+            --threads=\"$threads\" \
+            --time=\"${duration}\" \
+            run" "$temp_output_file"
+        
+        if [ "$DRY_RUN" != true ] && [ -f "$temp_output_file" ]; then
+            parse_memory_result "$temp_output_file" "$oper"
+            append_to_original "MEMORY ${oper^^} TEST RESULTS" "$temp_output_file"
+        fi
+        
+        rm -f "$temp_output_file"
+        
+        if [ "$REMOTE" != "true" ]; then
+            echo "✓ Memory ${oper} test completed"
+        fi
+    done
 }
 
 # Generate report
@@ -4732,17 +4732,21 @@ generate_report() {
     
     # Add Hardware Information
     if [ "${REPORT_HARDWARE_INFO:-true}" = "true" ]; then
-        local hardware_temp_file="$OUTPUT_DIR/hardware_temp_${TIMESTAMP}.log"
-        
-        if [ ${#target_servers[@]} -gt 0 ]; then
-            generate_hardware_report_unified "$hardware_temp_file" "${target_servers[@]}"
+        if ! command -v generate_hardware_report_unified &> /dev/null; then
+            echo "Warning: hw_functions not found, skipping hardware information in report" >&2
         else
-            generate_hardware_report_unified "$hardware_temp_file"
-        fi
+            local hardware_temp_file="$OUTPUT_DIR/hardware_temp_${TIMESTAMP}.log"
+            
+            if [ ${#target_servers[@]} -gt 0 ]; then
+                generate_hardware_report_unified "$hardware_temp_file" "${target_servers[@]}"
+            else
+                generate_hardware_report_unified "$hardware_temp_file"
+            fi
         
-        printf -- "\n" >> "$report_file"
-        cat "$hardware_temp_file" >> "$report_file"
-        rm -f "$hardware_temp_file"
+            printf -- "\n" >> "$report_file"
+            cat "$hardware_temp_file" >> "$report_file"
+            rm -f "$hardware_temp_file"
+        fi
         
         printf -- "\n" >> "$report_file"
     fi
@@ -5819,6 +5823,11 @@ main() {
     
     # Handle hardware subcommand
     if [ "$HARDWARE_ONLY" = "true" ]; then
+        if ! command -v get_cpu_arch &> /dev/null; then
+            echo "Error: hw_functions not found" >&2
+            echo "Please ensure hw_functions is present in tools/ directory" >&2
+            exit 1
+        fi
         echo "Hardware Information Report"
         echo "=========================="
         echo ""
@@ -6461,7 +6470,7 @@ install_build_dependencies() {
 #   1: failure
 #   2: skipped (architecture mismatch)
 #   3: skipped (OS mismatch)
-#   4: skipped (distro mismatch, will use remote compilation)
+#   4: skipped (distro mismatch, requires manual installation)
 distribute_to_server() {
     local target_ip="$1"
     local local_ip="$2"
@@ -6529,7 +6538,7 @@ distribute_to_server() {
         # Check distribution compatibility for Linux
         if [ "$local_os" = "Linux" ] && [ "$local_distro" != "$remote_distro" ] && [ "$remote_distro" != "unknown" ]; then
             echo "  ✗ Distribution mismatch: local is $local_distro, remote is $remote_distro"
-            echo "  - Using remote compilation for $target_ip"
+            echo "  - Skipping distribution to $target_ip (requires manual remote installation)"
             return 4
         fi
     fi
@@ -6972,11 +6981,11 @@ install_components() {
                 done
             fi
             if [ ${#skipped_distro[@]} -gt 0 ]; then
-                echo "  Distribution mismatch (requires remote compilation):"
+                echo "  Distribution mismatch (skipped):"
                 for ip in "${skipped_distro[@]}"; do
                     echo "    - $ip"
                 done
-                echo "  Note: Servers with distribution mismatch will need manual remote compilation"
+                echo "  Note: Servers with distribution mismatch require manual installation"
             fi
             if [ ${#failed[@]} -gt 0 ]; then
                 echo "  Distribution failed:"
@@ -7086,11 +7095,16 @@ validate_all_parameters() {
     # Validate MEMORY_OPER
     if [ -n "$MEMORY_OPER" ]; then
         local valid_memory_oper="read write"
-        if [[ ! " $valid_memory_oper " =~ " $MEMORY_OPER " ]]; then
-            output="${output}ERROR: Invalid MEMORY_OPER: $MEMORY_OPER\n"
-            output="${output}  Valid values: $valid_memory_oper\n"
-            error_count=$((error_count + 1))
-        fi
+        local IFS=' '
+        read -ra oper_array <<< "$MEMORY_OPER"
+        for oper in "${oper_array[@]}"; do
+            if [[ ! " $valid_memory_oper " =~ " $oper " ]]; then
+                output="${output}ERROR: Invalid MEMORY_OPER: $MEMORY_OPER\n"
+                output="${output}  Valid values: read, write, or read write\n"
+                error_count=$((error_count + 1))
+                break
+            fi
+        done
     fi
 
     # Validate BOOLEAN type parameters

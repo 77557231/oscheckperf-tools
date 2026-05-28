@@ -264,12 +264,12 @@ cat output/original_data_*_all_results.log
 
 #### Memory 参数
 
-| 参数                  | 默认值    | 说明                      |
-| ------------------- | ------ | ----------------------- |
-| `MEMORY_THREADS`    | `0`    | 内存测试线程数，0=自动（与CPU核心数一致） |
-| `MEMORY_BLOCK_SIZE` | `8K`   | 内存测试块大小                 |
-| `MEMORY_TOTAL_SIZE` | `20G`  | 内存测试总大小（测试数据量）          |
-| `MEMORY_OPER`       | `read` | 内存操作类型（read/write）      |
+| 参数                  | 默认值          | 说明                      |
+| ------------------- | ------------ | ----------------------- |
+| `MEMORY_THREADS`    | `0`          | 内存测试线程数，0=自动（与CPU核心数一致） |
+| `MEMORY_BLOCK_SIZE` | `8K`         | 内存测试块大小                 |
+| `MEMORY_TOTAL_SIZE` | `20G`        | 内存测试总大小（测试数据量）          |
+| `MEMORY_OPER`       | `read write` | 内存操作类型                  |
 
 #### Mutex 参数
 
