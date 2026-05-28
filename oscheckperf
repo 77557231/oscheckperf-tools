@@ -396,9 +396,9 @@ parse_threads_report() {
     fi
     
     echo "  Threads Test Results" >> "$output_file"
-    echo "  ------------------------------------------------------------------------------------------------------------" >> "$output_file"
-    printf "  %-18s %-12s %-12s %-12s %-10s %-10s %-12s %-10s\n" "Server IP" "Events/sec" "Avg Lat(ms)" "P95 Lat(ms)" "Min Lat(ms)" "Max Lat(ms)" "Sum Lat(ms)" "Fairness(avg)" >> "$output_file"
-    echo "  ------------------------------------------------------------------------------------------------------------" >> "$output_file"
+    echo "  ----------------------------------------------------------------------------------------------------------------------" >> "$output_file"
+    printf "  %-18s %-12s %-12s %-12s %-14s %-14s %-16s %-14s\n" "Server IP" "Events/sec" "Avg Lat(ms)" "P95 Lat(ms)" "Min Lat(ms)" "Max Lat(ms)" "Sum Lat(ms)" "Fairness(avg)" >> "$output_file"
+    echo "  ----------------------------------------------------------------------------------------------------------------------" >> "$output_file"
     
     local in_section=false
     local current_server_ip=""
@@ -417,7 +417,7 @@ parse_threads_report() {
         if [[ "$line" =~ "THREADS TEST RESULTS" ]]; then
             if [ "$in_section" = true ] && [ -n "$current_server_ip" ]; then
                 current_eps=$(calc_eps "$current_events" "$current_time")
-                printf "  %-18s %-12s %-12s %-12s %-10s %-10s %-12s %-10s\n" "$current_server_ip" "${current_eps:-N/A}" "${current_threads_avg_lat:-N/A}" "${current_threads_p95_lat:-N/A}" "${current_threads_min_lat:-N/A}" "${current_threads_max_lat:-N/A}" "${current_threads_sum_lat:-N/A}" "${current_threads_fairness:-N/A}" >> "$output_file"
+                printf "  %-18s %-12s %-12s %-12s %-14s %-14s %-16s %-14s\n" "$current_server_ip" "${current_eps:-N/A}" "${current_threads_avg_lat:-N/A}" "${current_threads_p95_lat:-N/A}" "${current_threads_min_lat:-N/A}" "${current_threads_max_lat:-N/A}" "${current_threads_sum_lat:-N/A}" "${current_threads_fairness:-N/A}" >> "$output_file"
             fi
             in_section=true
             current_server_ip=$(echo "$line" | grep -oP 'Server: \K[0-9.]+' || echo "N/A")
@@ -435,7 +435,7 @@ parse_threads_report() {
             last_testing_ip=$(echo "$line" | grep -oP 'Testing server [0-9]+/[0-9]+: \K[0-9.]+' || echo "")
             if [ "$in_section" = true ] && [ -n "$current_server_ip" ]; then
                 current_eps=$(calc_eps "$current_events" "$current_time")
-                printf "  %-18s %-12s %-12s %-12s %-10s %-10s %-12s %-10s\n" "$current_server_ip" "${current_eps:-N/A}" "${current_threads_avg_lat:-N/A}" "${current_threads_p95_lat:-N/A}" "${current_threads_min_lat:-N/A}" "${current_threads_max_lat:-N/A}" "${current_threads_sum_lat:-N/A}" "${current_threads_fairness:-N/A}" >> "$output_file"
+                printf "  %-18s %-12s %-12s %-12s %-14s %-14s %-16s %-14s\n" "$current_server_ip" "${current_eps:-N/A}" "${current_threads_avg_lat:-N/A}" "${current_threads_p95_lat:-N/A}" "${current_threads_min_lat:-N/A}" "${current_threads_max_lat:-N/A}" "${current_threads_sum_lat:-N/A}" "${current_threads_fairness:-N/A}" >> "$output_file"
             fi
             in_section=false
             current_server_ip=""
@@ -463,7 +463,7 @@ parse_threads_report() {
         elif [ "$in_section" = true ] && [[ "$line" =~ "TEST RESULTS" ]] && [[ ! "$line" =~ "THREADS TEST RESULTS" ]] && [[ ! "$line" =~ "Threads test summary:" ]]; then
             if [ -n "$current_server_ip" ]; then
                 current_eps=$(calc_eps "$current_events" "$current_time")
-                printf "  %-18s %-12s %-12s %-12s %-10s %-10s %-12s %-10s\n" "$current_server_ip" "${current_eps:-N/A}" "${current_threads_avg_lat:-N/A}" "${current_threads_p95_lat:-N/A}" "${current_threads_min_lat:-N/A}" "${current_threads_max_lat:-N/A}" "${current_threads_sum_lat:-N/A}" "${current_threads_fairness:-N/A}" >> "$output_file"
+                printf "  %-18s %-12s %-12s %-12s %-14s %-14s %-16s %-14s\n" "$current_server_ip" "${current_eps:-N/A}" "${current_threads_avg_lat:-N/A}" "${current_threads_p95_lat:-N/A}" "${current_threads_min_lat:-N/A}" "${current_threads_max_lat:-N/A}" "${current_threads_sum_lat:-N/A}" "${current_threads_fairness:-N/A}" >> "$output_file"
             fi
             in_section=false
             current_server_ip=""
@@ -490,7 +490,7 @@ parse_threads_report() {
     
     if [ "$in_section" = true ] && [ -n "$current_server_ip" ]; then
         current_eps=$(calc_eps "$current_events" "$current_time")
-        printf "  %-18s %-12s %-12s %-12s %-10s %-10s %-12s %-10s\n" "$current_server_ip" "${current_eps:-N/A}" "${current_threads_avg_lat:-N/A}" "${current_threads_p95_lat:-N/A}" "${current_threads_min_lat:-N/A}" "${current_threads_max_lat:-N/A}" "${current_threads_sum_lat:-N/A}" "${current_threads_fairness:-N/A}" >> "$output_file"
+        printf "  %-18s %-12s %-12s %-12s %-14s %-14s %-16s %-14s\n" "$current_server_ip" "${current_eps:-N/A}" "${current_threads_avg_lat:-N/A}" "${current_threads_p95_lat:-N/A}" "${current_threads_min_lat:-N/A}" "${current_threads_max_lat:-N/A}" "${current_threads_sum_lat:-N/A}" "${current_threads_fairness:-N/A}" >> "$output_file"
     fi
 }
 
@@ -5388,9 +5388,9 @@ EOF
             if [ ${#network_files[@]} -gt 0 ]; then
                 # Multiple network tests - show comparison table
                 echo "  Network Test Comparison (Multiple Servers)" >> "$report_file"
-                echo "  ------------------------------------------------------------------------------------------------------------" >> "$report_file"
-                printf "  %-18s %-18s %-14s %-10s %-31s %-14s\n" "Client IP" "Server IP" "Bandwidth (MB/s)" "Retrans" "RTT(ms)" "CPU(%)" >> "$report_file"
-                echo "  ------------------------------------------------------------------------------------------------------------" >> "$report_file"
+                echo "  -------------------------------------------------------------------------------------------------------------------" >> "$report_file"
+                printf "  %-18s %-18s %-18s %-14s %-31s %-19s\n" "Client IP" "Server IP" "Bandwidth (MB/s)" "Retrans" "RTT(ms)" "CPU(%)" >> "$report_file"
+                echo "  -------------------------------------------------------------------------------------------------------------------" >> "$report_file"
                 
                 # Collect all results for sorting and statistics
                 local -a results_arr=()
@@ -5528,7 +5528,7 @@ EOF
                     local sorted_results=$(printf "%s\n" "${results_arr[@]}" | sort -t'|' -k1 -rn)
                     local rank=1
                     echo "$sorted_results" | while IFS='|' read -r bw client server retrans rtt cpu; do
-                        printf "  %-18s %-18s %-14s %-10s %-26s %-14s" "$client" "$server" "$bw" "$retrans" "$rtt" "$cpu" >> "$report_file"
+                        printf "  %-18s %-18s %-18s %-14s %-31s %-19s" "$client" "$server" "$bw" "$retrans" "$rtt" "$cpu" >> "$report_file"
                         # Highlight poor performers (below 25% of max bandwidth)
                         if [ "$bw" != "N/A" ] && (( $(echo "$bw < $max_bw * 0.25" | bc -l) )); then
                             echo "  ⚠ POOR PERFORMANCE" >> "$report_file"

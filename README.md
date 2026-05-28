@@ -213,7 +213,6 @@ cat output/original_data_*_all_results.log
 - **P95 Latency**：95 百分位延迟（越低越好）
 - **Sum Latency**：累计延迟（越低越好）
 - **Threads fairness (events)**：线程事件公平性（格式 avg/stddev）
-- **Threads fairness (execution time)**：线程执行时间公平性
 
 ### 互斥锁测试
 
