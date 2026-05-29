@@ -1,7 +1,7 @@
 #!/bin/bash
 #--------------------------------------------------------------------------------
 #-- File name:   oscheckperf
-#-- Version:     v1.1.6
+#-- Version:     v1.1.7
 #-- Purpose:     Database System Benchmark Tool
 #-- Author:      Wanping Pan 
 #-- Description: One-click system benchmarking tool, supports configuration via config file or command line parameters
@@ -883,7 +883,7 @@ parse_args() {
                 exit 0
                 ;;
             --version)
-                echo "Version: 1.1.6"
+                echo "Version: 1.1.7"
                 exit 0
                 ;;
             --dry-run)
