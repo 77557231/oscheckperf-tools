@@ -274,11 +274,19 @@ parse_cpu_report() {
             current_min_lat=""
             current_sum_lat=""
             current_fairness=""
-        elif [[ "$line" =~ "MEMORY.*TEST RESULTS" || "$line" =~ "SYSBENCH FILEIO TEST RESULTS" || "$line" =~ "THREADS TEST RESULTS" || "$line" =~ "MUTEX TEST RESULTS" || "$line" =~ "NETWORK TEST RESULTS" ]]; then
+        elif [[ "$line" =~ MEMORY.*TEST.*RESULTS || "$line" =~ "SYSBENCH FILEIO TEST RESULTS" || "$line" =~ "THREADS TEST RESULTS" || "$line" =~ "MUTEX TEST RESULTS" || "$line" =~ "NETWORK TEST RESULTS" ]]; then
             if [ "$in_section" = true ] && [ -n "$current_server_ip" ]; then
                 printf "  %-18s %-12s %-12s %-12s %-12s %-12s %-14s %-10s\n" "$current_server_ip" "${current_eps:-N/A}" "${current_avg_lat:-N/A}" "${current_p95_lat:-N/A}" "${current_max_lat:-N/A}" "${current_min_lat:-N/A}" "${current_sum_lat:-N/A}" "${current_fairness:-N/A}" >> "$output_file"
             fi
             in_section=false
+            current_server_ip=""
+            current_eps=""
+            current_avg_lat=""
+            current_p95_lat=""
+            current_max_lat=""
+            current_min_lat=""
+            current_sum_lat=""
+            current_fairness=""
         elif [ "$in_section" = true ]; then
             if [[ "$line" =~ "events per second:" ]]; then
                 current_eps=$(echo "$line" | awk '{print $NF}')
@@ -323,6 +331,7 @@ parse_memory_report() {
     echo "  ---------------------------------------------------------------------------------------------------------------------------------" >> "$output_file"
     
     local in_section=false
+    local in_latency_section=false
     local current_server_ip=""
     local current_mode=""
     local current_ops_sec=""
@@ -340,6 +349,7 @@ parse_memory_report() {
                 printf "  %-18s %-12s %-12s %-12s %-10s %-10s %-10s %-12s %-20s %-8s\n" "$current_server_ip" "${current_ops_sec:-N/A}" "${current_mib_sec:-N/A}" "${current_mem_avg_lat:-N/A}" "${current_mem_min_lat:-N/A}" "${current_mem_max_lat:-N/A}" "${current_mem_p95_lat:-N/A}" "${current_mem_sum_lat:-N/A}" "${current_mem_fairness:-N/A}" "${current_mode:-N/A}" >> "$output_file"
             fi
             in_section=true
+            in_latency_section=false
             current_server_ip=$(echo "$line" | grep -oP 'Server: \K[0-9.]+' || echo "N/A")
             current_mode=$(echo "$line" | awk '{print $2}' | tr '[:upper:]' '[:lower:]')
             current_ops_sec=""
@@ -355,22 +365,37 @@ parse_memory_report() {
                 printf "  %-18s %-12s %-12s %-12s %-10s %-10s %-10s %-12s %-20s %-8s\n" "$current_server_ip" "${current_ops_sec:-N/A}" "${current_mib_sec:-N/A}" "${current_mem_avg_lat:-N/A}" "${current_mem_min_lat:-N/A}" "${current_mem_max_lat:-N/A}" "${current_mem_p95_lat:-N/A}" "${current_mem_sum_lat:-N/A}" "${current_mem_fairness:-N/A}" "${current_mode:-N/A}" >> "$output_file"
             fi
             in_section=false
+            in_latency_section=false
+            current_server_ip=""
+            current_ops_sec=""
+            current_mib_sec=""
+            current_mem_avg_lat=""
+            current_mem_min_lat=""
+            current_mem_max_lat=""
+            current_mem_p95_lat=""
+            current_mem_sum_lat=""
+            current_mem_fairness=""
+            current_mode=""
         elif [ "$in_section" = true ]; then
-            if [[ "$line" =~ "Total operations:" ]]; then
+            if [[ "$line" == *"Total operations:"* ]]; then
                 current_ops_sec=$(echo "$line" | awk -F'[()]' '{print $2}' | awk '{print $1}')
-            elif [[ "$line" =~ "MiB transferred" ]]; then
+            elif [[ "$line" == *"MiB transferred"* ]]; then
                 current_mib_sec=$(echo "$line" | awk -F'[()]' '{print $2}' | awk '{print $1}')
-            elif [[ "$line" =~ "avg:" ]] && [[ ! "$line" =~ "events \(avg/stddev\):" ]]; then
+            elif [[ "$line" == *"Latency (ms):"* ]]; then
+                in_latency_section=true
+            elif [[ "$line" == *"Threads fairness:"* ]]; then
+                in_latency_section=false
+            elif [ "$in_latency_section" = true ] && [[ "$line" == *"avg:"* ]]; then
                 current_mem_avg_lat=$(echo "$line" | awk '{print $NF}' | tr -d ',')
-            elif [[ "$line" =~ "min:" ]] && [[ ! "$line" =~ "execution time" ]]; then
+            elif [ "$in_latency_section" = true ] && [[ "$line" == *"min:"* ]]; then
                 current_mem_min_lat=$(echo "$line" | awk '{print $NF}' | tr -d ',')
-            elif [[ "$line" =~ "max:" ]] && [[ ! "$line" =~ "execution time" ]]; then
+            elif [ "$in_latency_section" = true ] && [[ "$line" == *"max:"* ]]; then
                 current_mem_max_lat=$(echo "$line" | awk '{print $NF}' | tr -d ',')
-            elif [[ "$line" =~ "95th percentile" ]]; then
+            elif [ "$in_latency_section" = true ] && [[ "$line" == *"95th percentile:"* ]]; then
                 current_mem_p95_lat=$(echo "$line" | awk '{print $NF}')
-            elif [[ "$line" =~ "sum:" ]]; then
+            elif [ "$in_latency_section" = true ] && [[ "$line" == *"sum:"* ]]; then
                 current_mem_sum_lat=$(echo "$line" | awk '{print $NF}' | tr -d ',')
-            elif echo "$line" | grep -q "events.*avg/stddev"; then
+            elif [[ "$line" == *"events"* && "$line" == *"avg/stddev"* ]]; then
                 current_mem_fairness=$(echo "$line" | awk '{print $NF}')
             fi
         fi
@@ -4954,27 +4979,15 @@ EOF
                 declare -A fio_aggrutil
                 
                 # Pre-extract fio extended metrics from combined file
-                while IFS='|' read -r ip io_mode p99 disk cpu_usr cpu_sys slat clat iodepth ctx aggrios aggrticks aggrinque aggrutil; do
-                    if [[ "$ip" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]]; then
-                        local key="${ip}_${io_mode}"
-                        fio_p99_lat["$key"]="$p99"
-                        fio_disk_util["$key"]="$disk"
-                        fio_cpu_usr["$key"]="$cpu_usr"
-                        fio_cpu_sys["$key"]="$cpu_sys"
-                        fio_slat_avg["$key"]="$slat"
-                        fio_clat_avg["$key"]="$clat"
-                        fio_iodepth_level["$key"]="$iodepth"
-                        fio_ctx["$key"]="$ctx"
-                        fio_aggrios["$key"]="$aggrios"
-                        fio_aggrticks["$key"]="$aggrticks"
-                        fio_aggrin_queue["$key"]="$aggrinque"
-                        fio_aggrutil["$key"]="$aggrutil"
-                    fi
-                done < <(awk 'BEGIN{OFS="|"} 
+                awk 'BEGIN{OFS="|"} 
                     /RESULTS FROM SERVER:/ {match($0, /RESULTS FROM SERVER: ([0-9.]+)/, arr); current_server=arr[1]}
-                    /FIO TEST RESULTS/ {match($0, /Server: ([0-9.]+)/, arr); ip=arr[1]; if(ip=="") ip=current_server; match($0, /FIO TEST RESULTS \(([^)]+)\)/, mode_arr); io_mode=mode_arr[1]; p99="N/A"; disk="N/A"; cpu_usr="N/A"; cpu_sys="N/A"; slat="0"; clat="N/A"; iodepth="N/A"; ctx="N/A"; aggrios="N/A"; aggrticks="N/A"; aggrinque="N/A"; aggrutil="N/A"; in_fio=1; ext_started=0} 
-                    in_fio && !ext_started && /slat \(usec\)/ {split($0, a, "avg="); split(a[2], b, ","); gsub(/ /, "", b[1]); slat=b[1]}
-                    in_fio && !ext_started && /clat \(usec\)/ {split($0, a, "avg="); split(a[2], b, ","); gsub(/ /, "", b[1]); clat=b[1]}
+                    /FIO TEST RESULTS/ {match($0, /Server: ([0-9.]+)/, arr); ip=arr[1]; if(ip=="") ip=current_server; match($0, /FIO TEST RESULTS \(([^)]+)\)/, mode_arr); io_mode=mode_arr[1]; p99="N/A"; disk="N/A"; cpu_usr="N/A"; cpu_sys="N/A"; r_slat="0"; w_slat="0"; r_clat="N/A"; w_clat="N/A"; iodepth="N/A"; ctx="N/A"; aggrios="N/A"; aggrticks="N/A"; aggrinque="N/A"; aggrutil="N/A"; in_fio=1; ext_started=0; r_slat_unit="usec"; w_slat_unit="usec"; has_read=0; has_write=0; is_read=0} 
+                    in_fio && !ext_started && /^  read:/ {is_read=1; has_read=1}
+                    in_fio && !ext_started && /^  write:/ {is_read=0; has_write=1}
+                    in_fio && !ext_started && /slat \(nsec\)/ {split($0, a, "avg="); split(a[2], b, ","); gsub(/ /, "", b[1]); if(is_read) r_slat=b[1]/1000; else w_slat=b[1]/1000}
+                    in_fio && !ext_started && /slat \(usec\)/ {split($0, a, "avg="); split(a[2], b, ","); gsub(/ /, "", b[1]); if(is_read) r_slat=b[1]; else w_slat=b[1]}
+                    in_fio && !ext_started && /clat \(nsec\)/ {split($0, a, "avg="); split(a[2], b, ","); gsub(/ /, "", b[1]); if(is_read) r_clat=b[1]/1000; else w_clat=b[1]/1000}
+                    in_fio && !ext_started && /clat \(usec\)/ {split($0, a, "avg="); split(a[2], b, ","); gsub(/ /, "", b[1]); if(is_read) r_clat=b[1]; else w_clat=b[1]}
                     in_fio && !ext_started && /IO depths/ {
                         split($0, depths, ","); 
                         max_depth="<=8"; max_pct=0;
@@ -5005,7 +5018,38 @@ EOF
                     in_fio && ext_started && /Disk Utilization:/ {disk=$3; sub(/%/, "", disk)} 
                     in_fio && ext_started && /CPU \(usr\):/ {cpu_usr=$3; sub(/%/, "", cpu_usr)} 
                     in_fio && ext_started && /CPU \(sys\):/ {cpu_sys=$3; sub(/%/, "", cpu_sys)}
-                    in_fio && ext_started && /^$/ && ip!="" {print ip "|" io_mode "|" p99 "|" disk "|" cpu_usr "|" cpu_sys "|" slat "|" clat "|" iodepth "|" ctx "|" aggrios "|" aggrticks "|" aggrinque "|" aggrutil; ip=""; in_fio=0}' "$combined_file")
+                    in_fio && ext_started && /^$/ && ip!="" {
+                        # Determine output mode suffix for each part
+                        # For mixed modes (randrw, rw), output separate read/write rows
+                        # For pure modes (read, write, randread, etc.), output single row
+                        if(has_read && has_write) {
+                            printf "%s|%s|%s|%s|%s|%s|%.2f|%.2f|%s|%s|%s|%s|%s|%s\n", ip, io_mode"_r", p99, disk, cpu_usr, cpu_sys, r_slat, r_clat, iodepth, ctx, aggrios, aggrticks, aggrinque, aggrutil;
+                            printf "%s|%s|%s|%s|%s|%s|%.2f|%.2f|%s|%s|%s|%s|%s|%s\n", ip, io_mode"_w", p99, disk, cpu_usr, cpu_sys, w_slat, w_clat, iodepth, ctx, aggrios, aggrticks, aggrinque, aggrutil;
+                        } else if(has_read) {
+                            printf "%s|%s|%s|%s|%s|%s|%.2f|%.2f|%s|%s|%s|%s|%s|%s\n", ip, io_mode, p99, disk, cpu_usr, cpu_sys, r_slat, r_clat, iodepth, ctx, aggrios, aggrticks, aggrinque, aggrutil;
+                        } else if(has_write) {
+                            printf "%s|%s|%s|%s|%s|%s|%.2f|%.2f|%s|%s|%s|%s|%s|%s\n", ip, io_mode, p99, disk, cpu_usr, cpu_sys, w_slat, w_clat, iodepth, ctx, aggrios, aggrticks, aggrinque, aggrutil;
+                        }
+                        ip=""; in_fio=0}' "$combined_file" > "$fio_extended_file"
+                
+                # Populate associative arrays from fio_extended_file for backward compatibility
+                while IFS='|' read -r ip io_mode p99 disk cpu_usr cpu_sys slat clat iodepth ctx aggrios aggrticks aggrinque aggrutil; do
+                    if [[ "$ip" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]]; then
+                        local key="${ip}_${io_mode}"
+                        fio_p99_lat["$key"]="$p99"
+                        fio_disk_util["$key"]="$disk"
+                        fio_cpu_usr["$key"]="$cpu_usr"
+                        fio_cpu_sys["$key"]="$cpu_sys"
+                        fio_slat_avg["$key"]="$slat"
+                        fio_clat_avg["$key"]="$clat"
+                        fio_iodepth_level["$key"]="$iodepth"
+                        fio_ctx["$key"]="$ctx"
+                        fio_aggrios["$key"]="$aggrios"
+                        fio_aggrticks["$key"]="$aggrticks"
+                        fio_aggrin_queue["$key"]="$aggrinque"
+                        fio_aggrutil["$key"]="$aggrutil"
+                    fi
+                done < "$fio_extended_file"
                 
                 while IFS= read -r line; do
                     if [[ "$line" =~ "SYSBENCH FILEIO TEST RESULTS" ]]; then
@@ -5298,27 +5342,35 @@ EOF
                         echo "" >> "$report_file"
                         echo "  # FIO Extended Metrics" >> "$report_file"
                         echo "  -----------------------------------------------------------------------------------------------------------------------------------------" >> "$report_file"
-                        printf "  %-15s %-9s %-9s %-6s %-9s %-9s %-8s %-8s %-6s %-7s %-13s %-13s %-6s %-6s\n" "Server IP" "slat(us)" "clat(us)" "Depth" "CPU(usr)" "CPU(sys)" "bw_min" "bw_max" "Mode" "ctx" "aggrios" "aggrticks" "util" "aggrutil" >> "$report_file"
+                        printf "  %-17s %-9s %-9s %-6s %-9s %-9s %-8s %-8s %-7s %-13s %-13s %-6s %-6s %-8s\n" "Server IP" "slat(us)" "clat(us)" "Depth" "CPU(usr)" "CPU(sys)" "bw_min" "bw_max" "ctx" "aggrios" "aggrticks" "util" "aggrutil" "Mode" >> "$report_file"
                         echo "  -----------------------------------------------------------------------------------------------------------------------------------------" >> "$report_file"
                         
-                        # Print extended metrics
-                        while IFS='|' read -r server_ip read_iops write_iops total_iops read_bw write_bw total_bw avg_lat p95_lat min_lat max_lat io_mode fsync_iops tool; do
-                            if ! [[ "$server_ip" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]]; then
+                        # Print extended metrics from raw output
+                        while IFS='|' read -r ext_ip ext_mode ext_p99 ext_disk ext_cpu_usr ext_cpu_sys ext_slat ext_clat ext_iodepth ext_ctx ext_aggrios ext_aggrticks ext_aggrinque ext_aggrutil; do
+                            if ! [[ "$ext_ip" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]]; then
                                 continue
                             fi
-                            local key="${server_ip}_${io_mode}"
-                            local slat="${fio_slat_avg[$key]:-N/A}"
-                            local clat="${fio_clat_avg[$key]:-N/A}"
-                            local iodepth="${fio_iodepth_level[$key]:-N/A}"
-                            local util="${fio_disk_util[$key]:-N/A}"
-                            local cpu_usr="${fio_cpu_usr[$key]:-N/A}"
-                            local cpu_sys="${fio_cpu_sys[$key]:-N/A}"
-                            local b_min="${fio_bw_min[$server_ip]:-N/A}"
-                            local b_max="${fio_bw_max[$server_ip]:-N/A}"
-                            local ctx="${fio_ctx[$key]:-N/A}"
-                            local aggrios="${fio_aggrios[$key]:-N/A}"
-                            local aggrticks="${fio_aggrticks[$key]:-N/A}"
-                            local aggrutil="${fio_aggrutil[$key]:-N/A}"
+                            
+                            local slat="$ext_slat"
+                            local clat="$ext_clat"
+                            local iodepth="${ext_iodepth:-N/A}"
+                            local util="$ext_disk"
+                            local cpu_usr="$ext_cpu_usr"
+                            local cpu_sys="$ext_cpu_sys"
+                            local ctx="${ext_ctx:-N/A}"
+                            local aggrios="${ext_aggrios:-N/A}"
+                            local aggrticks="${ext_aggrticks:-N/A}"
+                            local aggrutil="${ext_aggrutil:-N/A}"
+                            local b_min="${fio_bw_min[$ext_ip]:-N/A}"
+                            local b_max="${fio_bw_max[$ext_ip]:-N/A}"
+                            
+                            # Convert _r/_w suffix to readable mode
+                            local display_mode="$ext_mode"
+                            if [[ "$ext_mode" == *"_r" ]]; then
+                                display_mode="${ext_mode%_r} (r)"
+                            elif [[ "$ext_mode" == *"_w" ]]; then
+                                display_mode="${ext_mode%_w} (w)"
+                            fi
                             
                             # Format all numeric values - integers remain as integers, decimals to 2 places
                             local fmt_slat=$(if [ "$slat" != "N/A" ]; then awk -v val="$slat" 'BEGIN {if (val == int(val)) printf "%d", val; else printf "%.2f", val}' 2>/dev/null || echo "$slat"; else echo "N/A"; fi)
@@ -5330,8 +5382,8 @@ EOF
                             local fmt_b_max=$(if [ "$b_max" != "N/A" ]; then awk "BEGIN {printf \"%.0f\", $b_max}" 2>/dev/null || echo "$b_max"; else echo "N/A"; fi)
                             local fmt_aggrutil=$(if [ "$aggrutil" != "N/A" ]; then awk "BEGIN {printf \"%.2f\", $aggrutil}" 2>/dev/null || echo "$aggrutil"; else echo "N/A"; fi)
                             
-                            printf "  %-15s %-9s %-9s %-6s %-9s %-9s %-8s %-8s %-6s %-7s %-13s %-13s %-6s %-6s\n" "$server_ip" "$fmt_slat" "$fmt_clat" "$iodepth" "$fmt_cpu_usr" "$fmt_cpu_sys" "$fmt_b_min" "$fmt_b_max" "$io_mode" "${ctx:-N/A}" "${aggrios:-N/A}" "${aggrticks:-N/A}" "$fmt_util" "$fmt_aggrutil" >> "$report_file"
-                        done < <(sort -t'|' -k1,1 "$results_temp_file")
+                            printf "  %-17s %-9s %-9s %-6s %-9s %-9s %-8s %-8s %-7s %-13s %-13s %-6s %-6s %-8s\n" "$ext_ip" "$fmt_slat" "$fmt_clat" "$iodepth" "$fmt_cpu_usr" "$fmt_cpu_sys" "$fmt_b_min" "$fmt_b_max" "${ctx:-N/A}" "${aggrios:-N/A}" "${aggrticks:-N/A}" "$fmt_util" "$fmt_aggrutil" "$display_mode" >> "$report_file"
+                        done < <(cat "$fio_extended_file" 2>/dev/null || true)
                     fi
                     
                     rm -f "$results_temp_file" "$fio_extended_file"
