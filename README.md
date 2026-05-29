@@ -47,6 +47,21 @@ yum install ethtool numactl
 ./oscheckperf -i oscheckperf -f server_list
 ```
 
+**编译包推送时发行版兼容策略**
+
+默认情况下，工具采用宽松模式进行发行版兼容性检查，**直接检测包管理系统**：
+
+- **RPM 系**：自动检测 `rpm`/`yum`/`dnf` 包管理器
+- **DEB 系**：自动检测 `dpkg`/`apt` 包管理器
+
+严格模式：要求远程服务器发行版与本地完全匹配，STRICT\_DISTRO\_CHECK=true
+
+| 模式       | 参数值     | Centos→Kylin | CentOS→Ubuntu | Ubuntu→Debian |
+| -------- | ------- | ------------- | ------------- | ------------- |
+| 宽松模式（默认） | `false` | ✅ 允许          | ❌ 拒绝          | ✅ 允许          |
+| 严格模式     | `true`  | ❌ 拒绝          | ❌ 拒绝          | ❌ 拒绝          |
+
+
 ### 2. 运行测试
 
 ```bash
@@ -230,28 +245,28 @@ cat output/original_data_*_all_results.log
 
 #### sysbench 参数
 
-| 参数                     | 默认值        | 说明                                                        |
-| ---------------------- | ---------- | --------------------------------------------------------- |
-| `SYSBENCH_PROFILES`    | `rndrw`    | sysbench 测试模式，空格分隔（seqwr/seqrewr/seqrd/rndrd/rndwr/rndrw） |
-| `SYSBENCH_FILE_NUM`    | `4`        | sysbench 测试文件数量                                           |
-| `SYSBENCH_BLOCK_SIZE`  | `16K`      | sysbench 块大小                                              |
-| `SYSBENCH_IO_MODE`     | `sync`     | sysbench IO 模式（sync/async）                                |
-| `SYSBENCH_EXTRA_FLAGS` | `direct`   | sysbench 额外标志（direct/sync）                                |
-| `SYSBENCH_THREADS`     | `4`        | sysbench 线程数                                              |
-| `SYSBENCH_DURATION`    | `DURATION` | sysbench IO 测试时长                                          |
+| 参数                     | 默认值                       | 说明                                                        |
+| ---------------------- | ------------------------- | --------------------------------------------------------- |
+| `SYSBENCH_PROFILES`    | `seqrd seqwr rndrd rndwr` | sysbench 测试模式，空格分隔（seqwr/seqrewr/seqrd/rndrd/rndwr/rndrw） |
+| `SYSBENCH_FILE_NUM`    | `4`                       | sysbench 测试文件数量                                           |
+| `SYSBENCH_BLOCK_SIZE`  | `16K`                     | sysbench 块大小                                              |
+| `SYSBENCH_IO_MODE`     | `sync`                    | sysbench IO 模式（sync/async）                                |
+| `SYSBENCH_EXTRA_FLAGS` | `direct`                  | sysbench 额外标志（direct/sync）                                |
+| `SYSBENCH_THREADS`     | `4`                       | sysbench 线程数（设置为0时自动使用CPU核心数）                             |
+| `SYSBENCH_DURATION`    | `DURATION`                | sysbench IO 测试时长                                          |
 
 #### fio 参数
 
-| 参数             | 默认值        | 说明                                                                             |
-| -------------- | ---------- | ------------------------------------------------------------------------------ |
-| `FIO_PROFILES` | `randrw`   | fio 测试模式，空格分隔（read/write/randread/randwrite/rw/randrw/trim/randtrim/trimwrite） |
-| `FIO_BS`       | `16K`      | fio 块大小（优化后更适合数据库场景）                                                           |
-| `FIO_IODEPTH`  | `32`       | fio I/O 深度                                                                     |
-| `FIO_NUMJOBS`  | `4`        | fio 工作线程数                                                                      |
-| `FIO_DIRECT`   | `1`        | fio 直接 I/O 模式                                                                  |
-| `FIO_FILE_NUM` | `4`        | fio 测试文件数量（模拟多数据文件场景）                                                          |
-| `FIO_IOENGINE` | `libaio`   | fio IO 引擎（libaio/sync/posixaio）                                                |
-| `FIO_DURATION` | `DURATION` | fio 测试时长                                                                       |
+| 参数             | 默认值                             | 说明                                                                             |
+| -------------- | ------------------------------- | ------------------------------------------------------------------------------ |
+| `FIO_PROFILES` | `read write randread randwrite` | fio 测试模式，空格分隔（read/write/randread/randwrite/rw/randrw/trim/randtrim/trimwrite） |
+| `FIO_BS`       | `16K`                           | fio 块大小（优化后更适合数据库场景）                                                           |
+| `FIO_IODEPTH`  | `32`                            | fio I/O 深度                                                                     |
+| `FIO_NUMJOBS`  | `4`                             | fio 工作线程数（设置为0时自动使用CPU核心数）                                                     |
+| `FIO_DIRECT`   | `1`                             | fio 直接 I/O 模式                                                                  |
+| `FIO_FILE_NUM` | `4`                             | fio 测试文件数量（模拟多数据文件场景）                                                          |
+| `FIO_IOENGINE` | `libaio`                        | fio IO 引擎（libaio/sync/posixaio）                                                |
+| `FIO_DURATION` | `DURATION`                      | fio 测试时长                                                                       |
 
 #### Threads 参数
 
@@ -263,12 +278,12 @@ cat output/original_data_*_all_results.log
 
 #### Memory 参数
 
-| 参数                  | 默认值          | 说明                      |
-| ------------------- | ------------ | ----------------------- |
-| `MEMORY_THREADS`    | `0`          | 内存测试线程数，0=自动（与CPU核心数一致） |
-| `MEMORY_BLOCK_SIZE` | `8K`         | 内存测试块大小                 |
-| `MEMORY_TOTAL_SIZE` | `20G`        | 内存测试总大小（测试数据量）          |
-| `MEMORY_OPER`       | `read write` | 内存操作类型                  |
+| 参数                  | 默认值          | 说明                               |
+| ------------------- | ------------ | -------------------------------- |
+| `MEMORY_THREADS`    | `0`          | 内存测试线程数，0=自动（与CPU核心数一致）          |
+| `MEMORY_BLOCK_SIZE` | `8K`         | 内存测试块大小                          |
+| `MEMORY_TOTAL_SIZE` | `0`          | 内存测试总大小（测试数据量），0=自动（使用系统总内存的60%） |
+| `MEMORY_OPER`       | `read write` | 内存操作类型                           |
 
 #### Mutex 参数
 
@@ -279,11 +294,21 @@ cat output/original_data_*_all_results.log
 
 #### 通用参数
 
-| 参数              | 默认值                         | 说明                                   |
-| --------------- | --------------------------- | ------------------------------------ |
-| `IO_PATH`       | `$HOME/oscheckperf/io_test` | 测试文件目录，默认`$HOME/oscheckperf/io_test` |
-| `IO_TOTAL_SIZE` | `1G`                        | 测试文件总大小（sysbench 和 fio 通用）           |
-| `IO_TOOL`       | `sysbench`                  | IO 测试工具（sysbench/fio）                |
+| 参数                 | 默认值                         | 说明                                   |
+| ------------------ | --------------------------- | ------------------------------------ |
+| `IO_PATH`          | `$HOME/oscheckperf/io_test` | 测试文件目录，默认`$HOME/oscheckperf/io_test` |
+| `IO_TOTAL_SIZE`    | `10G`                       | 测试文件总大小（sysbench 和 fio 通用）           |
+| `IO_TOOL`          | `fio`                       | IO 测试工具（sysbench/fio）                |
+| `EXEC_MODE`        | `parallel`                  | 执行模式（parallel/serial）                |
+| `NETWORK_PROTOCOL` | `tcp`                       | 网络协议（tcp/udp）                        |
+
+#### 网络测试参数
+
+| 参数                 | 默认值      | 说明                        |
+| ------------------ | -------- | ------------------------- |
+| `NETWORK_PARALLEL` | `4`      | 网络测试并行连接数（iperf3 的 -P 参数） |
+| `NETWORK_PORT`     | `25201`  | 网络测试端口                    |
+| `NETWORK_MODE`     | `matrix` | 网络测试模式（serial/matrix）     |
 
 #### 参数说明
 

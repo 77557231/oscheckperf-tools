@@ -87,6 +87,25 @@ get_linux_distro() {
     echo "unknown"
 }
 
+# Get package manager family (rpm/deb) by directly detecting package manager
+# Returns: rpm, deb, or unknown
+# This approach avoids hardcoding distro names and automatically supports any RPM/DEB based distro
+get_pkg_manager_family() {
+    # Check for RPM-based systems (yum/dnf/rpm)
+    if command -v rpm &> /dev/null || [ -f /etc/yum.conf ] || [ -f /etc/dnf/dnf.conf ] || [ -f /etc/redhat-release ]; then
+        echo "rpm"
+        return
+    fi
+    
+    # Check for DEB-based systems (apt/dpkg)
+    if command -v dpkg &> /dev/null || [ -f /etc/apt/sources.list ] || [ -f /etc/debian_version ]; then
+        echo "deb"
+        return
+    fi
+    
+    echo "unknown"
+}
+
 # ================================================================================
 # Generic Result Parsing Framework
 # ================================================================================
@@ -1063,6 +1082,8 @@ parse_args() {
             NO_CHECKS=true
         fi
     done
+
+    export STRICT_DISTRO_CHECK="${STRICT_DISTRO_CHECK:-false}"
 }
 
 # Show help information
@@ -1107,13 +1128,13 @@ show_help() {
     echo "Memory test parameters:"
     echo "  MEMORY_THREADS=<number>     Memory test threads, 0=auto (default: 0)"
     echo "  MEMORY_BLOCK_SIZE=<size>    Block size, e.g. 8K (default: 8K)"
-    echo "  MEMORY_TOTAL_SIZE=<size>    Total test size, e.g. 20G (default: 20G)"
+    echo "  MEMORY_TOTAL_SIZE=<size>    Total test size (default: 0, auto-calculate 60% of total memory)"
     echo "  MEMORY_OPER=read|write|read write  Memory operation(s) (default: read write)"
     echo ""
     echo "IO test parameters:"
     echo "  Common IO parameters:"
-    echo "    IO_TOOL=sysbench|fio        IO test tool (default: sysbench)"
-    echo "    IO_TOTAL_SIZE=<size>        Total file size for IO test (default: 1G)"
+    echo "    IO_TOOL=sysbench|fio        IO test tool (default: fio)"
+    echo "    IO_TOTAL_SIZE=<size>        Total file size for IO test (default: 10G)"
     echo "    IO_PATH=<path>              IO test directory path (default: \$HOME/oscheckperf/io_test)"
     echo ""
     echo "  sysbench-specific parameters:"
@@ -2343,10 +2364,16 @@ run_sysbench_fileio() {
     # Support SYSBENCH_PROFILES parameter
     local test_modes="${SYSBENCH_PROFILES:-rndrw}"
 
+    # Calculate SYSBENCH_THREADS if set to 0 (use CPU core count)
+    local sysbench_threads="${SYSBENCH_THREADS:-4}"
+    if [ "$sysbench_threads" = "0" ]; then
+        sysbench_threads=$(get_cpu_cores)
+    fi
+
     # Only display test info in non-remote mode
     if [ "$REMOTE" != "true" ]; then
         echo "[sysbench] Starting fileio test..."
-        echo "  File size: ${IO_TOTAL_SIZE:-1G}, Test modes: $test_modes"
+        echo "  File size: ${IO_TOTAL_SIZE}, Test modes: $test_modes, Threads: $sysbench_threads"
         echo "  Test directory: $test_dir"
     fi
 
@@ -2392,11 +2419,11 @@ run_sysbench_fileio() {
             --file-block-size=${SYSBENCH_BLOCK_SIZE:-16K} \
             --file-io-mode=${SYSBENCH_IO_MODE:-sync} \
             --file-extra-flags=${SYSBENCH_EXTRA_FLAGS:-direct} \
-            --threads=${SYSBENCH_THREADS:-4} \
+            --threads=${sysbench_threads} \
             run"
         
         local sysbench_cleanup_cmd="sysbench fileio \
-            --file-total-size=${IO_TOTAL_SIZE:-1G} \
+            --file-total-size=${IO_TOTAL_SIZE} \
             --file-test-mode=$test_mode \
             --file-num=${SYSBENCH_FILE_NUM:-4} \
             --file-block-size=${SYSBENCH_BLOCK_SIZE:-16K} \
@@ -2461,6 +2488,12 @@ run_fio_test() {
         return 1
     fi
     
+    # Calculate FIO_NUMJOBS if set to 0 (use CPU core count)
+    local numjobs="${FIO_NUMJOBS:-4}"
+    if [ "$numjobs" = "0" ]; then
+        numjobs=$(get_cpu_cores)
+    fi
+    
     # Iterate through all profiles
     local profiles="${FIO_PROFILES:-randrw}"
     
@@ -2472,7 +2505,6 @@ run_fio_test() {
         local rw_type="${profile}"
         local bs="${FIO_BS:-16K}"
         local iodepth="${FIO_IODEPTH:-32}"
-        local numjobs="${FIO_NUMJOBS:-4}"
         local direct="${FIO_DIRECT:-1}"
         local ioengine="${FIO_IOENGINE:-libaio}"
         local file_num="${FIO_FILE_NUM:-4}"
@@ -2868,6 +2900,11 @@ run_serial_network_test() {
     local port="$NETWORK_PORT"
     local duration="$DURATION"
     local parallel="${NETWORK_PARALLEL:-1}"
+    local protocol="${NETWORK_PROTOCOL:-tcp}"
+    local protocol_flag=""
+    if [ "$protocol" = "udp" ]; then
+        protocol_flag="--udp"
+    fi
     
     # Create temp directory if it doesn't exist
     local output_dir="$TMP_DIR"
@@ -2913,7 +2950,7 @@ run_serial_network_test() {
     echo "Starting iperf3 serial test..."
     echo "  Server: $server_ip:$port ${is_local_server:+(local)}"
     echo "  Client(s): ${client_ips[*]}"
-    echo "  Duration: ${duration}s, Parallel connections: $parallel"
+    echo "  Duration: ${duration}s, Parallel connections: $parallel, Protocol: $protocol"
     echo "  Total test scenarios: $num_clients"
     
     # Start iperf3 server
@@ -2975,8 +3012,8 @@ run_serial_network_test() {
         if [ "$DRY_RUN" = true ]; then
             set_ssh_password "$client"
             local client_ssh=$(get_ssh_command "$client")
-            echo "[DRY RUN] $client_ssh 'iperf3 -c $server_ip -p $port -t $duration -P $parallel --connect-timeout 3000 -J'"
-            echo "[DRY RUN] $client_ssh 'iperf3 -c $server_ip -p $port -t $duration -P $parallel --connect-timeout 3000 2>&1 | grep -v ^$'"
+            echo "[DRY RUN] $client_ssh 'iperf3 -c $server_ip -p $port -t $duration -P $parallel --connect-timeout 3000 -J $protocol_flag'"
+            echo "[DRY RUN] $client_ssh 'iperf3 -c $server_ip -p $port -t $duration -P $parallel --connect-timeout 3000 2>&1 | grep -v ^$ $protocol_flag'"
             results+=("$client|$server_ip|0")
             echo "  [DRY RUN] Test would complete: $client -> $server_ip"
         else
@@ -2998,16 +3035,18 @@ run_serial_network_test() {
             
             echo "  Running test: $client -> $server_ip"
             
-            # Check if iperf3 server is reachable from client
-            if ! eval "$client_ssh 'nc -z -w 2 $server_ip $port'" > /dev/null 2>&1; then
-                echo "  ⚠ Server $server_ip:$port is not reachable from client $client"
-                echo "  Possible issues: firewall blocking port $port, or iperf3 server not running"
-                continue
+            # Check if iperf3 server is reachable from client (only check TCP for now)
+            if [ "$protocol" = "tcp" ]; then
+                if ! eval "$client_ssh 'nc -z -w 2 $server_ip $port'" > /dev/null 2>&1; then
+                    echo "  ⚠ Server $server_ip:$port is not reachable from client $client"
+                    echo "  Possible issues: firewall blocking port $port, or iperf3 server not running"
+                    continue
+                fi
             fi
             
             # Run iperf3 client with timeout
             local exit_status=0
-            eval "timeout --signal=KILL $client_timeout $client_ssh 'iperf3 -c $server_ip -p $port -t $duration -P $parallel --connect-timeout 3000 -J'" > "$client_output_file" 2>&1
+            eval "timeout --signal=KILL $client_timeout $client_ssh 'iperf3 -c $server_ip -p $port -t $duration -P $parallel --connect-timeout 3000 -J $protocol_flag'" > "$client_output_file" 2>&1
             exit_status=$?
             
             if [ $exit_status -eq 0 ]; then
@@ -3185,11 +3224,16 @@ run_single_matrix_pair() {
     local parallel="$5"
     local LOCAL_IP="$6"
     local pair_idx="$7"
+    local protocol="$8"
     
     local client_output_file="$TMP_DIR/network_matrix_${pair_idx}_${TIMESTAMP}.json"
     local client_text_output="$TMP_DIR/network_matrix_${pair_idx}_${TIMESTAMP}_text.log"
     local client_timeout=$((duration + 15))
     local result="0"
+    local protocol_flag=""
+    if [ "$protocol" = "udp" ]; then
+        protocol_flag="--udp"
+    fi
     
     # Start iperf3 server on destination
     set_ssh_password "$dst"
@@ -3200,8 +3244,8 @@ run_single_matrix_pair() {
     else
         eval "$dst_ssh 'iperf3 -s -p $port -D'"
         
-        # Wait for remote server port to be ready
-        if ! wait_for_iperf3_server "$dst_ssh" "$port" "true" 15 "true"; then
+        # Wait for remote server port to be ready (only check TCP)
+        if [ "$protocol" = "tcp" ] && ! wait_for_iperf3_server "$dst_ssh" "$port" "true" 15 "true"; then
             echo "  ⚠ Server $dst:$port startup timeout after 15s"
         fi
     fi
@@ -3209,15 +3253,15 @@ run_single_matrix_pair() {
     # Run iperf3 client from source
     if [ "$DRY_RUN" = true ]; then
         if [ "$src" = "$LOCAL_IP" ]; then
-            echo "[DRY RUN] timeout --signal=KILL $client_timeout iperf3 -c \"$dst\" -p \"$port\" -t \"$duration\" -P \"$parallel\" -J"
+            echo "[DRY RUN] timeout --signal=KILL $client_timeout iperf3 -c \"$dst\" -p \"$port\" -t \"$duration\" -P \"$parallel\" -J $protocol_flag"
         else
             local src_ssh=$(get_ssh_command "$src")
-            echo "[DRY RUN] timeout --signal=KILL $client_timeout $src_ssh 'iperf3 -c \"$dst\" -p \"$port\" -t \"$duration\" -P \"$parallel\" -J'"
+            echo "[DRY RUN] timeout --signal=KILL $client_timeout $src_ssh 'iperf3 -c \"$dst\" -p \"$port\" -t \"$duration\" -P \"$parallel\" -J $protocol_flag'"
         fi
     else
         if [ "$src" = "$LOCAL_IP" ]; then
             # Run locally
-            if timeout --signal=KILL $client_timeout iperf3 -c "$dst" -p "$port" -t "$duration" -P "$parallel" -J > "$client_output_file" 2>&1; then
+            if timeout --signal=KILL $client_timeout iperf3 -c "$dst" -p "$port" -t "$duration" -P "$parallel" -J $protocol_flag > "$client_output_file" 2>&1; then
                 generate_iperf3_text_from_json "$client_output_file" "$client_text_output"
             else
                 echo "  ⚠ Test failed: $src -> $dst"
@@ -3229,7 +3273,7 @@ run_single_matrix_pair() {
             # Run via SSH
             set_ssh_password "$src"
             local src_ssh=$(get_ssh_command "$src")
-            if eval "timeout --signal=KILL $client_timeout $src_ssh 'iperf3 -c \"$dst\" -p \"$port\" -t \"$duration\" -P \"$parallel\" -J'" > "$client_output_file" 2>&1; then
+            if eval "timeout --signal=KILL $client_timeout $src_ssh 'iperf3 -c \"$dst\" -p \"$port\" -t \"$duration\" -P \"$parallel\" -J $protocol_flag'" > "$client_output_file" 2>&1; then
                 generate_iperf3_text_from_json "$client_output_file" "$client_text_output"
             else
                 echo "  ⚠ Test failed: $src -> $dst"
@@ -3276,8 +3320,15 @@ run_matrix_batch() {
     local duration="$3"
     local parallel="$4"
     local LOCAL_IP="$5"
-    shift 5
+    local protocol="$6"
+    shift 6
     local pairs=("$@")
+    
+    # Set protocol flag
+    local protocol_flag=""
+    if [ "$protocol" = "udp" ]; then
+        protocol_flag="--udp"
+    fi
     
     local batch_size=${#pairs[@]}
     echo ""
@@ -3417,21 +3468,21 @@ run_matrix_batch() {
         
         if [ "$DRY_RUN" = true ]; then
             if [ "$src" = "$LOCAL_IP" ]; then
-                echo "    [DRY RUN] timeout --signal=KILL $client_timeout iperf3 -c \"$dst\" -p \"$port\" -t \"$duration\" -P \"$parallel\" --connect-timeout 3000 -J"
+                echo "    [DRY RUN] timeout --signal=KILL $client_timeout iperf3 -c \"$dst\" -p \"$port\" -t \"$duration\" -P \"$parallel\" --connect-timeout 3000 -J $protocol_flag"
             else
                 local src_ssh=$(get_ssh_command "$src")
-                echo "    [DRY RUN] timeout --signal=KILL $client_timeout $src_ssh 'iperf3 -c \"$dst\" -p \"$port\" -t \"$duration\" -P \"$parallel\" --connect-timeout 3000 -J'"
+                echo "    [DRY RUN] timeout --signal=KILL $client_timeout $src_ssh 'iperf3 -c \"$dst\" -p \"$port\" -t \"$duration\" -P \"$parallel\" --connect-timeout 3000 -J $protocol_flag'"
             fi
             client_results+=("$src|$dst|0")
         else
             if [ "$src" = "$LOCAL_IP" ]; then
                 debug_log "CLIENT_LAUNCH_LOCAL" "pair=$src|$dst" "port=$port" "timeout=$client_timeout" "output=$client_output_file"
-                timeout --signal=KILL $client_timeout iperf3 -c "$dst" -p "$port" -t "$duration" -P "$parallel" --connect-timeout 3000 -J > "$client_output_file" 2>&1 &
+                timeout --signal=KILL $client_timeout iperf3 -c "$dst" -p "$port" -t "$duration" -P "$parallel" --connect-timeout 3000 -J $protocol_flag > "$client_output_file" 2>&1 &
                 client_pids+=($!)
             else
                 set_ssh_password "$src"
                 local src_ssh=$(get_ssh_command "$src")
-                local ssh_cmd="timeout --signal=KILL $client_timeout $src_ssh 'iperf3 -c \"$dst\" -p \"$port\" -t \"$duration\" -P \"$parallel\" --connect-timeout 3000 -J'"
+                local ssh_cmd="timeout --signal=KILL $client_timeout $src_ssh 'iperf3 -c \"$dst\" -p \"$port\" -t \"$duration\" -P \"$parallel\" --connect-timeout 3000 -J $protocol_flag'"
                 debug_log "CLIENT_LAUNCH_SSH" "pair=$src|$dst" "port=$port" "timeout=$client_timeout" "output=$client_output_file" "cmd=$ssh_cmd"
                 eval "$ssh_cmd" > "$client_output_file" 2>&1 &
                 client_pids+=($!)
@@ -3573,10 +3624,13 @@ run_matrix_network_test() {
         return 0
     fi
     
+    local protocol="${NETWORK_PROTOCOL:-tcp}"
+    
     echo "Starting matrix network test..."
     echo "  Hosts: ${host_ips[*]}"
     echo "  Test duration: ${duration}s per pair"
     echo "  Parallel connections: $parallel"
+    echo "  Protocol: $protocol"
     local total_pairs=$((num_hosts * (num_hosts - 1) / 2))
     echo "  Total test pairs: $total_pairs"
     
@@ -3633,7 +3687,7 @@ run_matrix_network_test() {
             
             # Run batch in parallel and collect results
             if [ "$DRY_RUN" = true ]; then
-                run_matrix_batch $((batch_idx + 1)) "$port" "$duration" "$parallel" "$LOCAL_IP" "${batch_pairs[@]}"
+                run_matrix_batch $((batch_idx + 1)) "$port" "$duration" "$parallel" "$LOCAL_IP" "$protocol" "${batch_pairs[@]}"
                 for pair in "${batch_pairs[@]}"; do
                     IFS='|' read -r src dst <<< "$pair"
                     results+=("$src|$dst|0")
@@ -3643,7 +3697,7 @@ run_matrix_network_test() {
                     if [[ "$line" == RESULT:* ]]; then
                         results+=("${line#RESULT:}")
                     fi
-                done < <(run_matrix_batch $((batch_idx + 1)) "$port" "$duration" "$parallel" "$LOCAL_IP" "${batch_pairs[@]}")
+                done < <(run_matrix_batch $((batch_idx + 1)) "$port" "$duration" "$parallel" "$LOCAL_IP" "$protocol" "${batch_pairs[@]}")
             fi
 
             # Add sleep between batches to ensure old processes are fully cleaned up
@@ -3684,6 +3738,12 @@ run_matrix_network_test() {
             set_ssh_password "$dst"
             local dst_ssh=$(get_ssh_command "$dst")
             
+            # Set protocol flag
+            local protocol_flag=""
+            if [ "$protocol" = "udp" ]; then
+                protocol_flag="--udp"
+            fi
+            
             # Calculate timeout parameters for server:
             # --idle-timeout: 600 seconds (10 minutes) for automatic cleanup
             # --rcv-timeout: (duration + 30) * 1000 milliseconds to support long tests
@@ -3695,8 +3755,8 @@ run_matrix_network_test() {
             else
                 eval "$dst_ssh 'iperf3 -s -p $port -D --idle-timeout $server_idle_timeout --rcv-timeout $server_rcv_timeout'"
                 
-                # Wait for remote server port to be ready
-                if ! wait_for_iperf3_server "$dst_ssh" "$port" "true" 15 "true"; then
+                # Wait for remote server port to be ready (only for TCP)
+                if [ "$protocol" = "tcp" ] && ! wait_for_iperf3_server "$dst_ssh" "$port" "true" 15 "true"; then
                     echo "  ⚠ Server $dst:$port startup timeout after 15s"
                 fi
             fi
@@ -3714,15 +3774,15 @@ run_matrix_network_test() {
             if [ "$DRY_RUN" = true ]; then
                 echo "[DRY RUN] Would run iperf3 client from $src to $dst"
                 if [ "$src" = "$LOCAL_IP" ]; then
-                    echo "[DRY RUN] timeout --signal=KILL $client_timeout iperf3 -c \"$dst\" -p \"$port\" -t \"$duration\" -P \"$parallel\" --connect-timeout 3000 -J"
+                    echo "[DRY RUN] timeout --signal=KILL $client_timeout iperf3 -c \"$dst\" -p \"$port\" -t \"$duration\" -P \"$parallel\" --connect-timeout 3000 -J $protocol_flag"
                 else
                     local src_ssh=$(get_ssh_command "$src")
-                    echo "[DRY RUN] timeout --signal=KILL $client_timeout $src_ssh 'iperf3 -c \"$dst\" -p \"$port\" -t \"$duration\" -P \"$parallel\" --connect-timeout 3000 -J'"
+                    echo "[DRY RUN] timeout --signal=KILL $client_timeout $src_ssh 'iperf3 -c \"$dst\" -p \"$port\" -t \"$duration\" -P \"$parallel\" --connect-timeout 3000 -J $protocol_flag'"
                 fi
             else
                 if [ "$src" = "$LOCAL_IP" ]; then
                     # Run locally
-                    if timeout --signal=KILL $client_timeout iperf3 -c "$dst" -p "$port" -t "$duration" -P "$parallel" --connect-timeout 3000 -J > "$client_output_file" 2>&1; then
+                    if timeout --signal=KILL $client_timeout iperf3 -c "$dst" -p "$port" -t "$duration" -P "$parallel" --connect-timeout 3000 -J $protocol_flag > "$client_output_file" 2>&1; then
                         # Generate text format from JSON
                         generate_iperf3_text_from_json "$client_output_file" "$client_text_output"
                     else
@@ -3736,7 +3796,7 @@ run_matrix_network_test() {
                     # Run via SSH
                     set_ssh_password "$src"
                     local src_ssh=$(get_ssh_command "$src")
-                    if eval "timeout --signal=KILL $client_timeout $src_ssh 'iperf3 -c \"$dst\" -p \"$port\" -t \"$duration\" -P \"$parallel\" --connect-timeout 3000 -J'" > "$client_output_file" 2>&1; then
+                    if eval "timeout --signal=KILL $client_timeout $src_ssh 'iperf3 -c \"$dst\" -p \"$port\" -t \"$duration\" -P \"$parallel\" --connect-timeout 3000 -J $protocol_flag'" > "$client_output_file" 2>&1; then
                         # Generate text format from JSON
                         generate_iperf3_text_from_json "$client_output_file" "$client_text_output"
                     else
@@ -4664,6 +4724,25 @@ run_memory_test() {
     fi
     local duration="$DURATION"
     
+    # Calculate MEMORY_TOTAL_SIZE if set to 0 (use 60% of total system memory)
+    local memory_total_size="${MEMORY_TOTAL_SIZE:-0}"
+    if [ "$memory_total_size" = "0" ]; then
+        local total_mem_mb=$(get_memory_size_mb 2>/dev/null || echo "unknown")
+        if [ "$total_mem_mb" != "unknown" ]; then
+            # Calculate 60% of total memory
+            local sixty_percent_mb=$(awk "BEGIN {printf \"%.0f\", $total_mem_mb * 0.6}")
+            # Convert to appropriate unit (G or M)
+            if [ "$sixty_percent_mb" -ge 1024 ]; then
+                memory_total_size="$(awk "BEGIN {printf \"%.0f\", $sixty_percent_mb / 1024}")G"
+            else
+                memory_total_size="${sixty_percent_mb}M"
+            fi
+        else
+            # Fallback to 20G if we can't get system memory
+            memory_total_size="20G"
+        fi
+    fi
+    
     local memory_oper_list="${MEMORY_OPER:-read write}"
     local IFS=' '
     read -ra oper_array <<< "$memory_oper_list"
@@ -4673,12 +4752,12 @@ run_memory_test() {
         
         if [ "$REMOTE" != "true" ]; then
             echo "Starting memory ${oper} test..."
-            echo "  Threads: $threads, Duration: ${duration}s, Block size: ${MEMORY_BLOCK_SIZE:-8K}"
+            echo "  Threads: $threads, Duration: ${duration}s, Block size: ${MEMORY_BLOCK_SIZE:-8K}, Total size: $memory_total_size"
         fi
         
         run_command "sysbench memory \
             --memory-block-size=\"${MEMORY_BLOCK_SIZE:-8K}\" \
-            --memory-total-size=\"${MEMORY_TOTAL_SIZE:-20G}\" \
+            --memory-total-size=\"${memory_total_size}\" \
             --memory-oper=\"$oper\" \
             --threads=\"$threads\" \
             --time=\"${duration}\" \
@@ -4816,7 +4895,22 @@ generate_report() {
     printf -- "--------------------------------------------------------------------------------\n" >> "$report_file"
     printf -- "%-28s %-20s %-25s\n" "Enabled" "MEMORY_ENABLED" "${MEMORY_ENABLED:-true}" >> "$report_file"
     printf -- "%-28s %-20s %-25s\n" "Block Size" "MEMORY_BLOCK_SIZE" "${MEMORY_BLOCK_SIZE:-8K}" >> "$report_file"
-    printf -- "%-28s %-20s %-25s\n" "Total Size" "MEMORY_TOTAL_SIZE" "${MEMORY_TOTAL_SIZE:-20G}" >> "$report_file"
+    # Display auto-calculated memory size if MEMORY_TOTAL_SIZE is 0
+    local mem_total_val="${MEMORY_TOTAL_SIZE:-0}"
+    if [ "$mem_total_val" = "0" ]; then
+        local total_mem_mb=$(get_memory_size_mb 2>/dev/null || echo "unknown")
+        if [ "$total_mem_mb" != "unknown" ]; then
+            local sixty_percent_mb=$(awk "BEGIN {printf \"%.0f\", $total_mem_mb * 0.6}")
+            if [ "$sixty_percent_mb" -ge 1024 ]; then
+                mem_total_val="auto ($(awk "BEGIN {printf \"%.0f\", $sixty_percent_mb / 1024}")G)"
+            else
+                mem_total_val="auto (${sixty_percent_mb}M)"
+            fi
+        else
+            mem_total_val="auto (20G fallback)"
+        fi
+    fi
+    printf -- "%-28s %-20s %-25s\n" "Total Size" "MEMORY_TOTAL_SIZE" "$mem_total_val" >> "$report_file"
     printf -- "%-28s %-20s %-25s\n" "Operation" "MEMORY_OPER" "${MEMORY_OPER:-read}" >> "$report_file"
     printf -- "%-28s %-20s %-25s\n" "Duration" "DURATION" "${unified_duration}s" >> "$report_file"
     local mem_threads_val="${MEMORY_THREADS:-0}"
@@ -4841,11 +4935,31 @@ generate_report() {
         printf -- "%-28s %-20s %-25s\n" "Duration" "FIO_DURATION" "${FIO_DURATION:-$unified_duration}s" >> "$report_file"
         printf -- "%-28s %-20s %-25s\n" "Block Size" "FIO_BS" "${FIO_BS:-16K}" >> "$report_file"
         printf -- "%-28s %-20s %-25s\n" "IO Depth" "FIO_IODEPTH" "${FIO_IODEPTH:-32}" >> "$report_file"
-        printf -- "%-28s %-20s %-25s\n" "Num Jobs" "FIO_NUMJOBS" "${FIO_NUMJOBS:-4}" >> "$report_file"
+        # Display auto if FIO_NUMJOBS is 0
+        local fio_numjobs_val="${FIO_NUMJOBS}"
+        if [ "$fio_numjobs_val" = "0" ]; then
+            fio_numjobs_val="auto ($(get_cpu_cores))"
+        fi
+        printf -- "%-28s %-20s %-25s\n" "Num Jobs" "FIO_NUMJOBS" "$fio_numjobs_val" >> "$report_file"
         printf -- "%-28s %-20s %-25s\n" "Direct IO" "FIO_DIRECT" "${FIO_DIRECT:-1}" >> "$report_file"
         printf -- "%-28s %-20s %-25s\n" "File Num" "FIO_FILE_NUM" "${FIO_FILE_NUM:-4}" >> "$report_file"
         printf -- "%-28s %-20s %-25s\n" "IO Engine" "FIO_IOENGINE" "${FIO_IOENGINE:-libaio}" >> "$report_file"
-        
+    else
+        printf -- "%-28s %-20s %-25s\n" "Test Profiles" "SYSBENCH_PROFILES" "${SYSBENCH_PROFILES:-rndrw}" >> "$report_file"
+        printf -- "%-28s %-20s %-25s\n" "Duration" "SYSBENCH_DURATION" "${SYSBENCH_DURATION:-$unified_duration}s" >> "$report_file"
+        printf -- "%-28s %-20s %-25s\n" "Block Size" "SYSBENCH_BLOCK_SIZE" "${SYSBENCH_BLOCK_SIZE:-16K}" >> "$report_file"
+        printf -- "%-28s %-20s %-25s\n" "File Num" "SYSBENCH_FILE_NUM" "${SYSBENCH_FILE_NUM:-4}" >> "$report_file"
+        printf -- "%-28s %-20s %-25s\n" "IO Mode" "SYSBENCH_IO_MODE" "${SYSBENCH_IO_MODE:-sync}" >> "$report_file"
+        printf -- "%-28s %-20s %-25s\n" "Extra Flags" "SYSBENCH_EXTRA_FLAGS" "${SYSBENCH_EXTRA_FLAGS:-direct}" >> "$report_file"
+        # Display auto if SYSBENCH_THREADS is 0
+        local sysbench_threads_val="${SYSBENCH_THREADS:-4}"
+        if [ "$sysbench_threads_val" = "0" ]; then
+            sysbench_threads_val="auto ($(get_cpu_cores))"
+        fi
+        printf -- "%-28s %-20s %-25s\n" "Threads" "SYSBENCH_THREADS" "$sysbench_threads_val" >> "$report_file"
+    fi
+    # Add per file size calculation for fio
+    if [ "${IO_TOOL:-sysbench}" = "fio" ]; then
         local fio_total_size="${IO_TOTAL_SIZE:-1G}"
         local fio_file_num="${FIO_FILE_NUM:-4}"
         local fio_numjobs="${FIO_NUMJOBS:-4}"
@@ -4861,14 +4975,6 @@ generate_report() {
             fio_per_file_size="${fio_total_size}"
         fi
         printf -- "%-28s %-20s %-25s\n" "Per File Size" "(Calculated)" "${fio_per_file_size}" >> "$report_file"
-    else
-        printf -- "%-28s %-20s %-25s\n" "Test Mode" "SYSBENCH_PROFILES" "${SYSBENCH_PROFILES:-rndrw}" >> "$report_file"
-        printf -- "%-28s %-20s %-25s\n" "Duration" "SYSBENCH_DURATION" "${SYSBENCH_DURATION:-$unified_duration}s" >> "$report_file"
-        printf -- "%-28s %-20s %-25s\n" "File Num" "SYSBENCH_FILE_NUM" "${SYSBENCH_FILE_NUM:-4}" >> "$report_file"
-        printf -- "%-28s %-20s %-25s\n" "Block Size" "SYSBENCH_BLOCK_SIZE" "${SYSBENCH_BLOCK_SIZE:-16K}" >> "$report_file"
-        printf -- "%-28s %-20s %-25s\n" "IO Mode" "SYSBENCH_IO_MODE" "${SYSBENCH_IO_MODE:-sync}" >> "$report_file"
-        printf -- "%-28s %-20s %-25s\n" "Extra Flags" "SYSBENCH_EXTRA_FLAGS" "${SYSBENCH_EXTRA_FLAGS:-direct}" >> "$report_file"
-        printf -- "%-28s %-20s %-25s\n" "Threads" "SYSBENCH_THREADS" "${SYSBENCH_THREADS:-4}" >> "$report_file"
     fi
     printf -- "\n" >> "$report_file"
     
@@ -5679,6 +5785,21 @@ main() {
     NETWORK_PORT="${NETWORK_PORT:-25201}"
     SSH_PORT="${SSH_PORT:-22}"
     IO_PATH="${IO_PATH:-$BASE_DIR/io_test}"
+    
+    # Set default values for new parameters
+    EXEC_MODE="${EXEC_MODE:-parallel}"
+    NETWORK_PROTOCOL="${NETWORK_PROTOCOL:-tcp}"
+    
+    # Update default values based on requirements
+    IO_TOOL="${IO_TOOL:-fio}"
+    IO_TOTAL_SIZE="${IO_TOTAL_SIZE:-10G}"
+    NETWORK_PARALLEL="${NETWORK_PARALLEL:-4}"
+    SYSBENCH_PROFILES="${SYSBENCH_PROFILES:-seqrd seqwr rndrd rndwr}"
+    FIO_PROFILES="${FIO_PROFILES:-read write randread randwrite}"
+    FIO_IODEPTH="${FIO_IODEPTH:-64}"
+    FIO_NUMJOBS="${FIO_NUMJOBS:-4}"
+    SYSBENCH_THREADS="${SYSBENCH_THREADS:-4}"
+    MEMORY_TOTAL_SIZE="${MEMORY_TOTAL_SIZE:-0}"
     
     # Save config file ENABLED flags BEFORE parse_args resets them
     local config_cpu_enabled="${CPU_ENABLED:-false}"
@@ -6550,25 +6671,21 @@ distribute_to_server() {
     echo "  Getting remote system info..."
     remote_arch=$(eval "$ssh_cmd 'uname -m'") || { echo "  ✗ Failed to get remote architecture"; return 1; }
     remote_os=$(eval "$ssh_cmd 'uname -s'") || { echo "  ✗ Failed to get remote OS"; return 1; }
-    remote_distro=$(eval "$ssh_cmd '
-        if [ -f /etc/kylin-release ]; then echo kylin; exit; fi
-        if [ -f /etc/neokylin-release ]; then echo neokylin; exit; fi
-        if [ -f /etc/uos-release ]; then echo uos; exit; fi
-        if [ -f /etc/deepin-release ]; then echo deepin; exit; fi
-        if [ -f /etc/euleros-release ]; then echo euleros; exit; fi
-        if [ -f /etc/openEuler-release ]; then echo openeuler; exit; fi
-        if [ -f /etc/redhat-release ]; then
-            if grep -qi centos /etc/redhat-release; then echo centos; exit; fi
-            if grep -qi fedora /etc/redhat-release; then echo fedora; exit; fi
-            if grep -qi oracle /etc/redhat-release; then echo oracle; exit; fi
-            echo redhat; exit;
+    # Directly detect package manager family on remote server (avoids hardcoding distros)
+    remote_family=$(eval "$ssh_cmd '
+        if command -v rpm &> /dev/null || [ -f /etc/yum.conf ] || [ -f /etc/dnf/dnf.conf ] || [ -f /etc/redhat-release ]; then
+            echo rpm; exit;
         fi
-        if [ -f /etc/debian_version ]; then echo debian; exit; fi
-        if [ -f /etc/lsb-release ]; then grep -oP \"DISTRIB_ID=\\K.*\" /etc/lsb-release | tr \"[:upper:]\" \"[:lower:]\"; exit; fi
-        if [ -f /etc/os-release ]; then grep -oP \"ID=\\\"?\\K[^\"]+\" /etc/os-release | tr \"[:upper:]\" \"[:lower:]\"; exit; fi
+        if command -v dpkg &> /dev/null || [ -f /etc/apt/sources.list ] || [ -f /etc/debian_version ]; then
+            echo deb; exit;
+        fi
         echo unknown
-    '") || { echo "  ✗ Failed to get remote distro"; return 1; }
-    echo "  Local: $local_os $local_arch ($local_distro), Remote: $remote_os $remote_arch ($remote_distro)"
+    '") || { echo "  ✗ Failed to get remote package manager"; return 1; }
+    
+    # Get local package manager family
+    local local_family=$(get_pkg_manager_family)
+    
+    echo "  Local: $local_os $local_arch ($local_distro, $local_family), Remote: $remote_os $remote_arch ($remote_family)"
     
     # oscheckperf script is shell-based and cross-platform, no architecture/distro restrictions
     # Only check architecture/compatibility when distributing compiled binaries (all)
@@ -6588,10 +6705,44 @@ distribute_to_server() {
         fi
         
         # Check distribution compatibility for Linux
-        if [ "$local_os" = "Linux" ] && [ "$local_distro" != "$remote_distro" ] && [ "$remote_distro" != "unknown" ]; then
-            echo "  ✗ Distribution mismatch: local is $local_distro, remote is $remote_distro"
-            echo "  - Skipping distribution to $target_ip (requires manual remote installation)"
-            return 4
+        if [ "$local_os" = "Linux" ] && [ "$remote_family" != "unknown" ]; then
+            if [ "$STRICT_DISTRO_CHECK" = "true" ]; then
+                # Strict mode: require exact distro match
+                # Get remote distro name for strict mode comparison
+                remote_distro=$(eval "$ssh_cmd '
+                    if [ -f /etc/os-release ]; then grep -oP \"ID=\"?\\K[^\"]+\" /etc/os-release | tr \"[:upper:]\" \"[:lower:]\"; exit; fi
+                    if [ -f /etc/lsb-release ]; then grep -oP \"DISTRIB_ID=\\K.*\" /etc/lsb-release | tr \"[:upper:]\" \"[:lower:]\"; exit; fi
+                    if [ -f /etc/debian_version ]; then echo debian; exit; fi
+                    if [ -f /etc/redhat-release ]; then
+                        if grep -qi centos /etc/redhat-release; then echo centos; exit; fi
+                        if grep -qi fedora /etc/redhat-release; then echo fedora; exit; fi
+                        if grep -qi oracle /etc/redhat-release; then echo oracle; exit; fi
+                        echo redhat; exit;
+                    fi
+                    if [ -f /etc/kylin-release ]; then echo kylin; exit; fi
+                    if [ -f /etc/neokylin-release ]; then echo neokylin; exit; fi
+                    if [ -f /etc/uos-release ]; then echo uos; exit; fi
+                    if [ -f /etc/deepin-release ]; then echo deepin; exit; fi
+                    if [ -f /etc/euleros-release ]; then echo euleros; exit; fi
+                    if [ -f /etc/openEuler-release ]; then echo openeuler; exit; fi
+                    echo unknown
+                '") || remote_distro="unknown"
+                
+                if [ "$local_distro" != "$remote_distro" ]; then
+                    echo "  ✗ Distribution mismatch: local is $local_distro, remote is $remote_distro"
+                    echo "  - Skipping distribution to $target_ip (requires manual remote installation)"
+                    return 4
+                fi
+            else
+                # Relaxed mode (default): allow same package manager family
+                if [ "$local_family" = "$remote_family" ]; then
+                    echo "  ✓ Distribution compatible (same package manager family: $(echo "$local_family" | tr '[:lower:]' '[:upper:]'))"
+                else
+                    echo "  ✗ Distribution mismatch: local is $local_family, remote is $remote_family"
+                    echo "  - Skipping distribution to $target_ip (requires manual remote installation)"
+                    return 4
+                fi
+            fi
         fi
     fi
     
@@ -7140,6 +7291,26 @@ validate_all_parameters() {
         if [[ ! " $valid_network_modes " =~ " $NETWORK_MODE " ]]; then
             output="${output}ERROR: Invalid NETWORK_MODE: $NETWORK_MODE\n"
             output="${output}  Valid values: $valid_network_modes\n"
+            error_count=$((error_count + 1))
+        fi
+    fi
+    
+    # Validate NETWORK_PROTOCOL
+    if [ -n "$NETWORK_PROTOCOL" ]; then
+        local valid_network_protocols="tcp udp"
+        if [[ ! " $valid_network_protocols " =~ " $NETWORK_PROTOCOL " ]]; then
+            output="${output}ERROR: Invalid NETWORK_PROTOCOL: $NETWORK_PROTOCOL\n"
+            output="${output}  Valid values: $valid_network_protocols\n"
+            error_count=$((error_count + 1))
+        fi
+    fi
+    
+    # Validate EXEC_MODE
+    if [ -n "$EXEC_MODE" ]; then
+        local valid_exec_modes="parallel serial"
+        if [[ ! " $valid_exec_modes " =~ " $EXEC_MODE " ]]; then
+            output="${output}ERROR: Invalid EXEC_MODE: $EXEC_MODE\n"
+            output="${output}  Valid values: $valid_exec_modes\n"
             error_count=$((error_count + 1))
         fi
     fi
