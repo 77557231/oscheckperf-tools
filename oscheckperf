@@ -1,7 +1,7 @@
 #!/bin/bash
 #--------------------------------------------------------------------------------
 #-- File name:   oscheckperf
-#-- Version:     v1.1.7
+#-- Version:     v1.1.8
 #-- Purpose:     Database System Benchmark Tool
 #-- Author:      Wanping Pan 
 #-- Description: One-click system benchmarking tool, supports configuration via config file or command line parameters
@@ -902,7 +902,7 @@ parse_args() {
                 exit 0
                 ;;
             --version)
-                echo "Version: 1.1.7"
+                echo "Version: 1.1.8"
                 exit 0
                 ;;
             --dry-run)
@@ -1138,7 +1138,7 @@ show_help() {
     echo "    IO_PATH=<path>              IO test directory path (default: \$HOME/oscheckperf/io_test)"
     echo ""
     echo "  sysbench-specific parameters:"
-    echo "    SYSBENCH_PROFILES=<profiles>     sysbench IO profiles, space-separated (default: rndrw)"
+    echo "    SYSBENCH_PROFILES=<profiles>     sysbench IO profiles, space-separated (default: seqrd seqwr rndrd rndwr)"
     echo "                                     Available modes: seqwr, seqrewr, seqrd, rndrd, rndwr, rndrw"
     echo "    SYSBENCH_FILE_NUM=<number>       Number of test files (default: 4)"
     echo "    SYSBENCH_BLOCK_SIZE=<size>       Block size (default: 16K)"
@@ -1149,10 +1149,10 @@ show_help() {
     echo ""
     echo "  fio-specific parameters:"
     echo "    FIO_DURATION=<seconds>      fio test duration (default: same as DURATION)"
-    echo "    FIO_PROFILES=<profiles>     fio test profiles, space-separated (default: randrw)"
+    echo "    FIO_PROFILES=<profiles>     fio test profiles, space-separated (default: read write randread randwrite)"
     echo "                                Available modes: read, write, randread, randwrite, rw, randrw, trim, randtrim, trimwrite"
     echo "    FIO_BS=<size>              Block size for all profiles (default: 16K)"
-    echo "    FIO_IODEPTH=<num>           I/O depth for all profiles (default: 32)"
+    echo "    FIO_IODEPTH=<num>           I/O depth for all profiles (default: 64)"
     echo "    FIO_NUMJOBS=<num>           Number of jobs for all profiles (default: 4)"
     echo "    FIO_DIRECT=0|1              Direct I/O mode (default: 1, bypass OS cache)"
     echo "    FIO_FILE_NUM=<num>          Number of test files (default: 4, simulates multi-datafile scenario)"
@@ -1161,7 +1161,7 @@ show_help() {
     echo "Network test parameters:"
     echo "  NETWORK_MODE=serial|matrix  Network test mode (default: matrix)"
     echo "  NETWORK_PORT=<port>        Test port (default: 25201)"
-    echo "  NETWORK_PARALLEL=<number>  Parallel connections per test (default: 1)"
+    echo "  NETWORK_PARALLEL=<number>  Parallel connections per test (default: 4)"
     echo ""
     echo "Threads test parameters:"
     echo "  THREADS_NUM=<number>        Number of threads (default: auto, cpu_cores*4)"
@@ -2346,13 +2346,12 @@ parse_all_results() {
 run_io_test() {
     echo "=== IO Performance Test ==="
     
-    local io_tool="${IO_TOOL:-sysbench}"
-    local duration="$DURATION"
+    local io_tool="$IO_TOOL"
     
     if [ "$io_tool" = "fio" ]; then
-        FIO_DURATION="${FIO_DURATION:-$duration}" run_fio_test
+        FIO_DURATION="$FIO_DURATION" run_fio_test
     else
-        SYSBENCH_DURATION="${SYSBENCH_DURATION:-$duration}" run_sysbench_fileio
+        SYSBENCH_DURATION="$SYSBENCH_DURATION" run_sysbench_fileio
     fi
 }
 
@@ -2362,10 +2361,10 @@ run_sysbench_fileio() {
     local test_dir="$IO_PATH"
 
     # Support SYSBENCH_PROFILES parameter
-    local test_modes="${SYSBENCH_PROFILES:-rndrw}"
+    local test_modes="$SYSBENCH_PROFILES"
 
     # Calculate SYSBENCH_THREADS if set to 0 (use CPU core count)
-    local sysbench_threads="${SYSBENCH_THREADS:-4}"
+    local sysbench_threads="$SYSBENCH_THREADS"
     if [ "$sysbench_threads" = "0" ]; then
         sysbench_threads=$(get_cpu_cores)
     fi
@@ -2405,28 +2404,28 @@ run_sysbench_fileio() {
 
         # Build full sysbench command
         local sysbench_prepare_cmd="sysbench fileio \
-            --file-total-size=${IO_TOTAL_SIZE:-1G} \
+            --file-total-size=${IO_TOTAL_SIZE} \
             --file-test-mode=$test_mode \
-            --file-num=${SYSBENCH_FILE_NUM:-4} \
-            --file-block-size=${SYSBENCH_BLOCK_SIZE:-16K} \
+            --file-num=${SYSBENCH_FILE_NUM} \
+            --file-block-size=${SYSBENCH_BLOCK_SIZE} \
             prepare"
         
         local sysbench_run_cmd="sysbench fileio \
-            --file-total-size=${IO_TOTAL_SIZE:-1G} \
+            --file-total-size=${IO_TOTAL_SIZE} \
             --file-test-mode=$test_mode \
-            --time=${SYSBENCH_DURATION:-$DURATION} \
-            --file-num=${SYSBENCH_FILE_NUM:-4} \
-            --file-block-size=${SYSBENCH_BLOCK_SIZE:-16K} \
-            --file-io-mode=${SYSBENCH_IO_MODE:-sync} \
-            --file-extra-flags=${SYSBENCH_EXTRA_FLAGS:-direct} \
+            --time=${SYSBENCH_DURATION} \
+            --file-num=${SYSBENCH_FILE_NUM} \
+            --file-block-size=${SYSBENCH_BLOCK_SIZE} \
+            --file-io-mode=${SYSBENCH_IO_MODE} \
+            --file-extra-flags=${SYSBENCH_EXTRA_FLAGS} \
             --threads=${sysbench_threads} \
             run"
         
         local sysbench_cleanup_cmd="sysbench fileio \
             --file-total-size=${IO_TOTAL_SIZE} \
             --file-test-mode=$test_mode \
-            --file-num=${SYSBENCH_FILE_NUM:-4} \
-            --file-block-size=${SYSBENCH_BLOCK_SIZE:-16K} \
+            --file-num=${SYSBENCH_FILE_NUM} \
+            --file-block-size=${SYSBENCH_BLOCK_SIZE} \
             cleanup"
 
         if [ "$DRY_RUN" = true ]; then
@@ -2489,13 +2488,13 @@ run_fio_test() {
     fi
     
     # Calculate FIO_NUMJOBS if set to 0 (use CPU core count)
-    local numjobs="${FIO_NUMJOBS:-4}"
+    local numjobs="$FIO_NUMJOBS"
     if [ "$numjobs" = "0" ]; then
         numjobs=$(get_cpu_cores)
     fi
     
     # Iterate through all profiles
-    local profiles="${FIO_PROFILES:-randrw}"
+    local profiles="$FIO_PROFILES"
     
     for profile in $profiles; do
         echo "  Executing profile: $profile"
@@ -2503,12 +2502,12 @@ run_fio_test() {
         # Generate fio configuration
         local fio_conf="$TMP_DIR/fio_${profile}.fio"
         local rw_type="${profile}"
-        local bs="${FIO_BS:-16K}"
-        local iodepth="${FIO_IODEPTH:-32}"
-        local direct="${FIO_DIRECT:-1}"
-        local ioengine="${FIO_IOENGINE:-libaio}"
-        local file_num="${FIO_FILE_NUM:-4}"
-        local total_size="${IO_TOTAL_SIZE:-1G}"
+        local bs="$FIO_BS"
+        local iodepth="$FIO_IODEPTH"
+        local direct="$FIO_DIRECT"
+        local ioengine="$FIO_IOENGINE"
+        local file_num="$FIO_FILE_NUM"
+        local total_size="$IO_TOTAL_SIZE"
         
         # Calculate file size per file: total_size / (file_num * numjobs)
         # Important: fio size is per job, each job can write multiple files
@@ -2532,7 +2531,7 @@ run_fio_test() {
 ioengine=${ioengine}
 direct=${direct}
 size=${per_file_size}
-runtime=${FIO_DURATION:-$DURATION}
+runtime=${FIO_DURATION}
 time_based
 group_reporting
 thread
@@ -2850,9 +2849,9 @@ display_per_second_throughput() {
 
 # Network test function
 run_network_test() {
-    local network_tool="${NETWORK_TOOL:-iperf3}"
-    local network_mode="${NETWORK_MODE:-matrix}"
-    local network_enabled="${NETWORK_ENABLED:-true}"
+    local network_tool="$NETWORK_TOOL"
+    local network_mode="$NETWORK_MODE"
+    local network_enabled="$NETWORK_ENABLED"
     local network_client_ip="${NETWORK_CLIENT_IP:-}"
     
     # Check if network test is enabled
@@ -2899,8 +2898,8 @@ run_serial_network_test() {
     start_timer "network_test_serial"
     local port="$NETWORK_PORT"
     local duration="$DURATION"
-    local parallel="${NETWORK_PARALLEL:-1}"
-    local protocol="${NETWORK_PROTOCOL:-tcp}"
+    local parallel="$NETWORK_PARALLEL"
+    local protocol="$NETWORK_PROTOCOL"
     local protocol_flag=""
     if [ "$protocol" = "udp" ]; then
         protocol_flag="--udp"
@@ -3597,7 +3596,7 @@ run_matrix_network_test() {
     
     local port="$NETWORK_PORT"
     local duration="$DURATION"
-    local parallel="${NETWORK_PARALLEL:-1}"
+    local parallel="$NETWORK_PARALLEL"
     
     # Create output directory if it doesn't exist
     local output_dir="$OUTPUT_DIR"
@@ -3624,7 +3623,7 @@ run_matrix_network_test() {
         return 0
     fi
     
-    local protocol="${NETWORK_PROTOCOL:-tcp}"
+    local protocol="$NETWORK_PROTOCOL"
     
     echo "Starting matrix network test..."
     echo "  Hosts: ${host_ips[*]}"
@@ -3875,7 +3874,7 @@ run_parallel_network_test() {
     
     local port="$NETWORK_PORT"
     local duration="$DURATION"
-    local parallel="${NETWORK_PARALLEL:-1}"
+    local parallel="${NETWORK_PARALLEL:-4}"
     
     # Create output directory if it doesn't exist
     local output_dir="$OUTPUT_DIR"
@@ -4014,7 +4013,7 @@ generate_parallel_report() {
 
 Test Time: $(date '+%Y-%m-%d %H:%M:%S')
 Test Duration: $DURATIONs
-Parallel Connections: ${NETWORK_PARALLEL:-1}
+Parallel Connections: ${NETWORK_PARALLEL}
 Server: $server_ip
 
 ================================================================================
@@ -4159,7 +4158,7 @@ generate_matrix_report() {
 
 Test Time: $(date '+%Y-%m-%d %H:%M:%S')
 Test Duration: $DURATIONs per pair
-Parallel Connections: ${NETWORK_PARALLEL:-1}
+Parallel Connections: ${NETWORK_PARALLEL}
 
 Hosts: ${hosts_arr[*]}
 
@@ -4300,7 +4299,7 @@ parse_iperf3_result() {
     fi
     
     # Only show jitter and packet loss for UDP tests (not applicable for TCP)
-    if [ "${NETWORK_PROTOCOL:-tcp}" = "udp" ]; then
+    if [ "$NETWORK_PROTOCOL" = "udp" ]; then
         local jitter_ms=$(jq -r '.end.sum_received.jitter_ms // 0' "$json_file" 2>/dev/null)
         local lost_packets=$(jq -r '.end.sum_received.lost_packets // 0' "$json_file" 2>/dev/null)
         local total_packets=$(jq -r '.end.sum_received.packets // 0' "$json_file" 2>/dev/null)
@@ -4504,7 +4503,7 @@ run_threads_test() {
     echo "=== Threads Performance Test ==="
     
     local temp_output_file="$TMP_DIR/vb_threads_${TIMESTAMP}.log"
-    local threads="${THREADS_NUM:-0}"
+    local threads="$THREADS_NUM"
     if [ "$threads" -eq 0 ]; then
         local cores=$(get_cpu_cores 2>/dev/null || echo "4")
         threads=$((cores * 4))
@@ -4514,13 +4513,13 @@ run_threads_test() {
     # Only display test info in non-remote mode
     if [ "$REMOTE" != "true" ]; then
         echo "Starting threads test..."
-        echo "  Threads: $threads, Duration: ${duration}s, yields: ${THREADS_YIELDS:-100}, locks: ${THREADS_LOCKS:-4}"
+        echo "  Threads: $threads, Duration: ${duration}s, yields: ${THREADS_YIELDS}, locks: ${THREADS_LOCKS}"
     fi
     
     run_command "sysbench threads \
         --threads=\"$threads\" \
-        --thread-yields=\"${THREADS_YIELDS:-100}\" \
-        --thread-locks=\"${THREADS_LOCKS:-4}\" \
+        --thread-yields=\"${THREADS_YIELDS}\" \
+        --thread-locks=\"${THREADS_LOCKS}\" \
         --time=\"${duration}\" \
         run" "$temp_output_file"
     
@@ -4600,7 +4599,7 @@ run_mutex_test() {
     fi
     
     local temp_output_file="$TMP_DIR/vb_mutex_${TIMESTAMP}.log"
-    local threads="${MUTEX_THREADS:-0}"
+    local threads="$MUTEX_THREADS"
     if [ "$threads" -eq 0 ]; then
         threads=$(get_cpu_cores)
     fi
@@ -4609,11 +4608,11 @@ run_mutex_test() {
     # Only display test info in non-remote mode
     if [ "$REMOTE" != "true" ]; then
         echo "Starting mutex test..."
-        echo "  Threads: $threads, Duration: ${duration}s, mutex num: ${MUTEX_NUM:-1024}"
+        echo "  Threads: $threads, Duration: ${duration}s, mutex num: ${MUTEX_NUM}"
     fi
     
     run_command "sysbench mutex \
-        --mutex-num=\"${MUTEX_NUM:-1024}\" \
+        --mutex-num=\"${MUTEX_NUM}\" \
         --threads=\"$threads\" \
         --time=\"${duration}\" \
         run" "$temp_output_file"
@@ -4677,7 +4676,7 @@ run_cpu_test() {
     echo "=== CPU Performance Test ==="
     
     local temp_output_file="$TMP_DIR/vb_cpu_${TIMESTAMP}.log"
-    local threads="${CPU_THREADS:-0}"
+    local threads="$CPU_THREADS"
     if [ "$threads" -eq 0 ]; then
         threads=$(get_cpu_cores)
         echo "Auto-detected CPU cores: $threads"
@@ -4687,11 +4686,11 @@ run_cpu_test() {
     # Only display test info in non-remote mode
     if [ "$REMOTE" != "true" ]; then
         echo "Starting CPU test..."
-        echo "  Threads: $threads, Duration: ${duration}s, Max Prime: ${CPU_MAX_PRIME:-20000}"
+        echo "  Threads: $threads, Duration: ${duration}s, Max Prime: ${CPU_MAX_PRIME}"
     fi
     
     run_command "sysbench cpu \
-        --cpu-max-prime=\"${CPU_MAX_PRIME:-20000}\" \
+        --cpu-max-prime=\"${CPU_MAX_PRIME}\" \
         --threads=\"$threads\" \
         --time=\"${duration}\" \
         run" "$temp_output_file"
@@ -4725,7 +4724,7 @@ run_memory_test() {
     local duration="$DURATION"
     
     # Calculate MEMORY_TOTAL_SIZE if set to 0 (use 60% of total system memory)
-    local memory_total_size="${MEMORY_TOTAL_SIZE:-0}"
+    local memory_total_size="$MEMORY_TOTAL_SIZE"
     if [ "$memory_total_size" = "0" ]; then
         local total_mem_mb=$(get_memory_size_mb 2>/dev/null || echo "unknown")
         if [ "$total_mem_mb" != "unknown" ]; then
@@ -4743,7 +4742,7 @@ run_memory_test() {
         fi
     fi
     
-    local memory_oper_list="${MEMORY_OPER:-read write}"
+    local memory_oper_list="$MEMORY_OPER"
     local IFS=' '
     read -ra oper_array <<< "$memory_oper_list"
     
@@ -4752,11 +4751,11 @@ run_memory_test() {
         
         if [ "$REMOTE" != "true" ]; then
             echo "Starting memory ${oper} test..."
-            echo "  Threads: $threads, Duration: ${duration}s, Block size: ${MEMORY_BLOCK_SIZE:-8K}, Total size: $memory_total_size"
+            echo "  Threads: $threads, Duration: ${duration}s, Block size: ${MEMORY_BLOCK_SIZE}, Total size: $memory_total_size"
         fi
         
         run_command "sysbench memory \
-            --memory-block-size=\"${MEMORY_BLOCK_SIZE:-8K}\" \
+            --memory-block-size=\"${MEMORY_BLOCK_SIZE}\" \
             --memory-total-size=\"${memory_total_size}\" \
             --memory-oper=\"$oper\" \
             --threads=\"$threads\" \
@@ -4835,7 +4834,7 @@ generate_report() {
     fi
     
     # Add Hardware Information
-    if [ "${REPORT_HARDWARE_INFO:-true}" = "true" ]; then
+    if [ "$REPORT_HARDWARE_INFO" = "true" ]; then
         if ! command -v generate_hardware_report_unified &> /dev/null; then
             echo "Warning: hw_functions not found, skipping hardware information in report" >&2
         else
@@ -4867,9 +4866,9 @@ generate_report() {
     printf -- "--------------------------------------------------------------------------------\n" >> "$report_file"
     printf -- "%-28s %-20s %-25s\n" "Unified Duration" "DURATION" "${unified_duration}s" >> "$report_file"
     printf -- "%-28s %-20s %-25s\n" "Output Directory" "OUTPUT_DIR" "$OUTPUT_DIR" >> "$report_file"
-    printf -- "%-28s %-20s %-25s\n" "Execution Mode" "EXEC_MODE" "${EXEC_MODE:-parallel}" >> "$report_file"
+    printf -- "%-28s %-20s %-25s\n" "Execution Mode" "EXEC_MODE" "$EXEC_MODE" >> "$report_file"
     printf -- "%-28s %-20s %-25s\n" "SSH Port" "SSH_PORT" "$SSH_PORT" >> "$report_file"
-    printf -- "%-28s %-20s %-25s\n" "Report Hardware Info" "REPORT_HARDWARE_INFO" "${REPORT_HARDWARE_INFO:-true}" >> "$report_file"
+    printf -- "%-28s %-20s %-25s\n" "Report Hardware Info" "REPORT_HARDWARE_INFO" "$REPORT_HARDWARE_INFO" >> "$report_file"
     printf -- "\n" >> "$report_file"
     
     # CPU Test Configuration Table
@@ -4877,10 +4876,10 @@ generate_report() {
     printf -- "--------------------------------------------------------------------------------\n" >> "$report_file"
     printf -- "%-28s %-20s %-25s\n" "Parameter" "Env Var" "Value" >> "$report_file"
     printf -- "--------------------------------------------------------------------------------\n" >> "$report_file"
-    printf -- "%-28s %-20s %-25s\n" "Enabled" "CPU_ENABLED" "${CPU_ENABLED:-true}" >> "$report_file"
+    printf -- "%-28s %-20s %-25s\n" "Enabled" "CPU_ENABLED" "$CPU_ENABLED" >> "$report_file"
     printf -- "%-28s %-20s %-25s\n" "Duration" "DURATION" "${unified_duration}s" >> "$report_file"
-    printf -- "%-28s %-20s %-25s\n" "Max Prime Number" "CPU_MAX_PRIME" "${CPU_MAX_PRIME:-20000}" >> "$report_file"
-    local cpu_threads_val="${CPU_THREADS:-0}"
+    printf -- "%-28s %-20s %-25s\n" "Max Prime Number" "CPU_MAX_PRIME" "$CPU_MAX_PRIME" >> "$report_file"
+    local cpu_threads_val="$CPU_THREADS"
     if [ "$cpu_threads_val" = "0" ]; then
         printf -- "%-28s %-20s %-25s\n" "CPU Threads" "CPU_THREADS" "auto" >> "$report_file"
     else
@@ -4893,10 +4892,10 @@ generate_report() {
     printf -- "--------------------------------------------------------------------------------\n" >> "$report_file"
     printf -- "%-28s %-20s %-25s\n" "Parameter" "Env Var" "Value" >> "$report_file"
     printf -- "--------------------------------------------------------------------------------\n" >> "$report_file"
-    printf -- "%-28s %-20s %-25s\n" "Enabled" "MEMORY_ENABLED" "${MEMORY_ENABLED:-true}" >> "$report_file"
-    printf -- "%-28s %-20s %-25s\n" "Block Size" "MEMORY_BLOCK_SIZE" "${MEMORY_BLOCK_SIZE:-8K}" >> "$report_file"
+    printf -- "%-28s %-20s %-25s\n" "Enabled" "MEMORY_ENABLED" "$MEMORY_ENABLED" >> "$report_file"
+    printf -- "%-28s %-20s %-25s\n" "Block Size" "MEMORY_BLOCK_SIZE" "$MEMORY_BLOCK_SIZE" >> "$report_file"
     # Display auto-calculated memory size if MEMORY_TOTAL_SIZE is 0
-    local mem_total_val="${MEMORY_TOTAL_SIZE:-0}"
+    local mem_total_val="$MEMORY_TOTAL_SIZE"
     if [ "$mem_total_val" = "0" ]; then
         local total_mem_mb=$(get_memory_size_mb 2>/dev/null || echo "unknown")
         if [ "$total_mem_mb" != "unknown" ]; then
@@ -4911,9 +4910,9 @@ generate_report() {
         fi
     fi
     printf -- "%-28s %-20s %-25s\n" "Total Size" "MEMORY_TOTAL_SIZE" "$mem_total_val" >> "$report_file"
-    printf -- "%-28s %-20s %-25s\n" "Operation" "MEMORY_OPER" "${MEMORY_OPER:-read}" >> "$report_file"
+    printf -- "%-28s %-20s %-25s\n" "Operation" "MEMORY_OPER" "$MEMORY_OPER" >> "$report_file"
     printf -- "%-28s %-20s %-25s\n" "Duration" "DURATION" "${unified_duration}s" >> "$report_file"
-    local mem_threads_val="${MEMORY_THREADS:-0}"
+    local mem_threads_val="$MEMORY_THREADS"
     if [ "$mem_threads_val" = "0" ]; then
         printf -- "%-28s %-20s %-25s\n" "Memory Threads" "MEMORY_THREADS" "auto" >> "$report_file"
     else
@@ -4926,43 +4925,43 @@ generate_report() {
     printf -- "--------------------------------------------------------------------------------\n" >> "$report_file"
     printf -- "%-28s %-20s %-25s\n" "Parameter" "Env Var" "Value" >> "$report_file"
     printf -- "--------------------------------------------------------------------------------\n" >> "$report_file"
-    printf -- "%-28s %-20s %-25s\n" "Enabled" "IO_ENABLED" "${IO_ENABLED:-true}" >> "$report_file"
-    printf -- "%-28s %-20s %-25s\n" "Tool" "IO_TOOL" "${IO_TOOL:-sysbench}" >> "$report_file"
-    printf -- "%-28s %-20s %-25s\n" "File Size" "IO_TOTAL_SIZE" "${IO_TOTAL_SIZE:-1G}" >> "$report_file"
+    printf -- "%-28s %-20s %-25s\n" "Enabled" "IO_ENABLED" "$IO_ENABLED" >> "$report_file"
+    printf -- "%-28s %-20s %-25s\n" "Tool" "IO_TOOL" "$IO_TOOL" >> "$report_file"
+    printf -- "%-28s %-20s %-25s\n" "File Size" "IO_TOTAL_SIZE" "$IO_TOTAL_SIZE" >> "$report_file"
     printf -- "%-28s %-20s %-25s\n" "Test Path" "IO_PATH" "$IO_PATH" >> "$report_file"
-    if [ "${IO_TOOL:-sysbench}" = "fio" ]; then
-        printf -- "%-28s %-20s %-25s\n" "Test Profiles" "FIO_PROFILES" "${FIO_PROFILES:-randrw}" >> "$report_file"
-        printf -- "%-28s %-20s %-25s\n" "Duration" "FIO_DURATION" "${FIO_DURATION:-$unified_duration}s" >> "$report_file"
-        printf -- "%-28s %-20s %-25s\n" "Block Size" "FIO_BS" "${FIO_BS:-16K}" >> "$report_file"
-        printf -- "%-28s %-20s %-25s\n" "IO Depth" "FIO_IODEPTH" "${FIO_IODEPTH:-32}" >> "$report_file"
+    if [ "$IO_TOOL" = "fio" ]; then
+        printf -- "%-28s %-20s %-25s\n" "Test Profiles" "FIO_PROFILES" "$FIO_PROFILES" >> "$report_file"
+        printf -- "%-28s %-20s %-25s\n" "Duration" "FIO_DURATION" "${FIO_DURATION}s" >> "$report_file"
+        printf -- "%-28s %-20s %-25s\n" "Block Size" "FIO_BS" "$FIO_BS" >> "$report_file"
+        printf -- "%-28s %-20s %-25s\n" "IO Depth" "FIO_IODEPTH" "$FIO_IODEPTH" >> "$report_file"
         # Display auto if FIO_NUMJOBS is 0
-        local fio_numjobs_val="${FIO_NUMJOBS}"
+        local fio_numjobs_val="$FIO_NUMJOBS"
         if [ "$fio_numjobs_val" = "0" ]; then
             fio_numjobs_val="auto ($(get_cpu_cores))"
         fi
         printf -- "%-28s %-20s %-25s\n" "Num Jobs" "FIO_NUMJOBS" "$fio_numjobs_val" >> "$report_file"
-        printf -- "%-28s %-20s %-25s\n" "Direct IO" "FIO_DIRECT" "${FIO_DIRECT:-1}" >> "$report_file"
-        printf -- "%-28s %-20s %-25s\n" "File Num" "FIO_FILE_NUM" "${FIO_FILE_NUM:-4}" >> "$report_file"
-        printf -- "%-28s %-20s %-25s\n" "IO Engine" "FIO_IOENGINE" "${FIO_IOENGINE:-libaio}" >> "$report_file"
+        printf -- "%-28s %-20s %-25s\n" "Direct IO" "FIO_DIRECT" "$FIO_DIRECT" >> "$report_file"
+        printf -- "%-28s %-20s %-25s\n" "File Num" "FIO_FILE_NUM" "$FIO_FILE_NUM" >> "$report_file"
+        printf -- "%-28s %-20s %-25s\n" "IO Engine" "FIO_IOENGINE" "$FIO_IOENGINE" >> "$report_file"
     else
-        printf -- "%-28s %-20s %-25s\n" "Test Profiles" "SYSBENCH_PROFILES" "${SYSBENCH_PROFILES:-rndrw}" >> "$report_file"
-        printf -- "%-28s %-20s %-25s\n" "Duration" "SYSBENCH_DURATION" "${SYSBENCH_DURATION:-$unified_duration}s" >> "$report_file"
-        printf -- "%-28s %-20s %-25s\n" "Block Size" "SYSBENCH_BLOCK_SIZE" "${SYSBENCH_BLOCK_SIZE:-16K}" >> "$report_file"
-        printf -- "%-28s %-20s %-25s\n" "File Num" "SYSBENCH_FILE_NUM" "${SYSBENCH_FILE_NUM:-4}" >> "$report_file"
-        printf -- "%-28s %-20s %-25s\n" "IO Mode" "SYSBENCH_IO_MODE" "${SYSBENCH_IO_MODE:-sync}" >> "$report_file"
-        printf -- "%-28s %-20s %-25s\n" "Extra Flags" "SYSBENCH_EXTRA_FLAGS" "${SYSBENCH_EXTRA_FLAGS:-direct}" >> "$report_file"
+        printf -- "%-28s %-20s %-25s\n" "Test Profiles" "SYSBENCH_PROFILES" "$SYSBENCH_PROFILES" >> "$report_file"
+        printf -- "%-28s %-20s %-25s\n" "Duration" "SYSBENCH_DURATION" "${SYSBENCH_DURATION}s" >> "$report_file"
+        printf -- "%-28s %-20s %-25s\n" "Block Size" "SYSBENCH_BLOCK_SIZE" "$SYSBENCH_BLOCK_SIZE" >> "$report_file"
+        printf -- "%-28s %-20s %-25s\n" "File Num" "SYSBENCH_FILE_NUM" "$SYSBENCH_FILE_NUM" >> "$report_file"
+        printf -- "%-28s %-20s %-25s\n" "IO Mode" "SYSBENCH_IO_MODE" "$SYSBENCH_IO_MODE" >> "$report_file"
+        printf -- "%-28s %-20s %-25s\n" "Extra Flags" "SYSBENCH_EXTRA_FLAGS" "$SYSBENCH_EXTRA_FLAGS" >> "$report_file"
         # Display auto if SYSBENCH_THREADS is 0
-        local sysbench_threads_val="${SYSBENCH_THREADS:-4}"
+        local sysbench_threads_val="$SYSBENCH_THREADS"
         if [ "$sysbench_threads_val" = "0" ]; then
             sysbench_threads_val="auto ($(get_cpu_cores))"
         fi
         printf -- "%-28s %-20s %-25s\n" "Threads" "SYSBENCH_THREADS" "$sysbench_threads_val" >> "$report_file"
     fi
     # Add per file size calculation for fio
-    if [ "${IO_TOOL:-sysbench}" = "fio" ]; then
-        local fio_total_size="${IO_TOTAL_SIZE:-1G}"
-        local fio_file_num="${FIO_FILE_NUM:-4}"
-        local fio_numjobs="${FIO_NUMJOBS:-4}"
+    if [ "$IO_TOOL" = "fio" ]; then
+        local fio_total_size="$IO_TOTAL_SIZE"
+        local fio_file_num="$FIO_FILE_NUM"
+        local fio_numjobs="$FIO_NUMJOBS"
         local fio_size_value=$(echo "$fio_total_size" | sed -E 's/([0-9]+)([GMK])/\1/')
         local fio_per_file_size="auto"
         if [ "$fio_file_num" -gt 0 ] && [ "$fio_size_value" -gt 0 ]; then
@@ -4983,12 +4982,12 @@ generate_report() {
     printf -- "--------------------------------------------------------------------------------\n" >> "$report_file"
     printf -- "%-28s %-20s %-25s\n" "Parameter" "Env Var" "Value" >> "$report_file"
     printf -- "--------------------------------------------------------------------------------\n" >> "$report_file"
-    printf -- "%-28s %-20s %-25s\n" "Enabled" "NETWORK_ENABLED" "${NETWORK_ENABLED:-true}" >> "$report_file"
-    printf -- "%-28s %-20s %-25s\n" "Tool" "NETWORK_TOOL" "${NETWORK_TOOL:-iperf3}" >> "$report_file"
-    printf -- "%-28s %-20s %-25s\n" "Test Mode" "NETWORK_MODE" "${NETWORK_MODE:-matrix}" >> "$report_file"
+    printf -- "%-28s %-20s %-25s\n" "Enabled" "NETWORK_ENABLED" "$NETWORK_ENABLED" >> "$report_file"
+    printf -- "%-28s %-20s %-25s\n" "Tool" "NETWORK_TOOL" "$NETWORK_TOOL" >> "$report_file"
+    printf -- "%-28s %-20s %-25s\n" "Test Mode" "NETWORK_MODE" "$NETWORK_MODE" >> "$report_file"
     printf -- "%-28s %-20s %-25s\n" "Port" "NETWORK_PORT" "$NETWORK_PORT" >> "$report_file"
     printf -- "%-28s %-20s %-25s\n" "Duration" "DURATION" "${unified_duration}s" >> "$report_file"
-    printf -- "%-28s %-20s %-25s\n" "Parallel Connections" "NETWORK_PARALLEL" "${NETWORK_PARALLEL:-1}" >> "$report_file"
+    printf -- "%-28s %-20s %-25s\n" "Parallel Connections" "NETWORK_PARALLEL" "$NETWORK_PARALLEL" >> "$report_file"
     printf -- "\n" >> "$report_file"
     
     # Threads Test Configuration Table
@@ -4996,12 +4995,12 @@ generate_report() {
     printf -- "--------------------------------------------------------------------------------\n" >> "$report_file"
     printf -- "%-28s %-20s %-25s\n" "Parameter" "Env Var" "Value" >> "$report_file"
     printf -- "--------------------------------------------------------------------------------\n" >> "$report_file"
-    printf -- "%-28s %-20s %-25s\n" "Enabled" "THREADS_ENABLED" "${THREADS_ENABLED:-true}" >> "$report_file"
+    printf -- "%-28s %-20s %-25s\n" "Enabled" "THREADS_ENABLED" "$THREADS_ENABLED" >> "$report_file"
     printf -- "%-28s %-20s %-25s\n" "Duration" "DURATION" "${unified_duration}s" >> "$report_file"
-    printf -- "%-28s %-20s %-25s\n" "Yields" "THREADS_YIELDS" "${THREADS_YIELDS:-100}" >> "$report_file"
-    printf -- "%-28s %-20s %-25s\n" "Locks" "THREADS_LOCKS" "${THREADS_LOCKS:-4}" >> "$report_file"
-    if [ -n "${THREADS_NUM}" ]; then
-        printf -- "%-28s %-20s %-25s\n" "Threads" "THREADS_NUM" "${THREADS_NUM}" >> "$report_file"
+    printf -- "%-28s %-20s %-25s\n" "Yields" "THREADS_YIELDS" "$THREADS_YIELDS" >> "$report_file"
+    printf -- "%-28s %-20s %-25s\n" "Locks" "THREADS_LOCKS" "$THREADS_LOCKS" >> "$report_file"
+    if [ "$THREADS_NUM" != "0" ]; then
+        printf -- "%-28s %-20s %-25s\n" "Threads" "THREADS_NUM" "$THREADS_NUM" >> "$report_file"
     else
         printf -- "%-28s %-20s %-25s\n" "Threads" "THREADS_NUM" "auto (CPU cores * 4)" >> "$report_file"
     fi
@@ -5012,11 +5011,11 @@ generate_report() {
     printf -- "--------------------------------------------------------------------------------\n" >> "$report_file"
     printf -- "%-28s %-20s %-25s\n" "Parameter" "Env Var" "Value" >> "$report_file"
     printf -- "--------------------------------------------------------------------------------\n" >> "$report_file"
-    printf -- "%-28s %-20s %-25s\n" "Enabled" "MUTEX_ENABLED" "${MUTEX_ENABLED:-true}" >> "$report_file"
+    printf -- "%-28s %-20s %-25s\n" "Enabled" "MUTEX_ENABLED" "$MUTEX_ENABLED" >> "$report_file"
     printf -- "%-28s %-20s %-25s\n" "Duration" "DURATION" "${unified_duration}s" >> "$report_file"
-    printf -- "%-28s %-20s %-25s\n" "Mutex Num" "MUTEX_NUM" "${MUTEX_NUM:-1024}" >> "$report_file"
-    if [ "${MUTEX_THREADS:-0}" != "0" ]; then
-        printf -- "%-28s %-20s %-25s\n" "Threads" "MUTEX_THREADS" "${MUTEX_THREADS}" >> "$report_file"
+    printf -- "%-28s %-20s %-25s\n" "Mutex Num" "MUTEX_NUM" "$MUTEX_NUM" >> "$report_file"
+    if [ "$MUTEX_THREADS" != "0" ]; then
+        printf -- "%-28s %-20s %-25s\n" "Threads" "MUTEX_THREADS" "$MUTEX_THREADS" >> "$report_file"
     else
         printf -- "%-28s %-20s %-25s\n" "Threads" "MUTEX_THREADS" "auto (CPU cores)" >> "$report_file"
     fi
@@ -5049,7 +5048,7 @@ EOF
 
             # Show comparison table
             echo "  IO Test Results" >> "$report_file"
-                echo "  IO Tool: ${IO_TOOL:-sysbench}" >> "$report_file"
+                echo "  IO Tool: ${IO_TOOL:-fio}" >> "$report_file"
                 
                 local in_io_section=false
                 local current_server_ip=""
@@ -5061,7 +5060,7 @@ EOF
                 local current_total_bw=""
                 local current_avg_lat=""
                 local current_fsync_iops=""
-                local current_tool="${IO_TOOL:-sysbench}"
+                local current_tool="${IO_TOOL:-fio}"
                 local current_io_mode=""
                 local expect_avg_lat=false
                 local results_temp_file=$(mktemp)
@@ -5221,18 +5220,22 @@ EOF
                             
                             # Try to get bw_min and bw_max from JSON if available
                             local ip_prefix="${current_server_ip//./_}_"
+                            local key="${current_server_ip}_${current_io_mode}"
                             for json_file in "$TMP_DIR"/"${ip_prefix}"fio_*_result_*.json "$TMP_DIR"/fio_*_result_*.json; do
                                 if [ -f "$json_file" ] && jq_available; then
-                                    local b_min=$(jq -r '.jobs[0].read.bw_min // .jobs[0].write.bw_min // "N/A"' "$json_file" 2>/dev/null)
-                                    local b_max=$(jq -r '.jobs[0].read.bw_max // .jobs[0].write.bw_max // "N/A"' "$json_file" 2>/dev/null)
-                                    if [ "$b_min" != "N/A" ] && [ "$b_min" != "null" ]; then
-                                        fio_bw_min["$current_server_ip"]=$(awk "BEGIN {printf \"%.2f\", $b_min / 1024}" 2>/dev/null || echo "N/A")
-                                    fi
-                                    if [ "$b_max" != "N/A" ] && [ "$b_max" != "null" ]; then
-                                        fio_bw_max["$current_server_ip"]=$(awk "BEGIN {printf \"%.2f\", $b_max / 1024}" 2>/dev/null || echo "N/A")
-                                    fi
-                                    if [ -n "${fio_bw_min[$current_server_ip]}" ] || [ -n "${fio_bw_max[$current_server_ip]}" ]; then
-                                        break
+                                    # Check if this JSON file matches the current IO mode by looking at the filename
+                                    if [[ "$json_file" =~ "_${current_io_mode}_" ]] || [[ "$json_file" =~ "_${current_io_mode}\." ]]; then
+                                        local b_min=$(jq -r '.jobs[0].read.bw_min // .jobs[0].write.bw_min // "N/A"' "$json_file" 2>/dev/null)
+                                        local b_max=$(jq -r '.jobs[0].read.bw_max // .jobs[0].write.bw_max // "N/A"' "$json_file" 2>/dev/null)
+                                        if [ "$b_min" != "N/A" ] && [ "$b_min" != "null" ]; then
+                                            fio_bw_min["$key"]=$(awk "BEGIN {printf \"%.2f\", $b_min / 1024}" 2>/dev/null || echo "N/A")
+                                        fi
+                                        if [ "$b_max" != "N/A" ] && [ "$b_max" != "null" ]; then
+                                            fio_bw_max["$key"]=$(awk "BEGIN {printf \"%.2f\", $b_max / 1024}" 2>/dev/null || echo "N/A")
+                                        fi
+                                        if [ -n "${fio_bw_min[$key]}" ] || [ -n "${fio_bw_max[$key]}" ]; then
+                                            break
+                                        fi
                                     fi
                                 fi
                             done
@@ -5272,7 +5275,7 @@ EOF
                         current_min_lat=""
                         current_max_lat=""
                         current_fsync_iops=""
-                        current_io_mode="${SYSBENCH_PROFILES:-rndrw}"
+                        current_io_mode="${SYSBENCH_PROFILES:-seqrd seqwr rndrd rndwr}"
                         current_tool="sysbench"
                         expect_avg_lat=false
                     elif [ "$in_io_section" = true ]; then
@@ -5370,18 +5373,22 @@ EOF
                         
                         # Try to get bw_min and bw_max from JSON if available for last server
                         local ip_prefix="${current_server_ip//./_}_"
+                        local key="${current_server_ip}_${current_io_mode}"
                         for json_file in "$TMP_DIR"/"${ip_prefix}"fio_*_result_*.json "$TMP_DIR"/fio_*_result_*.json; do
                             if [ -f "$json_file" ] && jq_available; then
-                                local b_min=$(jq -r '.jobs[0].read.bw_min // .jobs[0].write.bw_min // "N/A"' "$json_file" 2>/dev/null)
-                                local b_max=$(jq -r '.jobs[0].read.bw_max // .jobs[0].write.bw_max // "N/A"' "$json_file" 2>/dev/null)
-                                if [ "$b_min" != "N/A" ] && [ "$b_min" != "null" ]; then
-                                    fio_bw_min["$current_server_ip"]=$(awk "BEGIN {printf \"%.2f\", $b_min / 1024}" 2>/dev/null || echo "N/A")
-                                fi
-                                if [ "$b_max" != "N/A" ] && [ "$b_max" != "null" ]; then
-                                    fio_bw_max["$current_server_ip"]=$(awk "BEGIN {printf \"%.2f\", $b_max / 1024}" 2>/dev/null || echo "N/A")
-                                fi
-                                if [ -n "${fio_bw_min[$current_server_ip]}" ] || [ -n "${fio_bw_max[$current_server_ip]}" ]; then
-                                    break
+                                # Check if this JSON file matches the current IO mode by looking at the filename
+                                if [[ "$json_file" =~ "_${current_io_mode}_" ]] || [[ "$json_file" =~ "_${current_io_mode}\." ]]; then
+                                    local b_min=$(jq -r '.jobs[0].read.bw_min // .jobs[0].write.bw_min // "N/A"' "$json_file" 2>/dev/null)
+                                    local b_max=$(jq -r '.jobs[0].read.bw_max // .jobs[0].write.bw_max // "N/A"' "$json_file" 2>/dev/null)
+                                    if [ "$b_min" != "N/A" ] && [ "$b_min" != "null" ]; then
+                                        fio_bw_min["$key"]=$(awk "BEGIN {printf \"%.2f\", $b_min / 1024}" 2>/dev/null || echo "N/A")
+                                    fi
+                                    if [ "$b_max" != "N/A" ] && [ "$b_max" != "null" ]; then
+                                        fio_bw_max["$key"]=$(awk "BEGIN {printf \"%.2f\", $b_max / 1024}" 2>/dev/null || echo "N/A")
+                                    fi
+                                    if [ -n "${fio_bw_min[$key]}" ] || [ -n "${fio_bw_max[$key]}" ]; then
+                                        break
+                                    fi
                                 fi
                             fi
                         done
@@ -5390,7 +5397,7 @@ EOF
                 
                 # Sort results by IP address and output to report
                 local is_sysbench=false
-                if [ "${IO_TOOL:-sysbench}" = "sysbench" ]; then
+                if [ "${IO_TOOL:-fio}" = "sysbench" ]; then
                     is_sysbench=true
                 fi
                 
@@ -5471,8 +5478,8 @@ EOF
                             local util="${fio_disk_util[$key]:-N/A}"
                             local cpu_usr="${fio_cpu_usr[$key]:-N/A}"
                             local cpu_sys="${fio_cpu_sys[$key]:-N/A}"
-                            local b_min="${fio_bw_min[$server_ip]:-N/A}"
-                            local b_max="${fio_bw_max[$server_ip]:-N/A}"
+                            local b_min="${fio_bw_min[$key]:-N/A}"
+                            local b_max="${fio_bw_max[$key]:-N/A}"
                             local ctx="${fio_ctx[$key]:-N/A}"
                             local aggrios="${fio_aggrios[$key]:-N/A}"
                             local aggrticks="${fio_aggrticks[$key]:-N/A}"
@@ -5800,14 +5807,58 @@ main() {
     FIO_NUMJOBS="${FIO_NUMJOBS:-4}"
     SYSBENCH_THREADS="${SYSBENCH_THREADS:-4}"
     MEMORY_TOTAL_SIZE="${MEMORY_TOTAL_SIZE:-0}"
+
+    # CPU test default values
+    CPU_THREADS="${CPU_THREADS:-0}"
+    CPU_MAX_PRIME="${CPU_MAX_PRIME:-20000}"
+
+    # Memory test default values
+    MEMORY_THREADS="${MEMORY_THREADS:-0}"
+    MEMORY_BLOCK_SIZE="${MEMORY_BLOCK_SIZE:-8K}"
+    MEMORY_OPER="${MEMORY_OPER:-read write}"
+
+    # Sysbench IO default values
+    SYSBENCH_FILE_NUM="${SYSBENCH_FILE_NUM:-4}"
+    SYSBENCH_BLOCK_SIZE="${SYSBENCH_BLOCK_SIZE:-16K}"
+    SYSBENCH_IO_MODE="${SYSBENCH_IO_MODE:-sync}"
+    SYSBENCH_EXTRA_FLAGS="${SYSBENCH_EXTRA_FLAGS:-direct}"
+    SYSBENCH_DURATION="${SYSBENCH_DURATION:-$DURATION}"
+
+    # FIO IO default values
+    FIO_BS="${FIO_BS:-16K}"
+    FIO_DIRECT="${FIO_DIRECT:-1}"
+    FIO_IOENGINE="${FIO_IOENGINE:-libaio}"
+    FIO_FILE_NUM="${FIO_FILE_NUM:-4}"
+    FIO_DURATION="${FIO_DURATION:-$DURATION}"
+
+    # Network test default values
+    NETWORK_TOOL="${NETWORK_TOOL:-iperf3}"
+    NETWORK_MODE="${NETWORK_MODE:-matrix}"
+
+    # Threads test default values
+    THREADS_NUM="${THREADS_NUM:-0}"
+    THREADS_YIELDS="${THREADS_YIELDS:-100}"
+    THREADS_LOCKS="${THREADS_LOCKS:-4}"
+
+    # Mutex test default values
+    MUTEX_THREADS="${MUTEX_THREADS:-0}"
+    MUTEX_NUM="${MUTEX_NUM:-1024}"
+
+    # Other test default values
+    CPU_ENABLED="${CPU_ENABLED:-true}"
+    MEMORY_ENABLED="${MEMORY_ENABLED:-true}"
+    IO_ENABLED="${IO_ENABLED:-true}"
+    THREADS_ENABLED="${THREADS_ENABLED:-true}"
+    MUTEX_ENABLED="${MUTEX_ENABLED:-true}"
+    NETWORK_ENABLED="${NETWORK_ENABLED:-true}"
     
     # Save config file ENABLED flags BEFORE parse_args resets them
-    local config_cpu_enabled="${CPU_ENABLED:-false}"
-    local config_memory_enabled="${MEMORY_ENABLED:-false}"
-    local config_io_enabled="${IO_ENABLED:-false}"
-    local config_network_enabled="${NETWORK_ENABLED:-false}"
-    local config_threads_enabled="${THREADS_ENABLED:-false}"
-    local config_mutex_enabled="${MUTEX_ENABLED:-false}"
+    local config_cpu_enabled="$CPU_ENABLED"
+    local config_memory_enabled="$MEMORY_ENABLED"
+    local config_io_enabled="$IO_ENABLED"
+    local config_network_enabled="$NETWORK_ENABLED"
+    local config_threads_enabled="$THREADS_ENABLED"
+    local config_mutex_enabled="$MUTEX_ENABLED"
     
     # Parse command line arguments
     parse_args "$@"
@@ -6119,7 +6170,7 @@ main() {
                     # Support new SYSBENCH_PROFILES and IO_PATH parameters with backward compatibility
                     remote_command="$remote_command CPU_THREADS=\"$CPU_THREADS\" CPU_MAX_PRIME=\"$CPU_MAX_PRIME\""
                     remote_command="$remote_command MEMORY_THREADS=\"$MEMORY_THREADS\" MEMORY_BLOCK_SIZE=\"$MEMORY_BLOCK_SIZE\" MEMORY_TOTAL_SIZE=\"$MEMORY_TOTAL_SIZE\" MEMORY_OPER=\"$MEMORY_OPER\""
-                    remote_command="$remote_command IO_TOOL=\"$IO_TOOL\" IO_TOTAL_SIZE=\"$IO_TOTAL_SIZE\" SYSBENCH_PROFILES=\"${SYSBENCH_PROFILES:-rndrw}\" SYSBENCH_FILE_NUM=\"$SYSBENCH_FILE_NUM\" SYSBENCH_DURATION=\"$SYSBENCH_DURATION\" IO_PATH=\"$IO_PATH\" FIO_DURATION=\"$FIO_DURATION\""
+                    remote_command="$remote_command IO_TOOL=\"$IO_TOOL\" IO_TOTAL_SIZE=\"$IO_TOTAL_SIZE\" SYSBENCH_PROFILES=\"${SYSBENCH_PROFILES:-seqrd seqwr rndrd rndwr}\" SYSBENCH_FILE_NUM=\"$SYSBENCH_FILE_NUM\" SYSBENCH_DURATION=\"$SYSBENCH_DURATION\" IO_PATH=\"$IO_PATH\" FIO_DURATION=\"$FIO_DURATION\""
                     remote_command="$remote_command THREADS_NUM=\"$THREADS_NUM\" THREADS_YIELDS=\"$THREADS_YIELDS\" THREADS_LOCKS=\"$THREADS_LOCKS\""
                     remote_command="$remote_command MUTEX_THREADS=\"$MUTEX_THREADS\" MUTEX_NUM=\"$MUTEX_NUM\""
                     
@@ -6158,22 +6209,22 @@ main() {
                                 remote_test_command="$remote_test_command IO_TOOL=$IO_TOOL"
                                 if [ "$IO_TOOL" = "fio" ]; then
                                     remote_test_command="$remote_test_command FIO_DURATION=${FIO_DURATION:-$DURATION}"
-                                    remote_test_command="$remote_test_command FIO_PROFILES=\"${FIO_PROFILES:-randrw}\""
+                                    remote_test_command="$remote_test_command FIO_PROFILES=\"${FIO_PROFILES:-read write randread randwrite}\""
                                     remote_test_command="$remote_test_command FIO_BS=${FIO_BS:-16K}"
-                                    remote_test_command="$remote_test_command FIO_IODEPTH=${FIO_IODEPTH:-32}"
+                                    remote_test_command="$remote_test_command FIO_IODEPTH=${FIO_IODEPTH:-64}"
                                     remote_test_command="$remote_test_command FIO_NUMJOBS=${FIO_NUMJOBS:-4}"
                                     remote_test_command="$remote_test_command FIO_DIRECT=${FIO_DIRECT:-1}"
                                     remote_test_command="$remote_test_command FIO_IOENGINE=${FIO_IOENGINE:-libaio}"
                                     remote_test_command="$remote_test_command FIO_FILE_NUM=${FIO_FILE_NUM:-4}"
                                 else
-                                    remote_test_command="$remote_test_command SYSBENCH_PROFILES=\"${SYSBENCH_PROFILES:-rndrw}\""
+                                    remote_test_command="$remote_test_command SYSBENCH_PROFILES=\"${SYSBENCH_PROFILES:-seqrd seqwr rndrd rndwr}\""
                                     remote_test_command="$remote_test_command SYSBENCH_IO_MODE=\"${SYSBENCH_IO_MODE:-sync}\""
                                     remote_test_command="$remote_test_command SYSBENCH_EXTRA_FLAGS=\"${SYSBENCH_EXTRA_FLAGS:-direct}\""
                                     remote_test_command="$remote_test_command SYSBENCH_THREADS=\"${SYSBENCH_THREADS:-4}\""
                                     remote_test_command="$remote_test_command SYSBENCH_BLOCK_SIZE=\"${SYSBENCH_BLOCK_SIZE:-16K}\""
                                 fi
                                 # Support new IO_PATH parameter with backward compatibility
-                                remote_test_command="$remote_test_command IO_TOTAL_SIZE=${IO_TOTAL_SIZE:-1G} SYSBENCH_FILE_NUM=${SYSBENCH_FILE_NUM:-4} SYSBENCH_DURATION=${SYSBENCH_DURATION:-$DURATION} IO_PATH=$IO_PATH"
+                                remote_test_command="$remote_test_command IO_TOTAL_SIZE=${IO_TOTAL_SIZE:-10G} SYSBENCH_FILE_NUM=${SYSBENCH_FILE_NUM:-4} SYSBENCH_DURATION=${SYSBENCH_DURATION:-$DURATION} IO_PATH=$IO_PATH"
                             fi
                         fi
                         
