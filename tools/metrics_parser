@@ -1,0 +1,971 @@
+#!/bin/bash
+#--------------------------------------------------------------------------------
+#-- File name:   metrics_parser
+#-- Purpose:     OS Check Performance Metrics Parser
+#-- Description: Unified metrics extraction and report generation framework.
+#--              Sourced by the main oscheckperf script.
+#--              Handles: CPU, Memory, IO, Threads, Mutex report parsing.
+#--------------------------------------------------------------------------------
+
+# ================================================================================
+# Pattern Configuration - Metric Extraction Rules
+# ================================================================================
+
+declare -A EXTRACT_PATTERNS
+
+init_patterns() {
+    # CPU test patterns
+    EXTRACT_PATTERNS["CPU_EPS"]='events per second:\s*([\d.]+)'
+    EXTRACT_PATTERNS["CPU_AVG_LAT"]='Latency.*avg:\s*([\d.]+)'
+    EXTRACT_PATTERNS["CPU_P95_LAT"]='95th percentile:\s*([\d.]+)'
+    EXTRACT_PATTERNS["CPU_MIN_LAT"]='min:\s*([\d.]+)'
+    EXTRACT_PATTERNS["CPU_MAX_LAT"]='max:\s*([\d.]+)'
+    EXTRACT_PATTERNS["CPU_SUM_LAT"]='sum:\s*([\d.]+)'
+    EXTRACT_PATTERNS["CPU_FAIRNESS"]='events \(avg/stddev\):\s*([\d.]+)'
+
+    # Memory test patterns
+    EXTRACT_PATTERNS["MEM_OPS_SEC"]='Total operations:\s*[\d.]+\s*\(([\d.]+)'
+    EXTRACT_PATTERNS["MEM_MIB_SEC"]='MiB transferred\s*[\d.]+\s*\(([\d.]+)'
+    EXTRACT_PATTERNS["MEM_AVG_LAT"]='avg:\s*([\d.]+)'
+    EXTRACT_PATTERNS["MEM_MIN_LAT"]='min:\s*([\d.]+)'
+    EXTRACT_PATTERNS["MEM_MAX_LAT"]='max:\s*([\d.]+)'
+    EXTRACT_PATTERNS["MEM_P95_LAT"]='95th percentile:\s*([\d.]+)'
+    EXTRACT_PATTERNS["MEM_SUM_LAT"]='sum:\s*([\d.]+)'
+    EXTRACT_PATTERNS["MEM_FAIRNESS"]='events \(avg/stddev\):\s*([\d.]+)'
+
+    # Threads test patterns
+    EXTRACT_PATTERNS["THREADS_EVENTS"]='total number of events:\s*([\d.]+)'
+    EXTRACT_PATTERNS["THREADS_TIME"]='total time:\s*([\d.]+)'
+    EXTRACT_PATTERNS["THREADS_AVG_LAT"]='avg:\s*([\d.]+)'
+    EXTRACT_PATTERNS["THREADS_MIN_LAT"]='min:\s*([\d.]+)'
+    EXTRACT_PATTERNS["THREADS_MAX_LAT"]='max:\s*([\d.]+)'
+    EXTRACT_PATTERNS["THREADS_P95_LAT"]='95th percentile:\s*([\d.]+)'
+    EXTRACT_PATTERNS["THREADS_SUM_LAT"]='sum:\s*([\d.]+)'
+    EXTRACT_PATTERNS["THREADS_FAIRNESS"]='events \(avg/stddev\):\s*([\d.]+)'
+
+    # Mutex test patterns
+    EXTRACT_PATTERNS["MUTEX_EVENTS"]='total number of events:\s*([\d.]+)'
+    EXTRACT_PATTERNS["MUTEX_TIME"]='total time:\s*([\d.]+)'
+    EXTRACT_PATTERNS["MUTEX_AVG_LAT"]='avg:\s*([\d.]+)'
+    EXTRACT_PATTERNS["MUTEX_MIN_LAT"]='min:\s*([\d.]+)'
+    EXTRACT_PATTERNS["MUTEX_MAX_LAT"]='max:\s*([\d.]+)'
+    EXTRACT_PATTERNS["MUTEX_P95_LAT"]='95th percentile:\s*([\d.]+)'
+    EXTRACT_PATTERNS["MUTEX_SUM_LAT"]='sum:\s*([\d.]+)'
+    EXTRACT_PATTERNS["MUTEX_FAIRNESS"]='events \(avg/stddev\):\s*([\d.]+)'
+}
+
+# ================================================================================
+# Generic Pattern Extractor
+# ================================================================================
+
+parse_extract() {
+    local line="$1"
+    local test_type="$2"
+    local pattern_key
+    local pattern
+    local metric_name
+
+    for pattern_key in "${!EXTRACT_PATTERNS[@]}"; do
+        if [[ "$pattern_key" == "${test_type}_"* ]]; then
+            pattern="${EXTRACT_PATTERNS[$pattern_key]}"
+            metric_name="${pattern_key#${test_type}_}"
+
+            if [[ "$line" =~ $pattern ]]; then
+                metrics_set "$metric_name" "${BASH_REMATCH[1]}"
+            fi
+        fi
+    done
+}
+
+# ================================================================================
+# Report Output Functions
+# ================================================================================
+
+report_cpu_metrics() {
+    local output_file="$1"
+    local server_ip="$(metrics_get 'SERVER_IP')"
+    local eps="$(metrics_get 'EPS')"
+    local avg_lat="$(metrics_get 'AVG_LAT')"
+    local p95_lat="$(metrics_get 'P95_LAT')"
+    local max_lat="$(metrics_get 'MAX_LAT')"
+    local min_lat="$(metrics_get 'MIN_LAT')"
+    local sum_lat="$(metrics_get 'SUM_LAT')"
+    local fairness="$(metrics_get 'FAIRNESS')"
+
+    printf "  %-18s %-12s %-12s %-12s %-12s %-12s %-14s %-10s\n" \
+        "$server_ip" \
+        "${eps}" \
+        "${avg_lat}" \
+        "${p95_lat}" \
+        "${max_lat}" \
+        "${min_lat}" \
+        "${sum_lat}" \
+        "${fairness}" >> "$output_file"
+}
+
+report_memory_metrics() {
+    local output_file="$1"
+    local server_ip="$(metrics_get 'SERVER_IP')"
+    local ops_sec="$(metrics_get 'OPS_SEC')"
+    local mib_sec="$(metrics_get 'MIB_SEC')"
+    local avg_lat="$(metrics_get 'AVG_LAT')"
+    local min_lat="$(metrics_get 'MIN_LAT')"
+    local max_lat="$(metrics_get 'MAX_LAT')"
+    local p95_lat="$(metrics_get 'P95_LAT')"
+    local sum_lat="$(metrics_get 'SUM_LAT')"
+    local fairness="$(metrics_get 'FAIRNESS')"
+    local mode="$(metrics_get 'MODE')"
+
+    printf "  %-18s %-12s %-12s %-12s %-10s %-10s %-10s %-12s %-17s %-8s\n" \
+        "$server_ip" \
+        "${ops_sec}" \
+        "${mib_sec}" \
+        "${avg_lat}" \
+        "${min_lat}" \
+        "${max_lat}" \
+        "${p95_lat}" \
+        "${sum_lat}" \
+        "${fairness}" \
+        "${mode}" >> "$output_file"
+}
+
+report_threads_metrics() {
+    local output_file="$1"
+    local server_ip="$(metrics_get 'SERVER_IP')"
+    local eps="$(metrics_get 'EPS')"
+    local avg_lat="$(metrics_get 'AVG_LAT')"
+    local p95_lat="$(metrics_get 'P95_LAT')"
+    local min_lat="$(metrics_get 'MIN_LAT')"
+    local max_lat="$(metrics_get 'MAX_LAT')"
+    local sum_lat="$(metrics_get 'SUM_LAT')"
+    local fairness="$(metrics_get 'FAIRNESS')"
+
+    printf "  %-18s %-12s %-12s %-12s %-14s %-14s %-16s %-14s\n" \
+        "$server_ip" \
+        "${eps}" \
+        "${avg_lat}" \
+        "${p95_lat}" \
+        "${min_lat}" \
+        "${max_lat}" \
+        "${sum_lat}" \
+        "${fairness}" >> "$output_file"
+}
+
+report_mutex_metrics() {
+    local output_file="$1"
+    local server_ip="$(metrics_get 'SERVER_IP')"
+    local events="$(metrics_get 'EVENTS')"
+    local tps="$(metrics_get 'TPS')"
+    local avg_lat="$(metrics_get 'AVG_LAT')"
+    local min_lat="$(metrics_get 'MIN_LAT')"
+    local max_lat="$(metrics_get 'MAX_LAT')"
+    local p95_lat="$(metrics_get 'P95_LAT')"
+    local sum_lat="$(metrics_get 'SUM_LAT')"
+
+    printf "  %-18s %-12s %-12s %-12s %-12s %-12s %-14s %-12s\n" \
+        "$server_ip" \
+        "${events}" \
+        "${tps}" \
+        "${avg_lat}" \
+        "${min_lat}" \
+        "${max_lat}" \
+        "${p95_lat}" \
+        "${sum_lat}" >> "$output_file"
+}
+
+# ================================================================================
+# CPU Report Parsing
+# ================================================================================
+
+parse_cpu_report_new() {
+    local input_file="$1"
+    local output_file="$2"
+
+    if [ ! -f "$input_file" ]; then
+        echo "  Test not executed" >> "$output_file"
+        return
+    fi
+
+    if ! grep -q "CPU TEST RESULTS" "$input_file" 2>/dev/null; then
+        echo "  Test not executed" >> "$output_file"
+        return
+    fi
+
+    echo "  CPU Test Results" >> "$output_file"
+    echo "  ---------------------------------------------------------------------------------------------------------------" >> "$output_file"
+    printf "  %-18s %-12s %-12s %-12s %-12s %-12s %-14s %-10s\n" "Server IP" "Events/sec" "Avg Lat(ms)" "P95 Lat(ms)" "Max Lat(ms)" "Min Lat(ms)" "Sum Lat(ms)" "Fairness(avg)" >> "$output_file"
+    echo "  ---------------------------------------------------------------------------------------------------------------" >> "$output_file"
+
+    metrics_init "CPU"
+
+    local in_section=false
+    while IFS= read -r line; do
+        if [[ "$line" =~ "CPU TEST RESULTS" ]]; then
+            if [ "$in_section" = true ] && metrics_has_data "CPU"; then
+                metrics_flush "CPU" "$output_file"
+            fi
+            in_section=true
+            metrics_init "CPU"
+            CURRENT_SERVER_IP=$(echo "$line" | grep -oP 'Server: \K[0-9.]+' || echo "N/A")
+            metrics_set "SERVER_IP" "$CURRENT_SERVER_IP"
+        elif [[ "$line" =~ MEMORY.*TEST.*RESULTS || "$line" =~ "SYSBENCH FILEIO TEST RESULTS" || "$line" =~ "THREADS TEST RESULTS" || "$line" =~ "MUTEX TEST RESULTS" || "$line" =~ "NETWORK TEST RESULTS" ]]; then
+            if [ "$in_section" = true ] && metrics_has_data "CPU"; then
+                metrics_flush "CPU" "$output_file"
+            fi
+            in_section=false
+            metrics_reset "CPU"
+        elif [ "$in_section" = true ]; then
+            if [[ "$line" =~ "events per second:" ]]; then
+                metrics_set "EPS" "$(echo "$line" | awk '{print $NF}')"
+            elif [[ "$line" =~ "avg:" ]] && [[ "$line" =~ [0-9] ]] && [[ ! "$line" =~ "events \(avg/stddev\):" ]] && [[ ! "$line" =~ "execution time" ]]; then
+                metrics_set "AVG_LAT" "$(echo "$line" | awk '{print $NF}')"
+            elif [[ "$line" =~ "95th percentile:" ]]; then
+                metrics_set "P95_LAT" "$(echo "$line" | awk '{print $NF}')"
+            elif [[ "$line" =~ "min:" ]] && [[ "$line" =~ [0-9] ]] && [[ ! "$line" =~ "execution time" ]]; then
+                metrics_set "MIN_LAT" "$(echo "$line" | awk '{print $NF}' | tr -d ',')"
+            elif [[ "$line" =~ "max:" ]] && [[ "$line" =~ [0-9] ]] && [[ ! "$line" =~ "execution time" ]]; then
+                metrics_set "MAX_LAT" "$(echo "$line" | awk '{print $NF}' | tr -d ',')"
+            elif [[ "$line" =~ "sum:" ]]; then
+                metrics_set "SUM_LAT" "$(echo "$line" | awk '{print $NF}' | tr -d ',')"
+            elif echo "$line" | grep -q "events.*avg/stddev"; then
+                metrics_set "FAIRNESS" "$(echo "$line" | awk '{print $NF}')"
+            fi
+        fi
+    done < "$input_file"
+
+    if [ "$in_section" = true ] && metrics_has_data "CPU"; then
+        metrics_flush "CPU" "$output_file"
+    fi
+}
+
+# ================================================================================
+# Memory Report Parsing
+# ================================================================================
+
+parse_memory_report_new() {
+    local input_file="$1"
+    local output_file="$2"
+
+    if [ ! -f "$input_file" ]; then
+        echo "  Test not executed" >> "$output_file"
+        return
+    fi
+
+    if ! grep -q "MEMORY.*TEST RESULTS" "$input_file" 2>/dev/null; then
+        echo "  Test not executed" >> "$output_file"
+        return
+    fi
+
+    echo "  Memory Test Results" >> "$output_file"
+    echo "  ---------------------------------------------------------------------------------------------------------------------------------" >> "$output_file"
+    printf "  %-18s %-12s %-12s %-12s %-10s %-10s %-10s %-12s %-17s %-8s\n" "Server IP" "Ops/sec" "MiB/sec" "Avg Lat(ms)" "Min Lat(ms)" "Max Lat(ms)" "P95 Lat(ms)" "Sum Lat(ms)" "Fairness(avg)" "Mode" >> "$output_file"
+    echo "  ---------------------------------------------------------------------------------------------------------------------------------" >> "$output_file"
+
+    metrics_init "MEMORY"
+
+    local in_section=false
+    local in_latency_section=false
+    local current_mode=""
+
+    while IFS= read -r line; do
+        if [[ "$line" =~ MEMORY\ ([A-Z]+)\ TEST\ RESULTS ]]; then
+            if [ "$in_section" = true ] && metrics_has_data "MEMORY"; then
+                metrics_set "MODE" "$current_mode"
+                metrics_flush "MEMORY" "$output_file"
+            fi
+            in_section=true
+            in_latency_section=false
+            metrics_init "MEMORY"
+            CURRENT_SERVER_IP=$(echo "$line" | grep -oP 'Server: \K[0-9.]+' || echo "N/A")
+            metrics_set "SERVER_IP" "$CURRENT_SERVER_IP"
+            current_mode=$(echo "$line" | awk '{print $2}' | tr '[:upper:]' '[:lower:]')
+        elif [[ "$line" =~ CPU.*TEST.*RESULTS || "$line" =~ SYSBENCH\ FILEIO.*TEST.*RESULTS || "$line" =~ THREADS.*TEST.*RESULTS || "$line" =~ MUTEX.*TEST.*RESULTS || "$line" =~ NETWORK.*TEST.*RESULTS ]]; then
+            if [ "$in_section" = true ] && metrics_has_data "MEMORY"; then
+                metrics_set "MODE" "$current_mode"
+                metrics_flush "MEMORY" "$output_file"
+            fi
+            in_section=false
+            in_latency_section=false
+            metrics_reset "MEMORY"
+            current_mode=""
+        elif [ "$in_section" = true ]; then
+            if [[ "$line" == *"Total operations:"* ]]; then
+                metrics_set "OPS_SEC" "$(echo "$line" | awk -F'[()]' '{print $2}' | awk '{print $1}')"
+            elif [[ "$line" == *"MiB transferred"* ]]; then
+                metrics_set "MIB_SEC" "$(echo "$line" | awk -F'[()]' '{print $2}' | awk '{print $1}')"
+            elif [[ "$line" == *"Latency (ms):"* ]]; then
+                in_latency_section=true
+            elif [[ "$line" == *"Threads fairness:"* ]]; then
+                in_latency_section=false
+            elif [ "$in_latency_section" = true ] && [[ "$line" == *"avg:"* ]]; then
+                metrics_set "AVG_LAT" "$(echo "$line" | awk '{print $NF}' | tr -d ',')"
+            elif [ "$in_latency_section" = true ] && [[ "$line" == *"min:"* ]]; then
+                metrics_set "MIN_LAT" "$(echo "$line" | awk '{print $NF}' | tr -d ',')"
+            elif [ "$in_latency_section" = true ] && [[ "$line" == *"max:"* ]]; then
+                metrics_set "MAX_LAT" "$(echo "$line" | awk '{print $NF}' | tr -d ',')"
+            elif [ "$in_latency_section" = true ] && [[ "$line" == *"95th percentile:"* ]]; then
+                metrics_set "P95_LAT" "$(echo "$line" | awk '{print $NF}')"
+            elif [ "$in_latency_section" = true ] && [[ "$line" == *"sum:"* ]]; then
+                metrics_set "SUM_LAT" "$(echo "$line" | awk '{print $NF}' | tr -d ',')"
+            elif [[ "$line" == *"events"* && "$line" == *"avg/stddev"* ]]; then
+                metrics_set "FAIRNESS" "$(echo "$line" | awk '{print $NF}')"
+            fi
+        fi
+    done < "$input_file"
+
+    if [ "$in_section" = true ] && metrics_has_data "MEMORY"; then
+        metrics_set "MODE" "$current_mode"
+        metrics_flush "MEMORY" "$output_file"
+    fi
+}
+
+# ================================================================================
+# Threads Report Parsing
+# ================================================================================
+
+parse_threads_report_new() {
+    local input_file="$1"
+    local output_file="$2"
+
+    if [ ! -f "$input_file" ]; then
+        echo "  Test not executed" >> "$output_file"
+        return
+    fi
+
+    if ! grep -q -E "Threads test summary:|THREADS TEST RESULTS" "$input_file" 2>/dev/null; then
+        echo "  Test not executed" >> "$output_file"
+        return
+    fi
+
+    echo "  Threads Test Results" >> "$output_file"
+    echo "  ----------------------------------------------------------------------------------------------------------------------" >> "$output_file"
+    printf "  %-18s %-12s %-12s %-12s %-14s %-14s %-16s %-14s\n" "Server IP" "Events/sec" "Avg Lat(ms)" "P95 Lat(ms)" "Min Lat(ms)" "Max Lat(ms)" "Sum Lat(ms)" "Fairness(avg)" >> "$output_file"
+    echo "  ----------------------------------------------------------------------------------------------------------------------" >> "$output_file"
+
+    metrics_init "THREADS"
+
+    local in_section=false
+    local current_events=""
+    local current_time=""
+    local last_testing_ip=""
+
+    while IFS= read -r line; do
+        if [[ "$line" =~ "THREADS TEST RESULTS" ]]; then
+            if [ "$in_section" = true ] && metrics_has_data "THREADS"; then
+                local eps=$(calc_eps "$current_events" "$current_time")
+                metrics_set "EPS" "$eps"
+                metrics_flush "THREADS" "$output_file"
+            fi
+            in_section=true
+            metrics_init "THREADS"
+            CURRENT_SERVER_IP=$(echo "$line" | grep -oP 'Server: \K[0-9.]+' || echo "N/A")
+            last_testing_ip="$CURRENT_SERVER_IP"
+            metrics_set "SERVER_IP" "$CURRENT_SERVER_IP"
+            current_events=""
+            current_time=""
+        elif [[ "$line" =~ CPU.*TEST.*RESULTS || "$line" =~ MEMORY.*TEST.*RESULTS || "$line" =~ IO.*TEST.*RESULTS || "$line" =~ FIO.*TEST.*RESULTS || "$line" =~ MUTEX.*TEST.*RESULTS || "$line" =~ NETWORK.*TEST.*RESULTS || "$line" =~ "Testing server" ]]; then
+            if [ "$in_section" = true ] && metrics_has_data "THREADS"; then
+                local eps=$(calc_eps "$current_events" "$current_time")
+                metrics_set "EPS" "$eps"
+                metrics_flush "THREADS" "$output_file"
+            fi
+            in_section=false
+            metrics_reset "THREADS"
+            current_events=""
+            current_time=""
+        elif [[ "$line" =~ "Threads test summary:" ]]; then
+            in_section=true
+            metrics_init "THREADS"
+            CURRENT_SERVER_IP="${last_testing_ip:-N/A}"
+            metrics_set "SERVER_IP" "$CURRENT_SERVER_IP"
+            current_events=""
+            current_time=""
+        elif [ "$in_section" = true ] && [[ "$line" =~ "TEST RESULTS" ]] && [[ ! "$line" =~ "THREADS TEST RESULTS" ]] && [[ ! "$line" =~ "Threads test summary:" ]]; then
+            if metrics_has_data "THREADS"; then
+                local eps=$(calc_eps "$current_events" "$current_time")
+                metrics_set "EPS" "$eps"
+                metrics_flush "THREADS" "$output_file"
+            fi
+            in_section=false
+            metrics_reset "THREADS"
+        elif [ "$in_section" = true ]; then
+            if [[ "$line" =~ "total number of events:" ]]; then
+                current_events=$(echo "$line" | awk '{print $NF}')
+            elif [[ "$line" =~ "total time:" ]]; then
+                current_time=$(echo "$line" | awk '{print $NF}' | tr -d 's')
+            elif [[ "$line" =~ "avg:" ]] && [[ ! "$line" =~ "events" ]]; then
+                metrics_set "AVG_LAT" "$(echo "$line" | awk '{print $NF}' | tr -d ',')"
+            elif [[ "$line" =~ "min:" ]] && [[ ! "$line" =~ "execution time" ]]; then
+                metrics_set "MIN_LAT" "$(echo "$line" | awk '{print $NF}' | tr -d ',')"
+            elif [[ "$line" =~ "max:" ]] && [[ ! "$line" =~ "execution time" ]]; then
+                metrics_set "MAX_LAT" "$(echo "$line" | awk '{print $NF}' | tr -d ',')"
+            elif [[ "$line" =~ "95th percentile" ]]; then
+                metrics_set "P95_LAT" "$(echo "$line" | awk '{print $NF}')"
+            elif [[ "$line" =~ "sum:" ]]; then
+                metrics_set "SUM_LAT" "$(echo "$line" | awk '{print $NF}' | tr -d ',')"
+            elif echo "$line" | grep -q "events.*avg/stddev"; then
+                metrics_set "FAIRNESS" "$(echo "$line" | awk '{print $3}')"
+            fi
+        fi
+    done < "$input_file"
+
+    if [ "$in_section" = true ] && metrics_has_data "THREADS"; then
+        local eps=$(calc_eps "$current_events" "$current_time")
+        metrics_set "EPS" "$eps"
+        metrics_flush "THREADS" "$output_file"
+    fi
+}
+
+# ================================================================================
+# Mutex Report Parsing
+# ================================================================================
+
+parse_mutex_report_new() {
+    local input_file="$1"
+    local output_file="$2"
+
+    if [ ! -f "$input_file" ]; then
+        echo "  Test not executed" >> "$output_file"
+        return
+    fi
+
+    if ! grep -q -E "Mutex test summary:|MUTEX TEST RESULTS" "$input_file" 2>/dev/null; then
+        echo "  Test not executed" >> "$output_file"
+        return
+    fi
+
+    echo "  Mutex Test Results" >> "$output_file"
+    echo "  ------------------------------------------------------------------------------------------------------------" >> "$output_file"
+    printf "  %-18s %-12s %-12s %-12s %-12s %-12s %-14s %-12s\n" "Server IP" "Transactions" "TPS" "Avg Lat(ms)" "Min Lat(ms)" "Max Lat(ms)" "P95 Lat(ms)" "Sum Lat(ms)" >> "$output_file"
+    echo "  ------------------------------------------------------------------------------------------------------------" >> "$output_file"
+
+    metrics_init "MUTEX"
+
+    local in_section=false
+    local current_events=""
+    local current_time=""
+    local last_testing_ip=""
+
+    while IFS= read -r line; do
+        if [[ "$line" =~ "Testing server" ]]; then
+            last_testing_ip=$(echo "$line" | grep -oP 'Testing server [0-9]+/[0-9]+: \K[0-9.]+' || echo "")
+            if [ "$in_section" = true ] && metrics_has_data "MUTEX"; then
+                local tps=$(calc_eps "$current_events" "$current_time")
+                metrics_set "EVENTS" "${current_events:-N/A}"
+                metrics_set "TPS" "$tps"
+                metrics_flush "MUTEX" "$output_file"
+            fi
+            in_section=false
+            metrics_reset "MUTEX"
+        elif [[ "$line" =~ CPU.*TEST.*RESULTS || "$line" =~ MEMORY.*TEST.*RESULTS || "$line" =~ IO.*TEST.*RESULTS || "$line" =~ FIO.*TEST.*RESULTS || "$line" =~ THREADS.*TEST.*RESULTS || "$line" =~ NETWORK.*TEST.*RESULTS ]]; then
+            if [ "$in_section" = true ] && metrics_has_data "MUTEX"; then
+                local tps=$(calc_eps "$current_events" "$current_time")
+                metrics_set "EVENTS" "${current_events:-N/A}"
+                metrics_set "TPS" "$tps"
+                metrics_flush "MUTEX" "$output_file"
+            fi
+            in_section=false
+            metrics_reset "MUTEX"
+            current_events=""
+            current_time=""
+        elif [[ "$line" =~ "MUTEX TEST RESULTS" ]]; then
+            if [ "$in_section" = true ] && metrics_has_data "MUTEX"; then
+                local tps=$(calc_eps "$current_events" "$current_time")
+                metrics_set "EVENTS" "${current_events:-N/A}"
+                metrics_set "TPS" "$tps"
+                metrics_flush "MUTEX" "$output_file"
+            fi
+            in_section=true
+            metrics_init "MUTEX"
+            CURRENT_SERVER_IP=$(echo "$line" | grep -oP 'Server: \K[0-9.]+' || echo "N/A")
+            metrics_set "SERVER_IP" "$CURRENT_SERVER_IP"
+            current_events=""
+            current_time=""
+        elif [[ "$line" =~ "Mutex test summary:" ]]; then
+            in_section=true
+            metrics_init "MUTEX"
+            CURRENT_SERVER_IP="${last_testing_ip:-N/A}"
+            metrics_set "SERVER_IP" "$CURRENT_SERVER_IP"
+            current_events=""
+            current_time=""
+        elif [ "$in_section" = true ] && [[ "$line" =~ "TEST RESULTS" ]] && [[ ! "$line" =~ "MUTEX TEST RESULTS" ]] && [[ ! "$line" =~ "Mutex test summary:" ]]; then
+            if metrics_has_data "MUTEX"; then
+                local tps=$(calc_eps "$current_events" "$current_time")
+                metrics_set "EVENTS" "${current_events:-N/A}"
+                metrics_set "TPS" "$tps"
+                metrics_flush "MUTEX" "$output_file"
+            fi
+            in_section=false
+            metrics_reset "MUTEX"
+        elif [ "$in_section" = true ]; then
+            if [[ "$line" =~ "total number of events:" ]]; then
+                current_events=$(echo "$line" | awk '{print $NF}')
+            elif [[ "$line" =~ "total time:" ]]; then
+                current_time=$(echo "$line" | awk '{print $NF}' | tr -d 's')
+            elif [[ "$line" =~ "avg:" ]] && [[ ! "$line" =~ "events" ]]; then
+                metrics_set "AVG_LAT" "$(echo "$line" | awk '{print $NF}' | tr -d ',')"
+            elif [[ "$line" =~ "min:" ]] && [[ ! "$line" =~ "execution time" ]]; then
+                metrics_set "MIN_LAT" "$(echo "$line" | awk '{print $NF}' | tr -d ',')"
+            elif [[ "$line" =~ "max:" ]] && [[ ! "$line" =~ "execution time" ]]; then
+                metrics_set "MAX_LAT" "$(echo "$line" | awk '{print $NF}' | tr -d ',')"
+            elif [[ "$line" =~ "95th percentile" ]]; then
+                metrics_set "P95_LAT" "$(echo "$line" | awk '{print $NF}')"
+            elif [[ "$line" =~ "sum:" ]]; then
+                metrics_set "SUM_LAT" "$(echo "$line" | awk '{print $NF}' | tr -d ',')"
+            elif echo "$line" | grep -q "events.*avg/stddev"; then
+                metrics_set "FAIRNESS" "$(echo "$line" | awk '{print $3}')"
+            fi
+        fi
+    done < "$input_file"
+
+    if [ "$in_section" = true ] && metrics_has_data "MUTEX"; then
+        local tps=$(calc_eps "$current_events" "$current_time")
+        metrics_set "EVENTS" "${current_events:-N/A}"
+        metrics_set "TPS" "$tps"
+        metrics_flush "MUTEX" "$output_file"
+    fi
+}
+
+# ================================================================================
+# IO Report Parsing
+# ================================================================================
+
+parse_io_report_new() {
+    local combined_file="$1"
+    local report_file="$2"
+    local tmp_dir="$3"
+
+    if [ ! -f "$combined_file" ]; then
+        return
+    fi
+
+    if ! grep -q "SYSBENCH FILEIO TEST RESULTS\|FIO TEST RESULTS\|IO TEST RESULTS" "$combined_file" 2>/dev/null; then
+        return
+    fi
+
+    local io_section_count=$(($(grep -c "^SYSBENCH FILEIO TEST RESULTS\|^FIO TEST RESULTS\|^IO TEST RESULTS" "$combined_file" 2>/dev/null)))
+
+    echo "  IO Test Results" >> "$report_file"
+    echo "  IO Tool: ${IO_TOOL:-fio}" >> "$report_file"
+
+    local in_io_section=false
+    local current_server_ip=""
+    local current_read_iops=""
+    local current_write_iops=""
+    local current_total_iops=""
+    local current_read_bw=""
+    local current_write_bw=""
+    local current_total_bw=""
+    local current_avg_lat=""
+    local current_fsync_iops=""
+    local current_tool="${IO_TOOL:-fio}"
+    local current_io_mode=""
+    local expect_avg_lat=false
+    local results_temp_file=$(mktemp)
+    local fio_extended_file=$(mktemp)
+
+    declare -A fio_p99_lat
+    declare -A fio_disk_util
+    declare -A fio_cpu_usr
+    declare -A fio_cpu_sys
+    declare -A fio_bw_min
+    declare -A fio_bw_max
+    declare -A fio_slat_avg
+    declare -A fio_clat_avg
+    declare -A fio_iodepth_level
+    declare -A fio_ctx
+    declare -A fio_aggrios
+    declare -A fio_aggrticks
+    declare -A fio_aggrin_queue
+    declare -A fio_aggrutil
+
+    # Pre-extract fio extended metrics from combined file
+    awk 'BEGIN{OFS="|"}
+        /RESULTS FROM SERVER:/ {match($0, /RESULTS FROM SERVER: ([0-9.]+)/, arr); current_server=arr[1]}
+        /FIO TEST RESULTS/ {match($0, /Server: ([0-9.]+)/, arr); ip=arr[1]; if(ip=="") ip=current_server; match($0, /FIO TEST RESULTS \(([^)]+)\)/, mode_arr); io_mode=mode_arr[1]; p99="N/A"; disk="N/A"; cpu_usr="N/A"; cpu_sys="N/A"; r_slat="0"; w_slat="0"; r_clat="N/A"; w_clat="N/A"; iodepth="N/A"; ctx="N/A"; aggrios="N/A"; aggrticks="N/A"; aggrinque="N/A"; aggrutil="N/A"; in_fio=1; ext_started=0; has_read=0; has_write=0; is_read=0}
+        in_fio && !ext_started && /^  read:/ {is_read=1; has_read=1}
+        in_fio && !ext_started && /^  write:/ {is_read=0; has_write=1}
+        in_fio && !ext_started && /slat \(nsec\)/ {split($0, a, "avg="); split(a[2], b, ","); gsub(/ /, "", b[1]); if(is_read) r_slat=b[1]/1000; else w_slat=b[1]/1000}
+        in_fio && !ext_started && /slat \(usec\)/ {split($0, a, "avg="); split(a[2], b, ","); gsub(/ /, "", b[1]); if(is_read) r_slat=b[1]; else w_slat=b[1]}
+        in_fio && !ext_started && /clat \(nsec\)/ {split($0, a, "avg="); split(a[2], b, ","); gsub(/ /, "", b[1]); if(is_read) r_clat=b[1]/1000; else w_clat=b[1]/1000}
+        in_fio && !ext_started && /clat \(usec\)/ {split($0, a, "avg="); split(a[2], b, ","); gsub(/ /, "", b[1]); if(is_read) r_clat=b[1]; else w_clat=b[1]}
+        in_fio && !ext_started && /IO depths/ {
+            split($0, depths, ",");
+            max_depth="<=8"; max_pct=0;
+            for(i in depths) {
+                if(depths[i] ~ /[[:space:]]1=[0-9.]+%/) { split(depths[i], a, "="); pct=a[2]; sub(/%/, "", pct); if(pct+0 > max_pct) { max_pct=pct+0; max_depth="1"; } }
+                if(depths[i] ~ /[[:space:]]2=[0-9.]+%/) { split(depths[i], a, "="); pct=a[2]; sub(/%/, "", pct); if(pct+0 > max_pct) { max_pct=pct+0; max_depth="2"; } }
+                if(depths[i] ~ /[[:space:]]4=[0-9.]+%/) { split(depths[i], a, "="); pct=a[2]; sub(/%/, "", pct); if(pct+0 > max_pct) { max_pct=pct+0; max_depth="4"; } }
+                if(depths[i] ~ /[[:space:]]8=[0-9.]+%/) { split(depths[i], a, "="); pct=a[2]; sub(/%/, "", pct); if(pct+0 > max_pct) { max_pct=pct+0; max_depth="8"; } }
+                if(depths[i] ~ /[[:space:]]16=[0-9.]+%/) { split(depths[i], a, "="); pct=a[2]; sub(/%/, "", pct); if(pct+0 > max_pct) { max_pct=pct+0; max_depth="16"; } }
+                if(depths[i] ~ /[[:space:]]32=[0-9.]+%/) { split(depths[i], a, "="); pct=a[2]; sub(/%/, "", pct); if(pct+0 > max_pct) { max_pct=pct+0; max_depth="32"; } }
+                if(depths[i] ~ />=64=[0-9.]+%/) { split(depths[i], a, "="); pct=a[2]; sub(/%/, "", pct); if(pct+0 > max_pct) { max_pct=pct+0; max_depth=">=64"; } }
+            }
+            iodepth=max_depth;
+        }
+        in_fio && !ext_started && /cpu/ && /ctx=/ {
+            if(match($0, /usr=([0-9.]+)%/, m)) cpu_usr=m[1];
+            if(match($0, /sys=([0-9.]+)%/, m)) cpu_sys=m[1];
+            if(match($0, /ctx=([0-9]+)/, m)) ctx=m[1];
+        }
+        in_fio && !ext_started && /aggrios=/ {
+            if(match($0, /aggrios=([0-9\/]+)/, m)) aggrios=m[1];
+            if(match($0, /aggrticks=([0-9\/]+)/, m)) aggrticks=m[1];
+            if(match($0, /aggrin_queue=([0-9]+)/, m)) aggrinque=m[1];
+            if(match($0, /aggrutil=([0-9.]+)%/, m)) aggrutil=m[1];
+        }
+        in_fio && /FIO Extended Metrics:/ {ext_started=1}
+        in_fio && ext_started && /P99 Latency:/ {p99=$3}
+        in_fio && ext_started && /Disk Utilization:/ {disk=$3; sub(/%/, "", disk)}
+        in_fio && ext_started && /CPU \(usr\):/ {cpu_usr=$3; sub(/%/, "", cpu_usr)}
+        in_fio && ext_started && /CPU \(sys\):/ {cpu_sys=$3; sub(/%/, "", cpu_sys)}
+        in_fio && ext_started && /^$/ && ip!="" {
+            if(has_read && has_write) {
+                printf "%s|%s|%s|%s|%s|%s|%.2f|%.2f|%s|%s|%s|%s|%s|%s\n", ip, io_mode"_r", p99, disk, cpu_usr, cpu_sys, r_slat, r_clat, iodepth, ctx, aggrios, aggrticks, aggrinque, aggrutil;
+                printf "%s|%s|%s|%s|%s|%s|%.2f|%.2f|%s|%s|%s|%s|%s|%s\n", ip, io_mode"_w", p99, disk, cpu_usr, cpu_sys, w_slat, w_clat, iodepth, ctx, aggrios, aggrticks, aggrinque, aggrutil;
+            } else if(has_read) {
+                printf "%s|%s|%s|%s|%s|%s|%.2f|%.2f|%s|%s|%s|%s|%s|%s\n", ip, io_mode, p99, disk, cpu_usr, cpu_sys, r_slat, r_clat, iodepth, ctx, aggrios, aggrticks, aggrinque, aggrutil;
+            } else if(has_write) {
+                printf "%s|%s|%s|%s|%s|%s|%.2f|%.2f|%s|%s|%s|%s|%s|%s\n", ip, io_mode, p99, disk, cpu_usr, cpu_sys, w_slat, w_clat, iodepth, ctx, aggrios, aggrticks, aggrinque, aggrutil;
+            }
+            ip=""; in_fio=0}' "$combined_file" > "$fio_extended_file"
+
+    # Populate associative arrays from fio_extended_file
+    while IFS='|' read -r ip io_mode p99 disk cpu_usr cpu_sys slat clat iodepth ctx aggrios aggrticks aggrinque aggrutil; do
+        if [[ "$ip" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]]; then
+            local key="${ip}_${io_mode}"
+            fio_p99_lat["$key"]="$p99"
+            fio_disk_util["$key"]="$disk"
+            fio_cpu_usr["$key"]="$cpu_usr"
+            fio_cpu_sys["$key"]="$cpu_sys"
+            fio_slat_avg["$key"]="$slat"
+            fio_clat_avg["$key"]="$clat"
+            fio_iodepth_level["$key"]="$iodepth"
+            fio_ctx["$key"]="$ctx"
+            fio_aggrios["$key"]="$aggrios"
+            fio_aggrticks["$key"]="$aggrticks"
+            fio_aggrin_queue["$key"]="$aggrinque"
+            fio_aggrutil["$key"]="$aggrutil"
+        fi
+    done < "$fio_extended_file"
+
+    while IFS= read -r line; do
+        if [[ "$line" =~ "SYSBENCH FILEIO TEST RESULTS" ]]; then
+            if [ "$in_io_section" = true ] && [ -n "$current_server_ip" ]; then
+                if [ -n "$current_read_iops" ] && [ -n "$current_write_iops" ]; then
+                    current_total_iops=$(awk "BEGIN {printf \"%.2f\", $current_read_iops + $current_write_iops}" 2>/dev/null || echo "N/A")
+                fi
+                if [ -n "$current_read_bw" ] && [ -n "$current_write_bw" ]; then
+                    current_total_bw=$(awk "BEGIN {printf \"%.2f\", $current_read_bw + $current_write_bw}" 2>/dev/null || echo "N/A")
+                fi
+                printf "%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|sysbench\n" "$current_server_ip" "${current_read_iops:-N/A}" "${current_write_iops:-N/A}" "${current_total_iops:-N/A}" "${current_read_bw:-N/A}" "${current_write_bw:-N/A}" "${current_total_bw:-N/A}" "${current_avg_lat:-N/A}" "${current_p95_lat:-N/A}" "${current_min_lat:-N/A}" "${current_max_lat:-N/A}" "${current_io_mode:-rndrw}" "${current_fsync_iops:-N/A}" >> "$results_temp_file"
+            fi
+            in_io_section=true
+            current_server_ip=$(echo "$line" | grep -oP 'Server: \K[0-9.]+' || echo "N/A")
+            current_read_iops=""
+            current_write_iops=""
+            current_total_iops=""
+            current_read_bw=""
+            current_write_bw=""
+            current_total_bw=""
+            current_avg_lat=""
+            current_p95_lat=""
+            current_min_lat=""
+            current_max_lat=""
+            current_fsync_iops=""
+            current_io_mode=$(echo "$line" | grep -oP 'SYSBENCH FILEIO TEST RESULTS \(([^)]+)\)' | awk -F'[()]' '{print $2}')
+            current_tool="sysbench"
+            expect_avg_lat=false
+        elif [[ "$line" =~ "FIO TEST RESULTS" ]]; then
+            local new_io_mode=$(echo "$line" | grep -oP 'FIO TEST RESULTS \(([^)]+)\)' | awk -F'[()]' '{print $2}')
+
+            if [ "$in_io_section" = true ] && [ -n "$current_server_ip" ]; then
+                if [ -n "$current_read_iops" ] && [ -n "$current_write_iops" ]; then
+                    current_total_iops=$(awk "BEGIN {printf \"%.2f\", $current_read_iops + $current_write_iops}" 2>/dev/null || echo "N/A")
+                elif [ -n "$current_read_iops" ]; then
+                    current_total_iops=$(awk "BEGIN {printf \"%.2f\", $current_read_iops}" 2>/dev/null || echo "$current_read_iops")
+                elif [ -n "$current_write_iops" ]; then
+                    current_total_iops=$(awk "BEGIN {printf \"%.2f\", $current_write_iops}" 2>/dev/null || echo "$current_write_iops")
+                else
+                    current_total_iops="N/A"
+                fi
+                if [ -n "$current_read_bw" ] && [ -n "$current_write_bw" ]; then
+                    current_total_bw=$(awk "BEGIN {printf \"%.2f\", $current_read_bw + $current_write_bw}" 2>/dev/null || echo "N/A")
+                elif [ -n "$current_read_bw" ]; then
+                    current_total_bw=$(awk "BEGIN {printf \"%.2f\", $current_read_bw}" 2>/dev/null || echo "$current_read_bw")
+                elif [ -n "$current_write_bw" ]; then
+                    current_total_bw=$(awk "BEGIN {printf \"%.2f\", $current_write_bw}" 2>/dev/null || echo "$current_write_bw")
+                else
+                    current_total_bw="N/A"
+                fi
+                printf "%s|%s|%s|%s|%s|%s|%s|%s|N/A|N/A|N/A|%s|N/A|fio\n" "$current_server_ip" "${current_read_iops:-N/A}" "${current_write_iops:-N/A}" "${current_total_iops:-N/A}" "${current_read_bw:-N/A}" "${current_write_bw:-N/A}" "${current_total_bw:-N/A}" "${current_avg_lat:-N/A}" "${current_io_mode:-read}" >> "$results_temp_file"
+            fi
+            in_io_section=true
+            current_server_ip=$(echo "$line" | grep -oP 'Server: \K[0-9.]+' || echo "N/A")
+            current_read_iops=""
+            current_write_iops=""
+            current_total_iops=""
+            current_read_bw=""
+            current_write_bw=""
+            current_total_bw=""
+            current_avg_lat=""
+            current_io_mode=$(echo "$line" | grep -oP 'FIO TEST RESULTS \(([^)]+)\)' | awk -F'[()]' '{print $2}')
+            current_tool="fio"
+            expect_avg_lat=false
+        elif [[ "$line" =~ "IO TEST RESULTS" ]]; then
+            if [ "$in_io_section" = true ] && [ -n "$current_server_ip" ]; then
+                if [ -n "$current_read_iops" ] && [ -n "$current_write_iops" ]; then
+                    current_total_iops=$(awk "BEGIN {printf \"%.2f\", $current_read_iops + $current_write_iops}" 2>/dev/null || echo "N/A")
+                fi
+                if [ -n "$current_read_bw" ] && [ -n "$current_write_bw" ]; then
+                    current_total_bw=$(awk "BEGIN {printf \"%.2f\", $current_read_bw + $current_write_bw}" 2>/dev/null || echo "N/A")
+                fi
+                printf "%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|sysbench\n" "$current_server_ip" "${current_read_iops:-N/A}" "${current_write_iops:-N/A}" "${current_total_iops:-N/A}" "${current_read_bw:-N/A}" "${current_write_bw:-N/A}" "${current_total_bw:-N/A}" "${current_avg_lat:-N/A}" "${current_p95_lat:-N/A}" "${current_min_lat:-N/A}" "${current_max_lat:-N/A}" "${current_io_mode:-rndrw}" "${current_fsync_iops:-N/A}" >> "$results_temp_file"
+            fi
+            in_io_section=true
+            current_server_ip=$(echo "$line" | grep -oP 'Server: \K[0-9.]+' || echo "N/A")
+            current_read_iops=""
+            current_write_iops=""
+            current_total_iops=""
+            current_read_bw=""
+            current_write_bw=""
+            current_total_bw=""
+            current_avg_lat=""
+            current_p95_lat=""
+            current_min_lat=""
+            current_max_lat=""
+            current_fsync_iops=""
+            current_io_mode="${SYSBENCH_PROFILES:-seqrd seqwr rndrd rndwr}"
+            current_tool="sysbench"
+            expect_avg_lat=false
+        elif [ "$in_io_section" = true ]; then
+            if [ "$current_tool" = "sysbench" ]; then
+                if [[ "$line" =~ "reads/s:" ]]; then
+                    current_read_iops=$(echo "$line" | awk '{print $NF}')
+                    expect_avg_lat=true
+                elif [[ "$line" =~ "writes/s:" ]]; then
+                    current_write_iops=$(echo "$line" | awk '{print $NF}')
+                elif [[ "$line" =~ "fsyncs/s:" ]]; then
+                    current_fsync_iops=$(echo "$line" | awk '{print $NF}')
+                elif [[ "$line" =~ "total/s:" ]]; then
+                    current_total_iops=$(echo "$line" | awk '{print $NF}')
+                elif [[ "$line" =~ "read, MiB/s:" ]]; then
+                    current_read_bw=$(echo "$line" | awk '{print $NF}')
+                elif [[ "$line" =~ "written, MiB/s:" ]]; then
+                    current_write_bw=$(echo "$line" | awk '{print $NF}')
+                elif $expect_avg_lat && [[ "$line" =~ "avg:" ]]; then
+                    current_avg_lat=$(echo "$line" | awk '{print $NF}' | tr -d ',')
+                    expect_avg_lat=false
+                elif [[ "$line" =~ "min:" ]]; then
+                    current_min_lat=$(echo "$line" | awk '{print $NF}' | tr -d ',')
+                elif [[ "$line" =~ "max:" ]]; then
+                    current_max_lat=$(echo "$line" | awk '{print $NF}' | tr -d ',')
+                elif [[ "$line" =~ "95th percentile" ]]; then
+                    current_p95_lat=$(echo "$line" | awk '{print $NF}' | tr -d ',')
+                fi
+            elif [ "$current_tool" = "fio" ]; then
+                if echo "$line" | grep -q -i "read:"; then
+                    local iops_part=$(echo "$line" | grep -o "IOPS=[0-9.]*[kM]*")
+                    local bw_part=$(echo "$line" | grep -o "BW=[0-9.]*MiB/s")
+                    local bw_range=$(echo "$line" | grep -o "[0-9.]*MiB/s-[0-9.]*MiB/s")
+                    if [ -n "$iops_part" ]; then
+                        local iops_value=$(echo "$iops_part" | sed 's/IOPS=//')
+                        if echo "$iops_value" | grep -q "k"; then
+                            current_read_iops=$(echo "$iops_value" | sed 's/k//' | awk '{printf "%.2f", $1 * 1000}')
+                        elif echo "$iops_value" | grep -q "M"; then
+                            current_read_iops=$(echo "$iops_value" | sed 's/M//' | awk '{printf "%.2f", $1 * 1000000}')
+                        else
+                            current_read_iops="$iops_value"
+                        fi
+                    fi
+                    if [ -n "$bw_part" ]; then
+                        current_read_bw=$(echo "$bw_part" | sed 's/BW=//' | sed 's/MiB\/s//')
+                    fi
+                    if [ -n "$bw_range" ]; then
+                        local b_min=$(echo "$bw_range" | awk -F'-' '{print $1}' | sed 's/MiB\/s//')
+                        local b_max=$(echo "$bw_range" | awk -F'-' '{print $2}' | sed 's/MiB\/s//')
+                        local key="${current_server_ip}_${current_io_mode}"
+                        fio_bw_min["$key"]="$b_min"
+                        fio_bw_max["$key"]="$b_max"
+                    fi
+                elif echo "$line" | grep -q -i "write:"; then
+                    local iops_part=$(echo "$line" | grep -o "IOPS=[0-9.]*[kM]*")
+                    local bw_part=$(echo "$line" | grep -o "BW=[0-9.]*MiB/s")
+                    local bw_range=$(echo "$line" | grep -o "[0-9.]*MiB/s-[0-9.]*MiB/s")
+                    if [ -n "$iops_part" ]; then
+                        local iops_value=$(echo "$iops_part" | sed 's/IOPS=//')
+                        if echo "$iops_value" | grep -q "k"; then
+                            current_write_iops=$(echo "$iops_value" | sed 's/k//' | awk '{printf "%.2f", $1 * 1000}')
+                        elif echo "$iops_value" | grep -q "M"; then
+                            current_write_iops=$(echo "$iops_value" | sed 's/M//' | awk '{printf "%.2f", $1 * 1000000}')
+                        else
+                            current_write_iops="$iops_value"
+                        fi
+                    fi
+                    if [ -n "$bw_part" ]; then
+                        current_write_bw=$(echo "$bw_part" | sed 's/BW=//' | sed 's/MiB\/s//')
+                    fi
+                    if [ -n "$bw_range" ]; then
+                        local b_min=$(echo "$bw_range" | awk -F'-' '{print $1}' | sed 's/MiB\/s//')
+                        local b_max=$(echo "$bw_range" | awk -F'-' '{print $2}' | sed 's/MiB\/s//')
+                        local key="${current_server_ip}_${current_io_mode}"
+                        fio_bw_min["$key"]="$b_min"
+                        fio_bw_max["$key"]="$b_max"
+                    fi
+                elif echo "$line" | grep -q "lat (usec)" && echo "$line" | grep -q "avg="; then
+                    local avg_lat_us=$(echo "$line" | grep -o "avg=[0-9.]*" | sed 's/avg=//')
+                    current_avg_lat=$(awk "BEGIN {printf \"%.6f\", $avg_lat_us / 1000}" 2>/dev/null || echo "N/A")
+                fi
+            fi
+        fi
+    done < "$combined_file"
+
+    # Process last server results
+    if [ "$in_io_section" = true ] && [ -n "$current_server_ip" ]; then
+        if [ -n "$current_read_iops" ] && [ -n "$current_write_iops" ]; then
+            current_total_iops=$(awk "BEGIN {printf \"%.2f\", $current_read_iops + $current_write_iops}" 2>/dev/null || echo "N/A")
+        elif [ -n "$current_read_iops" ]; then
+            current_total_iops=$(awk "BEGIN {printf \"%.2f\", $current_read_iops}" 2>/dev/null || echo "$current_read_iops")
+        elif [ -n "$current_write_iops" ]; then
+            current_total_iops=$(awk "BEGIN {printf \"%.2f\", $current_write_iops}" 2>/dev/null || echo "$current_write_iops")
+        else
+            current_total_iops="N/A"
+        fi
+        if [ -n "$current_read_bw" ] && [ -n "$current_write_bw" ]; then
+            current_total_bw=$(awk "BEGIN {printf \"%.2f\", $current_read_bw + $current_write_bw}" 2>/dev/null || echo "N/A")
+        elif [ -n "$current_read_bw" ]; then
+            current_total_bw=$(awk "BEGIN {printf \"%.2f\", $current_read_bw}" 2>/dev/null || echo "$current_read_bw")
+        elif [ -n "$current_write_bw" ]; then
+            current_total_bw=$(awk "BEGIN {printf \"%.2f\", $current_write_bw}" 2>/dev/null || echo "$current_write_bw")
+        else
+            current_total_bw="N/A"
+        fi
+        if [ "$current_tool" = "sysbench" ]; then
+            printf "%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|sysbench\n" "$current_server_ip" "${current_read_iops:-N/A}" "${current_write_iops:-N/A}" "${current_total_iops:-N/A}" "${current_read_bw:-N/A}" "${current_write_bw:-N/A}" "${current_total_bw:-N/A}" "${current_avg_lat:-N/A}" "${current_p95_lat:-N/A}" "${current_min_lat:-N/A}" "${current_max_lat:-N/A}" "${current_io_mode:-rndrw}" "${current_fsync_iops:-N/A}" >> "$results_temp_file"
+        else
+            printf "%s|%s|%s|%s|%s|%s|%s|%s|N/A|N/A|N/A|%s|N/A|fio\n" "$current_server_ip" "${current_read_iops:-N/A}" "${current_write_iops:-N/A}" "${current_total_iops:-N/A}" "${current_read_bw:-N/A}" "${current_write_bw:-N/A}" "${current_total_bw:-N/A}" "${current_avg_lat:-N/A}" "${current_io_mode:-read}" >> "$results_temp_file"
+
+            local ip_prefix="${current_server_ip//./_}_"
+            local key="${current_server_ip}_${current_io_mode}"
+            # 只有在没有从文本输出提取到值时，才尝试从 JSON 读取
+            if [ -z "${fio_bw_min[$key]}" ] || [ -z "${fio_bw_max[$key]}" ]; then
+                for json_file in "$tmp_dir"/"${ip_prefix}"fio_*_result_*.json "$tmp_dir"/fio_*_result_*.json; do
+                    if [ -f "$json_file" ] && jq_available; then
+                        if [[ "$json_file" =~ "_${current_io_mode}_" ]] || [[ "$json_file" =~ "_${current_io_mode}\." ]]; then
+                            local b_min=$(jq -r '.jobs[0].read.bw_min // .jobs[0].write.bw_min // "N/A"' "$json_file" 2>/dev/null)
+                            local b_max=$(jq -r '.jobs[0].read.bw_max // .jobs[0].write.bw_max // "N/A"' "$json_file" 2>/dev/null)
+                            if [ "$b_min" != "N/A" ] && [ "$b_min" != "null" ] && [ -z "${fio_bw_min[$key]}" ]; then
+                                fio_bw_min["$key"]=$(awk "BEGIN {printf \"%.2f\", $b_min / 1024}" 2>/dev/null || echo "N/A")
+                            fi
+                            if [ "$b_max" != "N/A" ] && [ "$b_max" != "null" ] && [ -z "${fio_bw_max[$key]}" ]; then
+                                fio_bw_max["$key"]=$(awk "BEGIN {printf \"%.2f\", $b_max / 1024}" 2>/dev/null || echo "N/A")
+                            fi
+                            if [ -n "${fio_bw_min[$key]}" ] || [ -n "${fio_bw_max[$key]}" ]; then
+                                break
+                            fi
+                        fi
+                    fi
+                done
+            fi
+        fi
+    fi
+
+    # Sort results by IP address and output to report
+    local is_sysbench=false
+    if [ "${IO_TOOL:-fio}" = "sysbench" ]; then
+        is_sysbench=true
+    fi
+
+    if [ -s "$results_temp_file" ]; then
+        if [ "$is_sysbench" = true ]; then
+            echo "  ---------------------------------------------------------------------------------------------------------------" >> "$report_file"
+            printf "  %-20s %-11s %-11s %-11s %-11s %-11s %-11s %-13s %-8s\n" "Server IP" "Read IOPS" "Write IOPS" "Total IOPS" "Read BW" "Write BW" "Total BW" "Latency(ms)" "Mode" >> "$report_file"
+            echo "  ---------------------------------------------------------------------------------------------------------------" >> "$report_file"
+        else
+            echo "  ------------------------------------------------------------------------------------------------------------------------" >> "$report_file"
+            printf "  %-20s %-11s %-11s %-11s %-11s %-11s %-11s %-13s %-10s %-8s\n" "Server IP" "Read IOPS" "Write IOPS" "Total IOPS" "Read BW" "Write BW" "Total BW" "Latency(ms)" "P99(ms)" "Mode" >> "$report_file"
+            echo "  ------------------------------------------------------------------------------------------------------------------------" >> "$report_file"
+        fi
+
+        while IFS='|' read -r server_ip read_iops write_iops total_iops read_bw write_bw total_bw avg_lat p95_lat min_lat max_lat io_mode fsync_iops tool; do
+            if ! [[ "$server_ip" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]]; then
+                continue
+            fi
+            local fmt_read_iops=$(if [ "$read_iops" != "N/A" ]; then awk -v val="$read_iops" 'BEGIN {if (val == int(val)) printf "%d", val; else printf "%.2f", val}' 2>/dev/null || echo "$read_iops"; else echo "N/A"; fi)
+            local fmt_write_iops=$(if [ "$write_iops" != "N/A" ]; then awk -v val="$write_iops" 'BEGIN {if (val == int(val)) printf "%d", val; else printf "%.2f", val}' 2>/dev/null || echo "$write_iops"; else echo "N/A"; fi)
+            local fmt_total_iops=$(if [ "$total_iops" != "N/A" ]; then awk -v val="$total_iops" 'BEGIN {if (val == int(val)) printf "%d", val; else printf "%.2f", val}' 2>/dev/null || echo "$total_iops"; else echo "N/A"; fi)
+            local fmt_read_bw=$(if [ "$read_bw" != "N/A" ]; then awk -v val="$read_bw" 'BEGIN {if (val == int(val)) printf "%d", val; else printf "%.2f", val}' 2>/dev/null || echo "$read_bw"; else echo "N/A"; fi)
+            local fmt_write_bw=$(if [ "$write_bw" != "N/A" ]; then awk -v val="$write_bw" 'BEGIN {if (val == int(val)) printf "%d", val; else printf "%.2f", val}' 2>/dev/null || echo "$write_bw"; else echo "N/A"; fi)
+            local fmt_total_bw=$(if [ "$total_bw" != "N/A" ]; then awk -v val="$total_bw" 'BEGIN {if (val == int(val)) printf "%d", val; else printf "%.2f", val}' 2>/dev/null || echo "$total_bw"; else echo "N/A"; fi)
+            local fmt_avg_lat=$(if [ "$avg_lat" != "N/A" ]; then awk "BEGIN {printf \"%.2f\", $avg_lat}" 2>/dev/null || echo "$avg_lat"; else echo "N/A"; fi)
+
+            if [ "$is_sysbench" = true ]; then
+                printf "  %-20s %-11s %-11s %-11s %-11s %-11s %-11s %-13s %-8s\n" "$server_ip" "$fmt_read_iops" "$fmt_write_iops" "$fmt_total_iops" "$fmt_read_bw" "$fmt_write_bw" "$fmt_total_bw" "$fmt_avg_lat" "$io_mode" >> "$report_file"
+            else
+                local key="${server_ip}_${io_mode}"
+                local p99="${fio_p99_lat[$key]:-N/A}"
+                local fmt_p99=$(if [ "$p99" != "N/A" ]; then awk -v val="$p99" 'BEGIN {if (val == int(val)) printf "%d", val; else printf "%.2f", val}' 2>/dev/null || echo "$p99"; else echo "N/A"; fi)
+                printf "  %-20s %-11s %-11s %-11s %-11s %-11s %-11s %-13s %-10s %-8s\n" "$server_ip" "$fmt_read_iops" "$fmt_write_iops" "$fmt_total_iops" "$fmt_read_bw" "$fmt_write_bw" "$fmt_total_bw" "$fmt_avg_lat" "$fmt_p99" "$io_mode" >> "$report_file"
+            fi
+        done < <(sort -t'|' -k1,1 "$results_temp_file")
+
+        if [ "$is_sysbench" = true ]; then
+            echo "" >> "$report_file"
+            echo "  # Sysbench Extended Metrics" >> "$report_file"
+            echo "  ---------------------------------------------------------------------------" >> "$report_file"
+            printf "  %-20s %-10s %-10s %-10s %-12s %-8s\n" "Server IP" "P95(ms)" "Min(ms)" "Max(ms)" "fsyncs/s" "Mode" >> "$report_file"
+            echo "  ---------------------------------------------------------------------------" >> "$report_file"
+
+            while IFS='|' read -r server_ip read_iops write_iops total_iops read_bw write_bw total_bw avg_lat p95_lat min_lat max_lat io_mode fsync_iops tool; do
+                if ! [[ "$server_ip" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]]; then
+                    continue
+                fi
+                local fmt_p95=$(if [ "$p95_lat" != "N/A" ]; then awk "BEGIN {printf \"%.2f\", $p95_lat}" 2>/dev/null || echo "$p95_lat"; else echo "N/A"; fi)
+                local fmt_min=$(if [ "$min_lat" != "N/A" ]; then awk "BEGIN {printf \"%.2f\", $min_lat}" 2>/dev/null || echo "$min_lat"; else echo "N/A"; fi)
+                local fmt_max=$(if [ "$max_lat" != "N/A" ]; then awk "BEGIN {printf \"%.2f\", $max_lat}" 2>/dev/null || echo "$max_lat"; else echo "N/A"; fi)
+                local fmt_fsync=$(if [ "$fsync_iops" != "N/A" ]; then awk "BEGIN {printf \"%.2f\", $fsync_iops}" 2>/dev/null || echo "$fsync_iops"; else echo "N/A"; fi)
+
+                printf "  %-20s %-10s %-10s %-10s %-12s %-8s\n" "$server_ip" "$fmt_p95" "$fmt_min" "$fmt_max" "$fmt_fsync" "$io_mode" >> "$report_file"
+            done < <(sort -t'|' -k1,1 "$results_temp_file")
+        fi
+
+        if [ "$is_sysbench" = false ]; then
+            echo "" >> "$report_file"
+            echo "  # FIO Extended Metrics" >> "$report_file"
+            echo "  -----------------------------------------------------------------------------------------------------------------------------------------" >> "$report_file"
+            printf "  %-15s %-9s %-9s %-6s %-9s %-9s %-8s %-8s %-7s %-13s %-13s %-6s %-6s %-6s\n" "Server IP" "slat(us)" "clat(us)" "Depth" "CPU(usr)" "CPU(sys)" "bw_min" "bw_max" "ctx" "aggrios" "aggrticks" "util" "aggrutil" "Mode" >> "$report_file"
+            echo "  -----------------------------------------------------------------------------------------------------------------------------------------" >> "$report_file"
+
+            while IFS='|' read -r ext_ip ext_mode ext_p99 ext_disk ext_cpu_usr ext_cpu_sys ext_slat ext_clat ext_iodepth ext_ctx ext_aggrios ext_aggrticks ext_aggrinque ext_aggrutil; do
+                if ! [[ "$ext_ip" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]]; then
+                    continue
+                fi
+
+                local slat="$ext_slat"
+                local clat="$ext_clat"
+                local iodepth="${ext_iodepth:-N/A}"
+                local util="$ext_disk"
+                local cpu_usr="$ext_cpu_usr"
+                local cpu_sys="$ext_cpu_sys"
+                local ctx="${ext_ctx:-N/A}"
+                local aggrios="${ext_aggrios:-N/A}"
+                local aggrticks="${ext_aggrticks:-N/A}"
+                local aggrutil="${ext_aggrutil:-N/A}"
+                local b_min="${fio_bw_min[${ext_ip}_${ext_mode}]:-N/A}"
+                local b_max="${fio_bw_max[${ext_ip}_${ext_mode}]:-N/A}"
+
+                printf "  %-15s %-9s %-9s %-6s %-9s %-9s %-8s %-8s %-7s %-13s %-13s %-6s %-6s %-6s\n" \
+                    "$ext_ip" "$slat" "$clat" "$iodepth" "$cpu_usr" "$cpu_sys" "$b_min" "$b_max" "$ctx" "$aggrios" "$aggrticks" "$util" "$aggrutil" "$ext_mode" >> "$report_file"
+            done < <(sort -t'|' -k1,1 "$fio_extended_file")
+        fi
+    else
+        echo "  Test not executed" >> "$report_file"
+    fi
+
+    rm -f "$results_temp_file" "$fio_extended_file"
+}
+
+# ================================================================================
+# Initialize patterns on source
+# ================================================================================
+init_patterns

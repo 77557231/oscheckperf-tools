@@ -57,10 +57,9 @@ yum install ethtool numactl
 严格模式：要求远程服务器发行版与本地完全匹配，STRICT\_DISTRO\_CHECK=true
 
 | 模式       | 参数值     | Centos→Kylin | CentOS→Ubuntu | Ubuntu→Debian |
-| -------- | ------- | ------------- | ------------- | ------------- |
-| 宽松模式（默认） | `false` | ✅ 允许          | ❌ 拒绝          | ✅ 允许          |
-| 严格模式     | `true`  | ❌ 拒绝          | ❌ 拒绝          | ❌ 拒绝          |
-
+| -------- | ------- | ------------ | ------------- | ------------- |
+| 宽松模式（默认） | `false` | ✅ 允许         | ❌ 拒绝          | ✅ 允许          |
+| 严格模式     | `true`  | ❌ 拒绝         | ❌ 拒绝          | ❌ 拒绝          |
 
 ### 2. 运行测试
 
@@ -260,8 +259,8 @@ cat output/original_data_*_all_results.log
 | 参数             | 默认值                             | 说明                                                                             |
 | -------------- | ------------------------------- | ------------------------------------------------------------------------------ |
 | `FIO_PROFILES` | `read write randread randwrite` | fio 测试模式，空格分隔（read/write/randread/randwrite/rw/randrw/trim/randtrim/trimwrite） |
-| `FIO_BS`       | `16K`                           | fio 块大小（优化后更适合数据库场景）                                                           |
-| `FIO_IODEPTH`  | `32`                            | fio I/O 深度                                                                     |
+| `FIO_BS`       | `8K`                            | fio 块大小（适合8K页数据库场景）                                                            |
+| `FIO_IODEPTH`  | `64`                            | fio I/O 深度                                                                     |
 | `FIO_NUMJOBS`  | `4`                             | fio 工作线程数（设置为0时自动使用CPU核心数）                                                     |
 | `FIO_DIRECT`   | `1`                             | fio 直接 I/O 模式                                                                  |
 | `FIO_FILE_NUM` | `4`                             | fio 测试文件数量（模拟多数据文件场景）                                                          |
