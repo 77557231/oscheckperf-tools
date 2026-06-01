@@ -308,6 +308,7 @@ cat output/original_data_*_all_results.log
 | `NETWORK_PARALLEL` | `4`      | 网络测试并行连接数（iperf3 的 -P 参数） |
 | `NETWORK_PORT`     | `25201`  | 网络测试端口                    |
 | `NETWORK_MODE`     | `matrix` | 网络测试模式（serial/matrix）     |
+| `NETWORK_DURATION` | `DURATION`| 网络测试时长（秒），未设置时使用全局DURATION |
 
 #### 参数说明
 
