@@ -2554,10 +2554,10 @@ run_serial_network_test() {
     # Start iperf3 server
     echo "  Starting iperf3 server on $server_ip..."
     # Calculate timeout parameters:
-    # --idle-timeout: 600 seconds (10 minutes) for automatic cleanup
-    # --rcv-timeout: (duration + 30) * 1000 milliseconds to support long tests
-    local server_idle_timeout=600
-    local server_rcv_timeout=$(( (duration + 30) * 1000 ))
+    # --idle-timeout: 30 seconds for quick cleanup after test completion
+    # --rcv-timeout: (duration + 45) * 1000 milliseconds - slightly longer than client timeout
+    local server_idle_timeout=30
+    local server_rcv_timeout=$(( (duration + 45) * 1000 ))
     
     if [ "$DRY_RUN" = true ]; then
         if [ "$is_local_server" = "true" ]; then
@@ -2938,10 +2938,11 @@ run_matrix_batch() {
     local pair_idx=0
     
     # Calculate timeout parameters for server:
-    # --idle-timeout: 600 seconds (10 minutes) for automatic cleanup
-    # --rcv-timeout: (duration + 30) * 1000 milliseconds to support long tests
-    local server_idle_timeout=600
-    local server_rcv_timeout=$(( (duration + 30) * 1000 ))
+    # --idle-timeout: 30 seconds for quick cleanup after test completion
+    # --rcv-timeout: (duration + 45) * 1000 milliseconds - slightly longer than client timeout
+    #                to ensure server doesn't timeout before client completes
+    local server_idle_timeout=30
+    local server_rcv_timeout=$(( (duration + 45) * 1000 ))
     
     debug_log "MATRIX_BATCH_START" "batch=$batch_idx" "base_port=$base_port" "duration=$duration" "parallel=$parallel" "pairs=${#pairs[@]}"
     
@@ -3149,7 +3150,7 @@ run_matrix_batch() {
             local port=$((base_port + pair_idx))
             set_ssh_password "$dst"
             local dst_ssh=$(get_ssh_command "$dst")
-            echo "    [DRY RUN] $dst_ssh 'pkill -f \"iperf3 -s -p $port\"'"
+            echo "    [DRY RUN] $dst_ssh 'killall iperf3'"
             pair_idx=$((pair_idx + 1))
         done
     else
@@ -3343,10 +3344,10 @@ run_matrix_network_test() {
             fi
             
             # Calculate timeout parameters for server:
-            # --idle-timeout: 600 seconds (10 minutes) for automatic cleanup
-            # --rcv-timeout: (duration + 30) * 1000 milliseconds to support long tests
-            local server_idle_timeout=600
-            local server_rcv_timeout=$(( (duration + 30) * 1000 ))
+            # --idle-timeout: 30 seconds for quick cleanup after test completion
+            # --rcv-timeout: (duration + 45) * 1000 milliseconds - slightly longer than client timeout
+            local server_idle_timeout=30
+            local server_rcv_timeout=$(( (duration + 45) * 1000 ))
             
             if [ "$DRY_RUN" = true ]; then
                 echo "[DRY RUN] $dst_ssh 'iperf3 -s -p $port -D --idle-timeout $server_idle_timeout --rcv-timeout $server_rcv_timeout'"
@@ -3930,67 +3931,36 @@ generate_iperf3_text_from_json() {
         return
     fi
     
-    # Extract JSON content
-    local json_content=$(awk 'BEGIN{found=0} /^\{/{found=1} found{print} /^\}/{if(found) exit}' "$json_file" 2>/dev/null || cat "$json_file")
-    
-    # Generate text-like output from JSON
-    {
-        echo "iperf3 text output (generated from JSON)"
-        echo "========================================="
-        
-        # Extract interval data
-        local intervals=$(echo "$json_content" | jq -r '.intervals[]' 2>/dev/null)
-        
-        if [ -n "$intervals" ]; then
-            local interval_idx=0
-            echo "$intervals" | while read -r interval; do
-                interval_idx=$((interval_idx + 1))
-                
-                # Extract timestamp and duration
-                local start=$(echo "$interval" | jq -r '.streams[0].start // 0' 2>/dev/null)
-                local end=$(awk "BEGIN {printf \"%.2f\", $start + 1}" 2>/dev/null)
-                
-                # Extract received data
-                local bytes=$(echo "$interval" | jq -r '.streams[0].sum.bytes // 0' 2>/dev/null)
-                local bits_per_second=$(echo "$interval" | jq -r '.streams[0].sum.bits_per_second // 0' 2>/dev/null)
-                
-                # Convert bytes to MBytes
-                local mbytes=$(awk "BEGIN {printf \"%.2f\", $bytes / 1048576}" 2>/dev/null || echo "0")
-                
-                # Convert bps to Mbits/sec or Gbits/sec
-                local bitrate=""
-                if [ "$bits_per_second" -gt 1000000000 ] 2>/dev/null; then
-                    bitrate=$(awk "BEGIN {printf \"%.2f Gbits/sec\", $bits_per_second / 1000000000}" 2>/dev/null)
-                else
-                    bitrate=$(awk "BEGIN {printf \"%.2f Mbits/sec\", $bits_per_second / 1000000}" 2>/dev/null)
-                fi
-                
-                if [ -n "$start" ] && [ "$start" != "null" ]; then
-                    printf "[%3d] %6.2f-%6.2f sec  %6.2f MBytes  %s\n" "$interval_idx" "$start" "$end" "$mbytes" "$bitrate"
-                fi
-            done
-        fi
-        
-        # Add summary
-        echo ""
-        echo "- - - - - - - - - - - - - - - - - - - - - - - - - - - - - -"
-        
-        local total_bytes=$(echo "$json_content" | jq -r '.end.sum_received.bytes // 0' 2>/dev/null)
-        local total_bits_per_second=$(echo "$json_content" | jq -r '.end.sum_received.bits_per_second // 0' 2>/dev/null)
-        
-        local total_mbytes=$(awk "BEGIN {printf \"%.2f\", $total_bytes / 1048576}" 2>/dev/null || echo "0")
-        
-        local total_bitrate=""
-        if [ "$total_bits_per_second" -gt 1000000000 ] 2>/dev/null; then
-            total_bitrate=$(awk "BEGIN {printf \"%.2f Gbits/sec\", $total_bits_per_second / 1000000000}" 2>/dev/null)
-        else
-            total_bitrate=$(awk "BEGIN {printf \"%.2f Mbits/sec\", $total_bits_per_second / 1000000}" 2>/dev/null)
-        fi
-        
-        printf "[SUM] %6.2f-%6.2f sec  %6.2f MBytes  %s  sender\n" "0.00" "$(echo "$json_content" | jq -r '.end.sum_received.seconds // 0' 2>/dev/null)" "$total_mbytes" "$total_bitrate"
-        printf "[SUM] %6.2f-%6.2f sec  %6.2f MBytes  %s  receiver\n" "0.00" "$(echo "$json_content" | jq -r '.end.sum_received.seconds // 0' 2>/dev/null)" "$total_mbytes" "$total_bitrate"
-        
-    } > "$output_file"
+    # Generate text-like output from JSON using a single jq call for efficiency
+    jq -r '
+        "iperf3 text output (generated from JSON)",
+        "=========================================",
+        "",
+        (.intervals // []) | to_entries[] | 
+        ([.key + 1, .value.streams[0].start // 0, (.value.streams[0].start // 0) + 1,
+          (.value.streams[0].sum.bytes // 0) / 1048576,
+          .value.streams[0].sum.bits_per_second // 0]) |
+        "[\\(.[0])] \\(.[1] | . * 100 | round / 100)-\\(.[2] | . * 100 | round / 100) sec  \\(.[3] | . * 100 | round / 100) MBytes  " +
+        (if .[4] > 1000000000 then (. [4] / 1000000000 | . * 100 | round / 100) + " Gbits/sec"
+         else (. [4] / 1000000 | . * 100 | round / 100) + " Mbits/sec" end),
+        "",
+        "- - - - - - - - - - - - - - - - - - - - - - - - - - - - - -",
+        "",
+        "[SUM] 0.00-\\((.end.sum_received.seconds // 0) | . * 100 | round / 100) sec  \\((.end.sum_received.bytes // 0) / 1048576 | . * 100 | round / 100) MBytes  " +
+        (if (.end.sum_received.bits_per_second // 0) > 1000000000 
+         then ((.end.sum_received.bits_per_second // 0) / 1000000000 | . * 100 | round / 100) + " Gbits/sec"
+         else ((.end.sum_received.bits_per_second // 0) / 1000000 | . * 100 | round / 100) + " Mbits/sec" 
+         end) + "  sender",
+        "[SUM] 0.00-\\((.end.sum_received.seconds // 0) | . * 100 | round / 100) sec  \\((.end.sum_received.bytes // 0) / 1048576 | . * 100 | round / 100) MBytes  " +
+        (if (.end.sum_received.bits_per_second // 0) > 1000000000 
+         then ((.end.sum_received.bits_per_second // 0) / 1000000000 | . * 100 | round / 100) + " Gbits/sec"
+         else ((.end.sum_received.bits_per_second // 0) / 1000000 | . * 100 | round / 100) + " Mbits/sec" 
+         end) + "  receiver"
+    ' "$json_file" > "$output_file" 2>/dev/null || {
+        # Fallback to simpler output if jq fails
+        echo "iperf3 text output (generated from JSON)" > "$output_file"
+        echo "=========================================" >> "$output_file"
+    }
 }
 
 # Parse iperf3 JSON to metrics (extended indicators)
