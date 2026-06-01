@@ -88,27 +88,66 @@ get_uptime_info() {
 
 # Get CPU model
 get_cpu_model() {
-    if [ -f /proc/cpuinfo ]; then
-        grep -m 1 'model name' /proc/cpuinfo | sed 's/model name\s*: //' 2>/dev/null || echo "unknown"
-    else
-        echo "unknown"
+    local cpu_model="unknown"
+
+    if command -v lscpu &>/dev/null; then
+        cpu_model=$(lscpu 2>/dev/null | grep -i "BIOS Model name" | awk -F: '{print $2}' | sed 's/^ *//' | sed 's/ *$//')
     fi
+
+    if [ -z "$cpu_model" ] || [ "$cpu_model" = "unknown" ]; then
+        if command -v lscpu &>/dev/null; then
+            cpu_model=$(lscpu 2>/dev/null | grep -i "Model name" | grep -v "BIOS" | awk -F: '{print $2}' | sed 's/^ *//' | sed 's/ *$//')
+        fi
+    fi
+
+    if [ -z "$cpu_model" ] || [ "$cpu_model" = "unknown" ]; then
+        if [ -f /proc/cpuinfo ]; then
+            cpu_model=$(grep -m 1 'model name' /proc/cpuinfo | sed 's/model name\s*: //' 2>/dev/null)
+        fi
+    fi
+
+    if [ -z "$cpu_model" ] || [ "$cpu_model" = "unknown" ]; then
+        if command -v lscpu &>/dev/null; then
+            local cpu_part=$(lscpu 2>/dev/null | grep -i "CPU part" | awk '{print $NF}')
+            local cpu_vendor=$(lscpu 2>/dev/null | grep -i "Vendor ID:" | awk '{print $NF}')
+            if [ -n "$cpu_part" ] && [ -n "$cpu_vendor" ]; then
+                if [ "$cpu_vendor" = "HiSilicon" ] || [ "$cpu_vendor" = "hisilicon" ]; then
+                    cpu_model="Kunpeng-920"
+                else
+                    cpu_model="${cpu_vendor} ${cpu_part}"
+                fi
+            fi
+        fi
+    fi
+
+    if [ -z "$cpu_model" ] || [ "$cpu_model" = "unknown" ]; then
+        cpu_model="unknown"
+    fi
+
+    echo "$cpu_model"
 }
 
 # Get CPU physical cores count
 get_cpu_physical_cores() {
+    if command -v lscpu &>/dev/null; then
+        local sockets=$(lscpu 2>/dev/null | grep -i 'Socket(s)' | awk '{print $NF}')
+        local cores_per_socket=$(lscpu 2>/dev/null | grep -i 'Core(s) per socket' | awk '{print $NF}')
+        if [ -n "$sockets" ] && [ -n "$cores_per_socket" ] && [ "$sockets" -gt 0 ] 2>/dev/null && [ "$cores_per_socket" -gt 0 ] 2>/dev/null; then
+            echo $((sockets * cores_per_socket))
+            return
+        fi
+    fi
+
     if [ -f /proc/cpuinfo ]; then
         local cores=$(grep -c 'physical id' /proc/cpuinfo 2>/dev/null)
         if [ -n "$cores" ] && [ "$cores" -gt 0 ] 2>/dev/null; then
             echo "$cores"
-        else
-            nproc 2>/dev/null || echo "unknown"
+            return
         fi
-    else
-        echo "unknown"
     fi
-}
 
+    nproc 2>/dev/null || echo "unknown"
+}
 # Get CPU logical cores count
 get_cpu_logical_cores() {
     nproc 2>/dev/null || grep -c ^processor /proc/cpuinfo 2>/dev/null || echo "unknown"
@@ -514,13 +553,17 @@ get_inode_info() {
 # Get network interface information
 get_network_info() {
     local result=""
+    local up_count=0
     for iface in $(ls /sys/class/net/ 2>/dev/null | grep -v "^lo$"); do
+        local state=$(cat "/sys/class/net/$iface/operstate" 2>/dev/null || echo "N/A")
+        if [ "$state" != "up" ]; then
+            continue
+        fi
         local mac=$(cat "/sys/class/net/$iface/address" 2>/dev/null || echo "N/A")
         local speed=$(cat "/sys/class/net/$iface/speed" 2>/dev/null || echo "N/A")
         local mtu=$(cat "/sys/class/net/$iface/mtu" 2>/dev/null || echo "N/A")
-        local state=$(cat "/sys/class/net/$iface/operstate" 2>/dev/null || echo "N/A")
         local ip=$(ip addr show "$iface" 2>/dev/null | grep 'inet ' | awk '{print $2}' | cut -d'/' -f1 | head -1 || echo "N/A")
-        
+
         local speed_str=""
         if [ "$speed" != "N/A" ] && [ "$speed" -gt 0 ] 2>/dev/null; then
             speed_str="${speed}Mbps"
@@ -529,27 +572,49 @@ get_network_info() {
         else
             speed_str="Unknown"
         fi
-        
+
         result="${result}${iface}: IP=${ip}, MAC=${mac}, Speed=${speed_str}, MTU=${mtu}, State=${state}\n"
+        up_count=$((up_count + 1))
     done
-    echo -e "$result"
+    if [ $up_count -eq 0 ]; then
+        echo "No active interfaces found"
+    else
+        echo -e "$result"
+    fi
 }
 
 # Get CPU L1 data cache size
 get_cpu_l1_cache() {
+    local cache_val="N/A"
+
     if command -v lscpu &>/dev/null; then
-        local cache_val=$(lscpu -C 2>/dev/null | grep 'L1d' | head -1 | awk '{print $2}')
-        if [ -n "$cache_val" ]; then
+        cache_val=$(lscpu 2>/dev/null | grep -i 'L1d.*cache' | awk -F: '{print $2}' | awk '{print $1, $2}' | sed 's/^ *//')
+        if [ -n "$cache_val" ] && [ "$cache_val" != "N/A" ] && [ "$cache_val" != " " ]; then
             echo "$cache_val"
             return
         fi
-        cache_val=$(lscpu 2>/dev/null | grep -i 'L1d cache' | awk -F: '{print $2}' | awk '{print $1}')
-        if [ -n "$cache_val" ]; then
+
+        cache_val=$(lscpu -C 2>/dev/null | grep 'L1d' | head -1 | awk '{print $3}')
+        if [ -n "$cache_val" ] && [ "$cache_val" != "N/A" ]; then
             echo "$cache_val"
             return
         fi
-        if [ -f /sys/devices/system/cpu/cpu0/cache/index0/size ]; then
-            cat /sys/devices/system/cpu/cpu0/cache/index0/size 2>/dev/null && return
+    fi
+
+    if [ -f /sys/devices/system/cpu/cpu0/cache/index0/size ]; then
+        local single_core=$(cat /sys/devices/system/cpu/cpu0/cache/index0/size 2>/dev/null)
+        if [ -n "$single_core" ]; then
+            local core_count=$(nproc 2>/dev/null || echo 1)
+            local single_num=$(echo "$single_core" | sed 's/[KkMmGgTt].*//')
+            if [[ "$single_core" == *K* ]] || [[ "$single_core" == *k* ]]; then
+                cache_val=$(awk "BEGIN {printf \"%.0f\", $single_num * $core_count / 1024}")"M"
+            elif [[ "$single_core" == *M* ]] || [[ "$single_core" == *m* ]]; then
+                cache_val=$(awk "BEGIN {printf \"%.0f\", $single_num * $core_count}")"M"
+            else
+                cache_val="$single_core"
+            fi
+            echo "$cache_val"
+            return
         fi
     fi
     echo "N/A"
@@ -557,14 +622,17 @@ get_cpu_l1_cache() {
 
 # Get CPU L2 cache size
 get_cpu_l2_cache() {
+    local cache_val="N/A"
+
     if command -v lscpu &>/dev/null; then
-        local cache_val=$(lscpu -C 2>/dev/null | grep 'L2' | head -1 | awk '{print $2}')
-        if [ -n "$cache_val" ]; then
+        cache_val=$(lscpu 2>/dev/null | grep -i 'L2.*cache' | awk -F: '{print $2}' | awk '{print $1, $2}' | sed 's/^ *//')
+        if [ -n "$cache_val" ] && [ "$cache_val" != "N/A" ] && [ "$cache_val" != " " ]; then
             echo "$cache_val"
             return
         fi
-        cache_val=$(lscpu 2>/dev/null | grep -i 'L2 cache' | awk -F: '{print $2}' | awk '{print $1}')
-        if [ -n "$cache_val" ]; then
+
+        cache_val=$(lscpu -C 2>/dev/null | grep 'L2' | head -1 | awk '{print $3}')
+        if [ -n "$cache_val" ] && [ "$cache_val" != "N/A" ]; then
             echo "$cache_val"
             return
         fi
@@ -574,14 +642,17 @@ get_cpu_l2_cache() {
 
 # Get CPU L3 cache size
 get_cpu_l3_cache() {
+    local cache_val="N/A"
+
     if command -v lscpu &>/dev/null; then
-        local cache_val=$(lscpu -C 2>/dev/null | grep 'L3' | head -1 | awk '{print $2}')
-        if [ -n "$cache_val" ]; then
+        cache_val=$(lscpu 2>/dev/null | grep -i 'L3.*cache' | awk -F: '{print $2}' | awk '{print $1, $2}' | sed 's/^ *//')
+        if [ -n "$cache_val" ] && [ "$cache_val" != "N/A" ] && [ "$cache_val" != " " ]; then
             echo "$cache_val"
             return
         fi
-        cache_val=$(lscpu 2>/dev/null | grep -i 'L3 cache' | awk -F: '{print $2}' | awk '{print $1}')
-        if [ -n "$cache_val" ]; then
+
+        cache_val=$(lscpu -C 2>/dev/null | grep 'L3' | head -1 | awk '{print $3}')
+        if [ -n "$cache_val" ] && [ "$cache_val" != "N/A" ]; then
             echo "$cache_val"
             return
         fi
@@ -842,6 +913,10 @@ get_benchmark_mount_options() {
 get_network_advanced_info() {
     local has_output=false
     for iface in $(ls /sys/class/net/ 2>/dev/null | grep -v "^lo$"); do
+        local state=$(cat "/sys/class/net/$iface/operstate" 2>/dev/null || echo "N/A")
+        if [ "$state" != "up" ]; then
+            continue
+        fi
         if command -v ethtool &>/dev/null; then
             local speed=$(ethtool "$iface" 2>/dev/null | grep 'Speed:' | awk '{print $2}')
             local duplex=$(ethtool "$iface" 2>/dev/null | grep 'Duplex:' | awk '{print $2}')

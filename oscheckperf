@@ -10,6 +10,11 @@
 # Note: set -e is intentionally not used to allow tests to continue even if some fail
 # This ensures report generation happens regardless of individual test failures
 
+# Set English locale to ensure consistent output from system commands (lscpu, etc.)
+# This avoids issues with Chinese vs English field names in lscpu output
+export LANG=en_US.UTF-8
+export LC_ALL=en_US.UTF-8
+
 # ================================================================================
 # Global Configuration Variables - Centralized Management
 # ================================================================================
