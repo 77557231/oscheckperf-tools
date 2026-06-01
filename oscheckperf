@@ -725,7 +725,7 @@ show_help() {
     echo "IO test parameters:"
     echo "  Common IO parameters:"
     echo "    IO_TOOL=sysbench|fio        IO test tool (default: fio)"
-    echo "    IO_TOTAL_SIZE=<size>        Total file size for IO test (default: 10G)"
+    echo "    IO_TOTAL_SIZE=<size>        Total file size for IO test (default: 10G, supports: G/M/K units)"
     echo "    IO_PATH=<path>              IO test directory path (default: \$HOME/oscheckperf/io_test)"
     echo ""
     echo "  sysbench-specific parameters:"
@@ -2107,9 +2107,16 @@ run_fio_test() {
         # Total = 64M * 4 files * 4 jobs = 1G (expected)
         local per_file_size="auto"
         local size_value=$(echo "$total_size" | sed -E 's/([0-9]+)([GMK])/\1/')
+        local size_unit=$(echo "$total_size" | sed -E 's/([0-9]+)([GMK])/\2/')
         
-        if [ "$file_num" -gt 0 ] && [ "$size_value" -gt 0 ]; then
-            local per_size=$((size_value * 1024 / file_num))
+        if [ "$file_num" -gt 0 ] && [ "$size_value" -gt 0 ] && [ -n "$size_unit" ]; then
+            local size_in_mb=$size_value
+            case "$size_unit" in
+                G) size_in_mb=$((size_value * 1024)) ;;
+                M) size_in_mb=$size_value ;;
+                K) size_in_mb=$((size_value / 1024)) ;;
+            esac
+            local per_size=$((size_in_mb / file_num))
             if [ "$numjobs" -gt 1 ]; then
                 per_size=$((per_size / numjobs))
             fi
@@ -4557,9 +4564,16 @@ generate_report() {
         local fio_file_num="$FIO_FILE_NUM"
         local fio_numjobs="$FIO_NUMJOBS"
         local fio_size_value=$(echo "$fio_total_size" | sed -E 's/([0-9]+)([GMK])/\1/')
+        local fio_size_unit=$(echo "$fio_total_size" | sed -E 's/([0-9]+)([GMK])/\2/')
         local fio_per_file_size="auto"
-        if [ "$fio_file_num" -gt 0 ] && [ "$fio_size_value" -gt 0 ]; then
-            local fio_per_size=$((fio_size_value * 1024 / fio_file_num))
+        if [ "$fio_file_num" -gt 0 ] && [ "$fio_size_value" -gt 0 ] && [ -n "$fio_size_unit" ]; then
+            local fio_size_in_mb=$fio_size_value
+            case "$fio_size_unit" in
+                G) fio_size_in_mb=$((fio_size_value * 1024)) ;;
+                M) fio_size_in_mb=$fio_size_value ;;
+                K) fio_size_in_mb=$((fio_size_value / 1024)) ;;
+            esac
+            local fio_per_size=$((fio_size_in_mb / fio_file_num))
             if [ "$fio_numjobs" -gt 1 ]; then
                 fio_per_size=$((fio_per_size / fio_numjobs))
             fi
@@ -4955,19 +4969,16 @@ main() {
     SYSBENCH_BLOCK_SIZE="${SYSBENCH_BLOCK_SIZE:-16K}"
     SYSBENCH_IO_MODE="${SYSBENCH_IO_MODE:-sync}"
     SYSBENCH_EXTRA_FLAGS="${SYSBENCH_EXTRA_FLAGS:-direct}"
-    SYSBENCH_DURATION="${SYSBENCH_DURATION:-$DURATION}"
 
     # FIO IO default values
     FIO_BS="${FIO_BS:-8K}"
     FIO_DIRECT="${FIO_DIRECT:-1}"
     FIO_IOENGINE="${FIO_IOENGINE:-libaio}"
     FIO_FILE_NUM="${FIO_FILE_NUM:-4}"
-    FIO_DURATION="${FIO_DURATION:-$DURATION}"
 
     # Network test default values
     NETWORK_TOOL="${NETWORK_TOOL:-iperf3}"
     NETWORK_MODE="${NETWORK_MODE:-matrix}"
-    NETWORK_DURATION="${NETWORK_DURATION:-$DURATION}"
 
     # Threads test default values
     THREADS_NUM="${THREADS_NUM:-0}"
@@ -5025,8 +5036,11 @@ main() {
         "THREADS_ENABLED=$THREADS_ENABLED" \
         "MUTEX_ENABLED=$MUTEX_ENABLED"
     
-    # Set default values
+    # Set default values after parse_args to respect command line parameters
     FORMAT="${FORMAT:-txt}"
+    SYSBENCH_DURATION="${SYSBENCH_DURATION:-$DURATION}"
+    FIO_DURATION="${FIO_DURATION:-$DURATION}"
+    NETWORK_DURATION="${NETWORK_DURATION:-$DURATION}"
     
     # Convert OUTPUT_DIR to absolute path to avoid issues when script changes directory
     case "$OUTPUT_DIR" in
