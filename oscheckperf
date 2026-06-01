@@ -3103,6 +3103,10 @@ run_matrix_batch() {
             wait_idx=$((wait_idx + 1))
         done
         
+        # Add a small delay to ensure file system cache is flushed
+        # This prevents race conditions where results may be read before fully written
+        sleep 2
+        
         # Parse results for all pairs
         pair_idx=0
         for output_info in "${client_output_files[@]}"; do
