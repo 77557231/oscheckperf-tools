@@ -3087,6 +3087,9 @@ run_matrix_batch() {
                 client_pids+=($!)
             fi
             client_output_files+=("$client_output_file|$client_text_output|$src|$dst")
+            
+            # Add small delay between client launches to avoid SSH connection race conditions
+            sleep 0.5
         fi
         
         pair_idx=$((pair_idx + 1))
