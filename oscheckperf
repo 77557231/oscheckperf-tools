@@ -3932,11 +3932,13 @@ generate_iperf3_text_from_json() {
     fi
     
     # Generate text-like output from JSON using a single jq call for efficiency
+    # The key fix: save root context in $root variable, so we can access .end after processing .intervals
     jq -r '
+        . as $root |
         "iperf3 text output (generated from JSON)",
         "=========================================",
         "",
-        (.intervals // []) | to_entries[] | 
+        ($root.intervals // []) | to_entries[] | 
         ([.key + 1, .value.streams[0].start // 0, (.value.streams[0].start // 0) + 1,
           (.value.streams[0].sum.bytes // 0) / 1048576,
           .value.streams[0].sum.bits_per_second // 0]) |
@@ -3946,15 +3948,15 @@ generate_iperf3_text_from_json() {
         "",
         "- - - - - - - - - - - - - - - - - - - - - - - - - - - - - -",
         "",
-        "[SUM] 0.00-\\((.end.sum_received.seconds // 0) | . * 100 | round / 100) sec  \\((.end.sum_received.bytes // 0) / 1048576 | . * 100 | round / 100) MBytes  " +
-        (if (.end.sum_received.bits_per_second // 0) > 1000000000 
-         then ((.end.sum_received.bits_per_second // 0) / 1000000000 | . * 100 | round / 100) + " Gbits/sec"
-         else ((.end.sum_received.bits_per_second // 0) / 1000000 | . * 100 | round / 100) + " Mbits/sec" 
+        "[SUM] 0.00-\\(($root.end.sum_received.seconds // 0) | . * 100 | round / 100) sec  \\(($root.end.sum_received.bytes // 0) / 1048576 | . * 100 | round / 100) MBytes  " +
+        (if ($root.end.sum_received.bits_per_second // 0) > 1000000000 
+         then (($root.end.sum_received.bits_per_second // 0) / 1000000000 | . * 100 | round / 100) + " Gbits/sec"
+         else (($root.end.sum_received.bits_per_second // 0) / 1000000 | . * 100 | round / 100) + " Mbits/sec" 
          end) + "  sender",
-        "[SUM] 0.00-\\((.end.sum_received.seconds // 0) | . * 100 | round / 100) sec  \\((.end.sum_received.bytes // 0) / 1048576 | . * 100 | round / 100) MBytes  " +
-        (if (.end.sum_received.bits_per_second // 0) > 1000000000 
-         then ((.end.sum_received.bits_per_second // 0) / 1000000000 | . * 100 | round / 100) + " Gbits/sec"
-         else ((.end.sum_received.bits_per_second // 0) / 1000000 | . * 100 | round / 100) + " Mbits/sec" 
+        "[SUM] 0.00-\\(($root.end.sum_received.seconds // 0) | . * 100 | round / 100) sec  \\(($root.end.sum_received.bytes // 0) / 1048576 | . * 100 | round / 100) MBytes  " +
+        (if ($root.end.sum_received.bits_per_second // 0) > 1000000000 
+         then (($root.end.sum_received.bits_per_second // 0) / 1000000000 | . * 100 | round / 100) + " Gbits/sec"
+         else (($root.end.sum_received.bits_per_second // 0) / 1000000 | . * 100 | round / 100) + " Mbits/sec" 
          end) + "  receiver"
     ' "$json_file" > "$output_file" 2>/dev/null || {
         # Fallback to simpler output if jq fails
