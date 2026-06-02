@@ -4459,8 +4459,7 @@ generate_report() {
     printf -- "%-28s %-20s %-25s\n" "Max Prime Number" "CPU_MAX_PRIME" "$CPU_MAX_PRIME" >> "$report_file"
     local cpu_threads_val="$CPU_THREADS"
     if [ "$cpu_threads_val" = "0" ]; then
-        local cpu_cores=$(get_cpu_cores 2>/dev/null || echo "unknown")
-        printf -- "%-28s %-20s %-25s\n" "CPU Threads" "CPU_THREADS" "auto($cpu_cores)" >> "$report_file"
+        printf -- "%-28s %-20s %-25s\n" "CPU Threads" "CPU_THREADS" "auto" >> "$report_file"
     else
         printf -- "%-28s %-20s %-25s\n" "CPU Threads" "CPU_THREADS" "$cpu_threads_val" >> "$report_file"
     fi
@@ -4476,25 +4475,14 @@ generate_report() {
     # Display auto-calculated memory size if MEMORY_TOTAL_SIZE is 0
     local mem_total_val="$MEMORY_TOTAL_SIZE"
     if [ "$mem_total_val" = "0" ]; then
-        local total_mem_mb=$(get_memory_size_mb 2>/dev/null || echo "unknown")
-        if [ "$total_mem_mb" != "unknown" ]; then
-            local sixty_percent_mb=$(awk "BEGIN {printf \"%.0f\", $total_mem_mb * 0.6}")
-            if [ "$sixty_percent_mb" -ge 1024 ]; then
-                mem_total_val="auto ($(awk "BEGIN {printf \"%.0f\", $sixty_percent_mb / 1024}")G)"
-            else
-                mem_total_val="auto (${sixty_percent_mb}M)"
-            fi
-        else
-            mem_total_val="auto (20G fallback)"
-        fi
+        mem_total_val="auto"
     fi
     printf -- "%-28s %-20s %-25s\n" "Total Size" "MEMORY_TOTAL_SIZE" "$mem_total_val" >> "$report_file"
     printf -- "%-28s %-20s %-25s\n" "Operation" "MEMORY_OPER" "$MEMORY_OPER" >> "$report_file"
     printf -- "%-28s %-20s %-25s\n" "Duration" "DURATION" "${unified_duration}s" >> "$report_file"
     local mem_threads_val="$MEMORY_THREADS"
     if [ "$mem_threads_val" = "0" ]; then
-        local cpu_cores=$(get_cpu_cores 2>/dev/null || echo "unknown")
-        printf -- "%-28s %-20s %-25s\n" "Memory Threads" "MEMORY_THREADS" "auto($cpu_cores)" >> "$report_file"
+        printf -- "%-28s %-20s %-25s\n" "Memory Threads" "MEMORY_THREADS" "auto" >> "$report_file"
     else
         printf -- "%-28s %-20s %-25s\n" "Memory Threads" "MEMORY_THREADS" "$mem_threads_val" >> "$report_file"
     fi
@@ -4517,7 +4505,7 @@ generate_report() {
         # Display auto if FIO_NUMJOBS is 0
         local fio_numjobs_val="$FIO_NUMJOBS"
         if [ "$fio_numjobs_val" = "0" ]; then
-            fio_numjobs_val="auto ($(get_cpu_cores))"
+            fio_numjobs_val="auto"
         fi
         printf -- "%-28s %-20s %-25s\n" "Num Jobs" "FIO_NUMJOBS" "$fio_numjobs_val" >> "$report_file"
         printf -- "%-28s %-20s %-25s\n" "Direct IO" "FIO_DIRECT" "$FIO_DIRECT" >> "$report_file"
@@ -4533,7 +4521,7 @@ generate_report() {
         # Display auto if SYSBENCH_THREADS is 0
         local sysbench_threads_val="$SYSBENCH_THREADS"
         if [ "$sysbench_threads_val" = "0" ]; then
-            sysbench_threads_val="auto ($(get_cpu_cores))"
+            sysbench_threads_val="auto"
         fi
         printf -- "%-28s %-20s %-25s\n" "Threads" "SYSBENCH_THREADS" "$sysbench_threads_val" >> "$report_file"
     fi
@@ -4589,9 +4577,7 @@ generate_report() {
     if [ "$THREADS_NUM" != "0" ]; then
         printf -- "%-28s %-20s %-25s\n" "Threads" "THREADS_NUM" "$THREADS_NUM" >> "$report_file"
     else
-        local cpu_cores=$(get_cpu_cores 2>/dev/null || echo "unknown")
-        local threads_calc=$((cpu_cores * 4))
-        printf -- "%-28s %-20s %-25s\n" "Threads" "THREADS_NUM" "auto($threads_calc)" >> "$report_file"
+        printf -- "%-28s %-20s %-25s\n" "Threads" "THREADS_NUM" "auto" >> "$report_file"
     fi
     printf -- "\n" >> "$report_file"
     
@@ -4606,8 +4592,7 @@ generate_report() {
     if [ "$MUTEX_THREADS" != "0" ]; then
         printf -- "%-28s %-20s %-25s\n" "Threads" "MUTEX_THREADS" "$MUTEX_THREADS" >> "$report_file"
     else
-        local cpu_cores=$(get_cpu_cores 2>/dev/null || echo "unknown")
-        printf -- "%-28s %-20s %-25s\n" "Threads" "MUTEX_THREADS" "auto($cpu_cores)" >> "$report_file"
+        printf -- "%-28s %-20s %-25s\n" "Threads" "MUTEX_THREADS" "auto" >> "$report_file"
     fi
     printf -- "\n" >> "$report_file"
     printf -- "================================================================================\n" >> "$report_file"
