@@ -616,7 +616,7 @@ parse_io_report_new() {
             if(match($0, /sys=([0-9.]+)%/, m)) cpu_sys=m[1];
             if(match($0, /ctx=([0-9]+)/, m)) ctx=m[1];
         }
-        in_fio && !ext_started && /aggrios=/ {
+        in_fio && !ext_started && /aggrios=/ && aggrios == "N/A" {
             if(match($0, /aggrios=([0-9\/]+)/, m)) aggrios=m[1];
             if(match($0, /aggrticks=([0-9\/]+)/, m)) aggrticks=m[1];
             if(match($0, /aggrin_queue=([0-9]+)/, m)) aggrinque=m[1];
@@ -1023,7 +1023,7 @@ parse_io_report_new() {
             printf "  %-15s %-9s %-9s %-6s %-9s %-9s %-8s %-8s %-7s %-13s %-13s %-6s %-6s %-6s\n" "Server IP" "slat(us)" "clat(us)" "Depth" "CPU(usr)" "CPU(sys)" "bw_min" "bw_max" "ctx" "aggrios" "aggrticks" "util" "aggrutil" "Mode" >> "$report_file"
             echo "  -----------------------------------------------------------------------------------------------------------------------------------------" >> "$report_file"
 
-            while IFS='|' read -r ext_ip ext_mode ext_p99 ext_disk ext_cpu_usr ext_cpu_sys ext_slat ext_clat ext_iodepth ext_ctx ext_aggrios ext_aggrticks ext_aggrinque ext_aggrutil; do
+            while IFS='|' read -r ext_ip ext_mode ext_p99 ext_disk ext_cpu_usr ext_cpu_sys ext_slat ext_clat ext_iodepth ext_ctx ext_aggrios ext_aggrticks ext_aggrinque ext_aggrutil ext_bw_min ext_bw_max; do
                 if ! [[ "$ext_ip" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]]; then
                     continue
                 fi
@@ -1038,8 +1038,8 @@ parse_io_report_new() {
                 local aggrios="${ext_aggrios:-N/A}"
                 local aggrticks="${ext_aggrticks:-N/A}"
                 local aggrutil="${ext_aggrutil:-N/A}"
-                local b_min="${fio_bw_min[${ext_ip}_${ext_mode}]:-N/A}"
-                local b_max="${fio_bw_max[${ext_ip}_${ext_mode}]:-N/A}"
+                local b_min="${ext_bw_min:-N/A}"
+                local b_max="${ext_bw_max:-N/A}"
 
                 printf "  %-15s %-9s %-9s %-6s %-9s %-9s %-8s %-8s %-7s %-13s %-13s %-6s %-6s %-6s\n" \
                     "$ext_ip" "$slat" "$clat" "$iodepth" "$cpu_usr" "$cpu_sys" "$b_min" "$b_max" "$ctx" "$aggrios" "$aggrticks" "$util" "$aggrutil" "$ext_mode" >> "$report_file"
