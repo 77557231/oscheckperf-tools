@@ -8,6 +8,23 @@
 #--------------------------------------------------------------------------------
 
 # ================================================================================
+# Utility Functions
+# ================================================================================
+
+# Note: get_cpu_cores() is defined in the main oscheckperf script and available
+#       in the same scope when this file is sourced
+
+calc_per_core() {
+    local value="$1"
+    local cores="$2"
+    if [ -n "$value" ] && [ "$value" != "0" ] && [ "$value" != "N/A" ] && [ -n "$cores" ] && [ "$cores" != "0" ] && [ "$cores" != "unknown" ] && [ "$cores" != "N/A" ]; then
+        awk "BEGIN {printf \"%.2f\", $value / $cores}" 2>/dev/null || echo "N/A"
+    else
+        echo "N/A"
+    fi
+}
+
+# ================================================================================
 # Pattern Configuration - Metric Extraction Rules
 # ================================================================================
 
@@ -85,6 +102,7 @@ report_cpu_metrics() {
     local output_file="$1"
     local server_ip="$(metrics_get 'SERVER_IP')"
     local eps="$(metrics_get 'EPS')"
+    local eps_core="$(metrics_get 'EPS_CORE')"
     local avg_lat="$(metrics_get 'AVG_LAT')"
     local p95_lat="$(metrics_get 'P95_LAT')"
     local max_lat="$(metrics_get 'MAX_LAT')"
@@ -92,9 +110,10 @@ report_cpu_metrics() {
     local sum_lat="$(metrics_get 'SUM_LAT')"
     local fairness="$(metrics_get 'FAIRNESS')"
 
-    printf "  %-18s %-12s %-12s %-12s %-12s %-12s %-14s %-10s\n" \
+    printf "  %-18s %-12s %-14s %-12s %-12s %-12s %-12s %-14s %-10s\n" \
         "$server_ip" \
         "${eps}" \
+        "${eps_core}" \
         "${avg_lat}" \
         "${p95_lat}" \
         "${max_lat}" \
@@ -133,6 +152,7 @@ report_threads_metrics() {
     local output_file="$1"
     local server_ip="$(metrics_get 'SERVER_IP')"
     local eps="$(metrics_get 'EPS')"
+    local eps_core="$(metrics_get 'EPS_CORE')"
     local avg_lat="$(metrics_get 'AVG_LAT')"
     local p95_lat="$(metrics_get 'P95_LAT')"
     local min_lat="$(metrics_get 'MIN_LAT')"
@@ -140,9 +160,10 @@ report_threads_metrics() {
     local sum_lat="$(metrics_get 'SUM_LAT')"
     local fairness="$(metrics_get 'FAIRNESS')"
 
-    printf "  %-18s %-12s %-12s %-12s %-14s %-14s %-16s %-14s\n" \
+    printf "  %-18s %-12s %-14s %-12s %-12s %-14s %-14s %-16s %-14s\n" \
         "$server_ip" \
         "${eps}" \
+        "${eps_core}" \
         "${avg_lat}" \
         "${p95_lat}" \
         "${min_lat}" \
@@ -156,16 +177,18 @@ report_mutex_metrics() {
     local server_ip="$(metrics_get 'SERVER_IP')"
     local events="$(metrics_get 'EVENTS')"
     local tps="$(metrics_get 'TPS')"
+    local tps_core="$(metrics_get 'TPS_CORE')"
     local avg_lat="$(metrics_get 'AVG_LAT')"
     local min_lat="$(metrics_get 'MIN_LAT')"
     local max_lat="$(metrics_get 'MAX_LAT')"
     local p95_lat="$(metrics_get 'P95_LAT')"
     local sum_lat="$(metrics_get 'SUM_LAT')"
 
-    printf "  %-18s %-12s %-12s %-12s %-12s %-12s %-14s %-12s\n" \
+    printf "  %-18s %-12s %-12s %-12s %-12s %-12s %-12s %-14s %-12s\n" \
         "$server_ip" \
         "${events}" \
         "${tps}" \
+        "${tps_core}" \
         "${avg_lat}" \
         "${min_lat}" \
         "${max_lat}" \
@@ -192,13 +215,14 @@ parse_cpu_report_new() {
     fi
 
     echo "  CPU Test Results" >> "$output_file"
-    echo "  ---------------------------------------------------------------------------------------------------------------" >> "$output_file"
-    printf "  %-18s %-12s %-12s %-12s %-12s %-12s %-14s %-10s\n" "Server IP" "Events/sec" "Avg Lat(ms)" "P95 Lat(ms)" "Max Lat(ms)" "Min Lat(ms)" "Sum Lat(ms)" "Fairness(avg)" >> "$output_file"
-    echo "  ---------------------------------------------------------------------------------------------------------------" >> "$output_file"
+    echo "  ------------------------------------------------------------------------------------------------------------------------" >> "$output_file"
+    printf "  %-18s %-12s %-14s %-12s %-12s %-12s %-12s %-14s %-10s\n" "Server IP" "Events/sec" "Events/sec/core" "Avg Lat(ms)" "P95 Lat(ms)" "Max Lat(ms)" "Min Lat(ms)" "Sum Lat(ms)" "Fairness(avg)" >> "$output_file"
+    echo "  ------------------------------------------------------------------------------------------------------------------------" >> "$output_file"
 
     metrics_init "CPU"
 
     local in_section=false
+    local cpu_cores=$(get_cpu_cores)
     while IFS= read -r line; do
         if [[ "$line" =~ "CPU TEST RESULTS" ]]; then
             if [ "$in_section" = true ] && metrics_has_data "CPU"; then
@@ -216,7 +240,9 @@ parse_cpu_report_new() {
             metrics_reset "CPU"
         elif [ "$in_section" = true ]; then
             if [[ "$line" =~ "events per second:" ]]; then
-                metrics_set "EPS" "$(echo "$line" | awk '{print $NF}')"
+                local raw_eps="$(echo "$line" | awk '{print $NF}')"
+                metrics_set "EPS" "$raw_eps"
+                metrics_set "EPS_CORE" "$(calc_per_core "$raw_eps" "$cpu_cores")"
             elif [[ "$line" =~ "avg:" ]] && [[ "$line" =~ [0-9] ]] && [[ ! "$line" =~ "events \(avg/stddev\):" ]] && [[ ! "$line" =~ "execution time" ]]; then
                 metrics_set "AVG_LAT" "$(echo "$line" | awk '{print $NF}')"
             elif [[ "$line" =~ "95th percentile:" ]]; then
@@ -338,13 +364,14 @@ parse_threads_report_new() {
     fi
 
     echo "  Threads Test Results" >> "$output_file"
-    echo "  ----------------------------------------------------------------------------------------------------------------------" >> "$output_file"
-    printf "  %-18s %-12s %-12s %-12s %-14s %-14s %-16s %-14s\n" "Server IP" "Events/sec" "Avg Lat(ms)" "P95 Lat(ms)" "Min Lat(ms)" "Max Lat(ms)" "Sum Lat(ms)" "Fairness(avg)" >> "$output_file"
-    echo "  ----------------------------------------------------------------------------------------------------------------------" >> "$output_file"
+    echo "  ------------------------------------------------------------------------------------------------------------------------------" >> "$output_file"
+    printf "  %-18s %-12s %-14s %-12s %-12s %-14s %-14s %-16s %-14s\n" "Server IP" "Events/sec" "Events/sec/core" "Avg Lat(ms)" "P95 Lat(ms)" "Min Lat(ms)" "Max Lat(ms)" "Sum Lat(ms)" "Fairness(avg)" >> "$output_file"
+    echo "  ------------------------------------------------------------------------------------------------------------------------------" >> "$output_file"
 
     metrics_init "THREADS"
 
     local in_section=false
+    local cpu_cores=$(get_cpu_cores)
     local current_events=""
     local current_time=""
     local last_testing_ip=""
@@ -354,6 +381,7 @@ parse_threads_report_new() {
             if [ "$in_section" = true ] && metrics_has_data "THREADS"; then
                 local eps=$(calc_eps "$current_events" "$current_time")
                 metrics_set "EPS" "$eps"
+                metrics_set "EPS_CORE" "$(calc_per_core "$eps" "$cpu_cores")"
                 metrics_flush "THREADS" "$output_file"
             fi
             in_section=true
@@ -367,6 +395,7 @@ parse_threads_report_new() {
             if [ "$in_section" = true ] && metrics_has_data "THREADS"; then
                 local eps=$(calc_eps "$current_events" "$current_time")
                 metrics_set "EPS" "$eps"
+                metrics_set "EPS_CORE" "$(calc_per_core "$eps" "$cpu_cores")"
                 metrics_flush "THREADS" "$output_file"
             fi
             in_section=false
@@ -384,6 +413,7 @@ parse_threads_report_new() {
             if metrics_has_data "THREADS"; then
                 local eps=$(calc_eps "$current_events" "$current_time")
                 metrics_set "EPS" "$eps"
+                metrics_set "EPS_CORE" "$(calc_per_core "$eps" "$cpu_cores")"
                 metrics_flush "THREADS" "$output_file"
             fi
             in_section=false
@@ -412,6 +442,7 @@ parse_threads_report_new() {
     if [ "$in_section" = true ] && metrics_has_data "THREADS"; then
         local eps=$(calc_eps "$current_events" "$current_time")
         metrics_set "EPS" "$eps"
+        metrics_set "EPS_CORE" "$(calc_per_core "$eps" "$cpu_cores")"
         metrics_flush "THREADS" "$output_file"
     fi
 }
@@ -435,13 +466,14 @@ parse_mutex_report_new() {
     fi
 
     echo "  Mutex Test Results" >> "$output_file"
-    echo "  ------------------------------------------------------------------------------------------------------------" >> "$output_file"
-    printf "  %-18s %-12s %-12s %-12s %-12s %-12s %-14s %-12s\n" "Server IP" "Transactions" "TPS" "Avg Lat(ms)" "Min Lat(ms)" "Max Lat(ms)" "P95 Lat(ms)" "Sum Lat(ms)" >> "$output_file"
-    echo "  ------------------------------------------------------------------------------------------------------------" >> "$output_file"
+    echo "  --------------------------------------------------------------------------------------------------------------------" >> "$output_file"
+    printf "  %-18s %-12s %-12s %-12s %-12s %-12s %-12s %-14s %-12s\n" "Server IP" "Transactions" "TPS" "TPS/core" "Avg Lat(ms)" "Min Lat(ms)" "Max Lat(ms)" "P95 Lat(ms)" "Sum Lat(ms)" >> "$output_file"
+    echo "  --------------------------------------------------------------------------------------------------------------------" >> "$output_file"
 
     metrics_init "MUTEX"
 
     local in_section=false
+    local cpu_cores=$(get_cpu_cores)
     local current_events=""
     local current_time=""
     local last_testing_ip=""
@@ -453,6 +485,7 @@ parse_mutex_report_new() {
                 local tps=$(calc_eps "$current_events" "$current_time")
                 metrics_set "EVENTS" "${current_events:-N/A}"
                 metrics_set "TPS" "$tps"
+                metrics_set "TPS_CORE" "$(calc_per_core "$tps" "$cpu_cores")"
                 metrics_flush "MUTEX" "$output_file"
             fi
             in_section=false
@@ -462,6 +495,7 @@ parse_mutex_report_new() {
                 local tps=$(calc_eps "$current_events" "$current_time")
                 metrics_set "EVENTS" "${current_events:-N/A}"
                 metrics_set "TPS" "$tps"
+                metrics_set "TPS_CORE" "$(calc_per_core "$tps" "$cpu_cores")"
                 metrics_flush "MUTEX" "$output_file"
             fi
             in_section=false
@@ -473,6 +507,7 @@ parse_mutex_report_new() {
                 local tps=$(calc_eps "$current_events" "$current_time")
                 metrics_set "EVENTS" "${current_events:-N/A}"
                 metrics_set "TPS" "$tps"
+                metrics_set "TPS_CORE" "$(calc_per_core "$tps" "$cpu_cores")"
                 metrics_flush "MUTEX" "$output_file"
             fi
             in_section=true
@@ -493,6 +528,7 @@ parse_mutex_report_new() {
                 local tps=$(calc_eps "$current_events" "$current_time")
                 metrics_set "EVENTS" "${current_events:-N/A}"
                 metrics_set "TPS" "$tps"
+                metrics_set "TPS_CORE" "$(calc_per_core "$tps" "$cpu_cores")"
                 metrics_flush "MUTEX" "$output_file"
             fi
             in_section=false
@@ -522,6 +558,7 @@ parse_mutex_report_new() {
         local tps=$(calc_eps "$current_events" "$current_time")
         metrics_set "EVENTS" "${current_events:-N/A}"
         metrics_set "TPS" "$tps"
+        metrics_set "TPS_CORE" "$(calc_per_core "$tps" "$cpu_cores")"
         metrics_flush "MUTEX" "$output_file"
     fi
 }
