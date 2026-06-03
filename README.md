@@ -263,7 +263,7 @@ cat output/original_data_*_all_results.log
 | `FIO_IODEPTH`  | `128 128 32 32`                 | fio I/O 深度，支持多值配置（与FIO_PROFILES一一对应）；单值时应用于所有profile（参考阿里云块存储测试规范） |
 | `FIO_NUMJOBS`  | `1 1 4 4`                       | fio 工作线程数，支持多值配置（与FIO_PROFILES一一对应）；单值时应用于所有profile；设置为0时自动使用CPU核心数 |
 | `FIO_DIRECT`   | `1`                             | fio 直接 I/O 模式                                                                  |
-| `FIO_FILE_NUM` | `4`                             | fio 测试文件数量（模拟多数据文件场景）                                                          |
+| `FIO_NRFILES` | `1`                             | fio 测试文件数量（模拟多数据文件场景）                                                          |
 | `FIO_IOENGINE` | `libaio`                        | fio IO 引擎（libaio/sync/posixaio）                                                |
 | `FIO_DURATION` | `DURATION`                      | fio 测试时长                                                                       |
 
@@ -453,11 +453,14 @@ cat output/original_data_*_all_results.log
 #### fio 文件大小
 
 ```
-每个文件大小 = IO_TOTAL_SIZE / (FIO_FILE_NUM * FIO_NUMJOBS)
-总计 = 每个文件大小 × FIO_FILE_NUM × FIO_NUMJOBS = IO_TOTAL_SIZE
+每个 job 的大小 = IO_TOTAL_SIZE / FIO_NUMJOBS
+文件大小 = 每个 job 的大小（所有 job 共享同一文件）
+总计 = 文件大小 × FIO_NUMJOBS = IO_TOTAL_SIZE
 ```
 
-例如：`IO_TOTAL_SIZE=1G`，`FIO_FILE_NUM=4`，`FIO_NUMJOBS=4` → 每个文件 64M
+例如：`IO_TOTAL_SIZE=1G`，`FIO_NUMJOBS=4` → 文件大小 256M，总写入量 1G
+
+> **说明**：`FIO_NRFILES`（对应 fio 的 `nrfiles`）在当前配置下不影响文件大小计算，因为所有 job 共享同一个测试文件。
 
 ### Q6: IO\_TOTAL\_SIZE 和 DURATION 的关系？RAID 缓存有影响吗？
 

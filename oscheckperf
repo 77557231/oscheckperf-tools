@@ -1,7 +1,7 @@
 #!/bin/bash
 #--------------------------------------------------------------------------------
 #-- File name:   oscheckperf
-#-- Version:     v1.2.1
+#-- Version:     v1.2.2
 #-- Purpose:     Database System Benchmark Tool
 #-- Author:      Wanping Pan 
 #-- Description: One-click system benchmarking tool, supports configuration via config file or command line parameters
@@ -493,7 +493,7 @@ parse_args() {
                 exit 0
                 ;;
             --version)
-                echo "Version: 1.2.1"
+                echo "Version: 1.2.2"
                 exit 0
                 ;;
             --dry-run)
@@ -749,7 +749,7 @@ show_help() {
     echo "    FIO_NUMJOBS=<nums>          Number of jobs(s), space-separated (default: 1 1 4 4)"
     echo "                                Multiple values map to FIO_PROFILES by index, single value applies to all"
     echo "    FIO_DIRECT=0|1              Direct I/O mode (default: 1, bypass OS cache)"
-    echo "    FIO_FILE_NUM=<num>          Number of test files (default: 4, simulates multi-datafile scenario)"
+    echo "    FIO_NRFILES=<num>           Number of test files (default: 1, simulates multi-datafile scenario)"
     echo "    FIO_IOENGINE=<engine>       I/O engine: libaio, sync, posixaio (default: libaio)"
     echo ""
     echo "Network test parameters:"
@@ -2109,13 +2109,13 @@ run_fio_test() {
         local rw_type="${profile}"
         local direct="$FIO_DIRECT"
         local ioengine="$FIO_IOENGINE"
-        local file_num="$FIO_FILE_NUM"
+        local file_num="$FIO_NRFILES"
         local total_size="$IO_TOTAL_SIZE"
         
-        # Calculate file size per file: total_size / (file_num * numjobs)
-        # Important: fio size is per job, each job can write multiple files
-        # e.g., IO_TOTAL_SIZE=1G, FIO_FILE_NUM=4, FIO_NUMJOBS=4 → each file is 64M
-        # Total = 64M * 4 files * 4 jobs = 1G (expected)
+        # Calculate size per job: total_size / numjobs
+        # Important: fio size is per job, all jobs share the same file
+        # e.g., IO_TOTAL_SIZE=1G, FIO_NRFILES=4, FIO_NUMJOBS=4 → size per job = 256M
+        # Total = 256M * 4 jobs = 1G (expected)
         local per_file_size="auto"
         local size_value=$(echo "$total_size" | sed -E 's/([0-9]+)([GMK])/\1/')
         local size_unit=$(echo "$total_size" | sed -E 's/([0-9]+)([GMK])/\2/')
@@ -2127,10 +2127,7 @@ run_fio_test() {
                 M) size_in_mb=$size_value ;;
                 K) size_in_mb=$((size_value / 1024)) ;;
             esac
-            local per_size=$((size_in_mb / file_num))
-            if [ "$numjobs" -gt 1 ]; then
-                per_size=$((per_size / numjobs))
-            fi
+            local per_size=$((size_in_mb / numjobs))
             per_file_size="${per_size}M"
         else
             per_file_size="${total_size}"
@@ -4520,7 +4517,7 @@ generate_report() {
         fi
         printf -- "%-28s %-20s %-25s\n" "Num Jobs" "FIO_NUMJOBS" "$fio_numjobs_val" >> "$report_file"
         printf -- "%-28s %-20s %-25s\n" "Direct IO" "FIO_DIRECT" "$FIO_DIRECT" >> "$report_file"
-        printf -- "%-28s %-20s %-25s\n" "File Num" "FIO_FILE_NUM" "$FIO_FILE_NUM" >> "$report_file"
+        printf -- "%-28s %-20s %-25s\n" "File Num" "FIO_NRFILES" "$FIO_NRFILES" >> "$report_file"
         printf -- "%-28s %-20s %-25s\n" "IO Engine" "FIO_IOENGINE" "$FIO_IOENGINE" >> "$report_file"
     else
         printf -- "%-28s %-20s %-25s\n" "Test Profiles" "SYSBENCH_PROFILES" "$SYSBENCH_PROFILES" >> "$report_file"
@@ -4539,7 +4536,7 @@ generate_report() {
     # Add per file size calculation for fio
     if [ "$IO_TOOL" = "fio" ]; then
         local fio_total_size="$IO_TOTAL_SIZE"
-        local fio_file_num="$FIO_FILE_NUM"
+        local fio_file_num="$FIO_NRFILES"
         local fio_numjobs="$FIO_NUMJOBS"
         local fio_size_value=$(echo "$fio_total_size" | sed -E 's/([0-9]+)([GMK])/\1/')
         local fio_size_unit=$(echo "$fio_total_size" | sed -E 's/([0-9]+)([GMK])/\2/')
@@ -4551,10 +4548,7 @@ generate_report() {
                 M) fio_size_in_mb=$fio_size_value ;;
                 K) fio_size_in_mb=$((fio_size_value / 1024)) ;;
             esac
-            local fio_per_size=$((fio_size_in_mb / fio_file_num))
-            if [ "$fio_numjobs" -gt 1 ]; then
-                fio_per_size=$((fio_per_size / fio_numjobs))
-            fi
+            local fio_per_size=$((fio_size_in_mb / (fio_file_num * fio_numjobs)))
             fio_per_file_size="${fio_per_size}M"
         else
             fio_per_file_size="${fio_total_size}"
@@ -4949,7 +4943,7 @@ main() {
     FIO_BS="${FIO_BS:-128K 128K 4K 4K}"
     FIO_DIRECT="${FIO_DIRECT:-1}"
     FIO_IOENGINE="${FIO_IOENGINE:-libaio}"
-    FIO_FILE_NUM="${FIO_FILE_NUM:-4}"
+    FIO_NRFILES="${FIO_NRFILES:-1}"
 
     # Network test default values
     NETWORK_TOOL="${NETWORK_TOOL:-iperf3}"
@@ -5338,7 +5332,7 @@ main() {
                                     remote_test_command="$remote_test_command FIO_NUMJOBS=\"$FIO_NUMJOBS\""
                                     remote_test_command="$remote_test_command FIO_DIRECT=\"$FIO_DIRECT\""
                                     remote_test_command="$remote_test_command FIO_IOENGINE=\"$FIO_IOENGINE\""
-                                    remote_test_command="$remote_test_command FIO_FILE_NUM=\"$FIO_FILE_NUM\""
+                                    remote_test_command="$remote_test_command FIO_NRFILES=\"$FIO_NRFILES\""
                                 else
                                     remote_test_command="$remote_test_command SYSBENCH_PROFILES=\"$SYSBENCH_PROFILES\""
                                     remote_test_command="$remote_test_command SYSBENCH_IO_MODE=\"$SYSBENCH_IO_MODE\""
@@ -6556,10 +6550,10 @@ validate_all_parameters() {
         done
     fi
     
-    # Validate FIO_FILE_NUM (must be a positive integer)
-    if [ -n "$FIO_FILE_NUM" ]; then
-        if [[ ! "$FIO_FILE_NUM" =~ ^[0-9]+$ ]]; then
-            output="${output}ERROR: Invalid FIO_FILE_NUM: $FIO_FILE_NUM\n"
+    # Validate FIO_NRFILES (must be a positive integer)
+    if [ -n "$FIO_NRFILES" ]; then
+        if [[ ! "$FIO_NRFILES" =~ ^[0-9]+$ ]]; then
+            output="${output}ERROR: Invalid FIO_NRFILES: $FIO_NRFILES\n"
             output="${output}  Must be a positive integer (e.g., 4). Use IO_TOTAL_SIZE for size specification.\n"
             error_count=$((error_count + 1))
         fi
