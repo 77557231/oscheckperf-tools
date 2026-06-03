@@ -259,13 +259,18 @@ cat output/original_data_*_all_results.log
 | 参数             | 默认值                             | 说明                                                                             |
 | -------------- | ------------------------------- | ------------------------------------------------------------------------------ |
 | `FIO_PROFILES` | `read write randread randwrite` | fio 测试模式，空格分隔（read/write/randread/randwrite/rw/randrw/trim/randtrim/trimwrite） |
-| `FIO_BS`       | `8K`                            | fio 块大小（适合8K页数据库场景）                                                            |
-| `FIO_IODEPTH`  | `64`                            | fio I/O 深度                                                                     |
-| `FIO_NUMJOBS`  | `4`                             | fio 工作线程数（设置为0时自动使用CPU核心数）                                                     |
+| `FIO_BS`       | `128K 128K 4K 4K`               | fio 块大小，支持多值配置（与FIO_PROFILES一一对应）；单值时应用于所有profile（参考阿里云块存储测试规范） |
+| `FIO_IODEPTH`  | `128 128 32 32`                 | fio I/O 深度，支持多值配置（与FIO_PROFILES一一对应）；单值时应用于所有profile（参考阿里云块存储测试规范） |
+| `FIO_NUMJOBS`  | `1 1 4 4`                       | fio 工作线程数，支持多值配置（与FIO_PROFILES一一对应）；单值时应用于所有profile；设置为0时自动使用CPU核心数 |
 | `FIO_DIRECT`   | `1`                             | fio 直接 I/O 模式                                                                  |
 | `FIO_FILE_NUM` | `4`                             | fio 测试文件数量（模拟多数据文件场景）                                                          |
 | `FIO_IOENGINE` | `libaio`                        | fio IO 引擎（libaio/sync/posixaio）                                                |
 | `FIO_DURATION` | `DURATION`                      | fio 测试时长                                                                       |
+
+**多值参数映射说明**：`FIO_BS`、`FIO_IODEPTH`、`FIO_NUMJOBS` 支持空格分隔的多值配置，按索引与 `FIO_PROFILES` 一一对应。例如默认配置：
+- `FIO_PROFILES="read write randread randwrite"`
+- `FIO_BS="128K 128K 4K 4K"` → read用128K，write用128K，randread用4K，randwrite用4K
+- 如果参数值数量少于profile数量，不足部分使用第一个值
 
 #### Threads 参数
 
@@ -357,6 +362,24 @@ cat output/original_data_*_all_results.log
 
 # PostgreSQL 场景（高吞吐量）
 ./oscheckperf io IO_TOOL=fio FIO_PROFILES="randrw" FIO_BS=16K FIO_NUMJOBS=16
+```
+
+### 阿里云云盘性能对标测试
+
+```bash
+# 使用默认配置一键压测四个核心指标（参考阿里云官方测试规范）
+# read/write: bs=128K, iodepth=128, numjobs=1（测试吞吐量）
+# randread/randwrite: bs=4K, iodepth=32, numjobs=4（测试IOPS）
+./oscheckperf io IO_TOOL=fio
+
+# 自定义测试参数（保持原有逻辑，单值应用于所有profile）
+./oscheckperf io IO_TOOL=fio FIO_PROFILES="randread randwrite" FIO_BS=8K
+
+# 自定义多值参数（与profile一一对应）
+./oscheckperf io IO_TOOL=fio FIO_PROFILES="randread read" FIO_BS="4K 256K" FIO_IODEPTH="64 256"
+
+# 混合使用（部分参数多值，部分参数单值）
+./oscheckperf io IO_TOOL=fio FIO_PROFILES="randread read" FIO_BS="4K 128K" FIO_NUMJOBS=8
 ```
 
 ### 多服务器网络测试

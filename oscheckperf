@@ -1,7 +1,7 @@
 #!/bin/bash
 #--------------------------------------------------------------------------------
 #-- File name:   oscheckperf
-#-- Version:     v1.2.0
+#-- Version:     v1.2.1
 #-- Purpose:     Database System Benchmark Tool
 #-- Author:      Wanping Pan 
 #-- Description: One-click system benchmarking tool, supports configuration via config file or command line parameters
@@ -493,7 +493,7 @@ parse_args() {
                 exit 0
                 ;;
             --version)
-                echo "Version: 1.2.0"
+                echo "Version: 1.2.1"
                 exit 0
                 ;;
             --dry-run)
@@ -742,9 +742,12 @@ show_help() {
     echo "    FIO_DURATION=<seconds>      fio test duration (default: same as DURATION)"
     echo "    FIO_PROFILES=<profiles>     fio test profiles, space-separated (default: read write randread randwrite)"
     echo "                                Available modes: read, write, randread, randwrite, rw, randrw, trim, randtrim, trimwrite"
-    echo "    FIO_BS=<size>              Block size for all profiles (default: 8K)"
-    echo "    FIO_IODEPTH=<num>           I/O depth for all profiles (default: 64)"
-    echo "    FIO_NUMJOBS=<num>           Number of jobs for all profiles (default: 4)"
+    echo "    FIO_BS=<sizes>              Block size(s), space-separated (default: 128K 128K 4K 4K)"
+    echo "                                Multiple values map to FIO_PROFILES by index, single value applies to all"
+    echo "    FIO_IODEPTH=<nums>          I/O depth(s), space-separated (default: 128 128 32 32)"
+    echo "                                Multiple values map to FIO_PROFILES by index, single value applies to all"
+    echo "    FIO_NUMJOBS=<nums>          Number of jobs(s), space-separated (default: 1 1 4 4)"
+    echo "                                Multiple values map to FIO_PROFILES by index, single value applies to all"
     echo "    FIO_DIRECT=0|1              Direct I/O mode (default: 1, bypass OS cache)"
     echo "    FIO_FILE_NUM=<num>          Number of test files (default: 4, simulates multi-datafile scenario)"
     echo "    FIO_IOENGINE=<engine>       I/O engine: libaio, sync, posixaio (default: libaio)"
@@ -2079,23 +2082,31 @@ run_fio_test() {
         return 1
     fi
     
-    # Calculate FIO_NUMJOBS if set to 0 (use CPU core count)
-    local numjobs="$FIO_NUMJOBS"
-    if [ "$numjobs" = "0" ]; then
-        numjobs=$(get_cpu_cores)
-    fi
+    # Convert space-separated parameters to arrays for profile-specific configuration
+    IFS=' ' read -r -a profiles_array <<< "$FIO_PROFILES"
+    IFS=' ' read -r -a bs_array <<< "$FIO_BS"
+    IFS=' ' read -r -a iodepth_array <<< "$FIO_IODEPTH"
+    IFS=' ' read -r -a numjobs_array <<< "$FIO_NUMJOBS"
     
     # Iterate through all profiles
-    local profiles="$FIO_PROFILES"
-    
-    for profile in $profiles; do
-        echo "  Executing profile: $profile"
+    for index in "${!profiles_array[@]}"; do
+        local profile="${profiles_array[$index]}"
+        
+        # Get parameter value for current profile index, fallback to first value if not available
+        local bs="${bs_array[$index]:-${bs_array[0]}}"
+        local iodepth="${iodepth_array[$index]:-${iodepth_array[0]}}"
+        local numjobs="${numjobs_array[$index]:-${numjobs_array[0]}}"
+        
+        # Calculate FIO_NUMJOBS if set to 0 (use CPU core count)
+        if [ "$numjobs" = "0" ]; then
+            numjobs=$(get_cpu_cores)
+        fi
+        
+        echo "  Executing profile: $profile (bs=$bs, iodepth=$iodepth, numjobs=$numjobs)"
         
         # Generate fio configuration
         local fio_conf="$TMP_DIR/fio_${profile}.fio"
         local rw_type="${profile}"
-        local bs="$FIO_BS"
-        local iodepth="$FIO_IODEPTH"
         local direct="$FIO_DIRECT"
         local ioengine="$FIO_IOENGINE"
         local file_num="$FIO_FILE_NUM"
@@ -4914,8 +4925,8 @@ main() {
     NETWORK_PARALLEL="${NETWORK_PARALLEL:-4}"
     SYSBENCH_PROFILES="${SYSBENCH_PROFILES:-seqrd seqwr rndrd rndwr}"
     FIO_PROFILES="${FIO_PROFILES:-read write randread randwrite}"
-    FIO_IODEPTH="${FIO_IODEPTH:-64}"
-    FIO_NUMJOBS="${FIO_NUMJOBS:-4}"
+    FIO_IODEPTH="${FIO_IODEPTH:-128 128 32 32}"
+    FIO_NUMJOBS="${FIO_NUMJOBS:-1 1 4 4}"
     SYSBENCH_THREADS="${SYSBENCH_THREADS:-4}"
     MEMORY_TOTAL_SIZE="${MEMORY_TOTAL_SIZE:-0}"
 
@@ -4935,7 +4946,7 @@ main() {
     SYSBENCH_EXTRA_FLAGS="${SYSBENCH_EXTRA_FLAGS:-direct}"
 
     # FIO IO default values
-    FIO_BS="${FIO_BS:-8K}"
+    FIO_BS="${FIO_BS:-128K 128K 4K 4K}"
     FIO_DIRECT="${FIO_DIRECT:-1}"
     FIO_IOENGINE="${FIO_IOENGINE:-libaio}"
     FIO_FILE_NUM="${FIO_FILE_NUM:-4}"
@@ -6508,8 +6519,8 @@ validate_all_parameters() {
 
     # Validate numeric parameters
     for num_param in "DURATION" "CPU_THREADS" "CPU_MAX_PRIME" "MEMORY_THREADS" \
-        "SYSBENCH_FILE_NUM" "SYSBENCH_DURATION" "FIO_DURATION" "FIO_IODEPTH" \
-        "FIO_NUMJOBS" "THREADS_NUM" "THREADS_YIELDS" "THREADS_LOCKS" \
+        "SYSBENCH_FILE_NUM" "SYSBENCH_DURATION" "FIO_DURATION" \
+        "THREADS_NUM" "THREADS_YIELDS" "THREADS_LOCKS" \
         "MUTEX_THREADS" "MUTEX_NUM" "NETWORK_PARALLEL"; do
         local param_val=$(eval echo \${$num_param:-})
         if [ -n "$param_val" ]; then
@@ -6520,6 +6531,39 @@ validate_all_parameters() {
             fi
         fi
     done
+    
+    # Validate FIO_IODEPTH (supports space-separated multiple values)
+    if [ -n "$FIO_IODEPTH" ]; then
+        for val in $FIO_IODEPTH; do
+            if [[ ! "$val" =~ ^[0-9]+$ ]]; then
+                output="${output}ERROR: Invalid FIO_IODEPTH: $FIO_IODEPTH\n"
+                output="${output}  Each value must be a positive integer\n"
+                error_count=$((error_count + 1))
+                break
+            fi
+        done
+    fi
+    
+    # Validate FIO_NUMJOBS (supports space-separated multiple values)
+    if [ -n "$FIO_NUMJOBS" ]; then
+        for val in $FIO_NUMJOBS; do
+            if [[ ! "$val" =~ ^[0-9]+$ ]]; then
+                output="${output}ERROR: Invalid FIO_NUMJOBS: $FIO_NUMJOBS\n"
+                output="${output}  Each value must be a positive integer\n"
+                error_count=$((error_count + 1))
+                break
+            fi
+        done
+    fi
+    
+    # Validate FIO_FILE_NUM (must be a positive integer)
+    if [ -n "$FIO_FILE_NUM" ]; then
+        if [[ ! "$FIO_FILE_NUM" =~ ^[0-9]+$ ]]; then
+            output="${output}ERROR: Invalid FIO_FILE_NUM: $FIO_FILE_NUM\n"
+            output="${output}  Must be a positive integer (e.g., 4). Use IO_TOTAL_SIZE for size specification.\n"
+            error_count=$((error_count + 1))
+        fi
+    fi
 
     # Output results
     if [ "$error_count" -gt 0 ]; then
