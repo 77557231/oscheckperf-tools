@@ -634,6 +634,10 @@ parse_io_report_new() {
             if(match($0, /min=([0-9]+)/, m)) {if(is_read) r_bw_min=sprintf("%.2f", m[1]/1024); else w_bw_min=sprintf("%.2f", m[1]/1024)}
             if(match($0, /max=([0-9]+)/, m)) {if(is_read) r_bw_max=sprintf("%.2f", m[1]/1024); else w_bw_max=sprintf("%.2f", m[1]/1024)}
         }
+        in_fio && !ext_started && /bw \(.*GiB\/s\)/ {
+            if(match($0, /min=[[:space:]]*([0-9.]+)/, m)) {if(is_read) r_bw_min=sprintf("%.2f", m[1]*1024); else w_bw_min=sprintf("%.2f", m[1]*1024)}
+            if(match($0, /max=[[:space:]]*([0-9.]+)/, m)) {if(is_read) r_bw_max=sprintf("%.2f", m[1]*1024); else w_bw_max=sprintf("%.2f", m[1]*1024)}
+        }
         in_fio && !ext_started && /IO depths/ {
             split($0, depths, ",");
             max_depth="<=8"; max_pct=0;
@@ -817,9 +821,10 @@ parse_io_report_new() {
             elif [ "$current_tool" = "fio" ]; then
                 if echo "$line" | grep -q -i "read:"; then
                     local iops_part=$(echo "$line" | grep -o "IOPS=[0-9.]*[kM]*")
-                    local bw_part=$(echo "$line" | grep -o "BW=[0-9.]*MiB/s")
+                    local bw_part=$(echo "$line" | grep -o "BW=[0-9.]*[GMiK]iB/s")
                     local bw_range_mib=$(echo "$line" | grep -o "[0-9.]*MiB/s-[0-9.]*MiB/s")
                     local bw_range_kib=$(echo "$line" | grep -o "[0-9.]*KiB/s-[0-9.]*KiB/s")
+                    local bw_range_gib=$(echo "$line" | grep -o "[0-9.]*GiB/s-[0-9.]*GiB/s")
                     if [ -n "$iops_part" ]; then
                         local iops_value=$(echo "$iops_part" | sed 's/IOPS=//')
                         if echo "$iops_value" | grep -q "k"; then
@@ -831,24 +836,39 @@ parse_io_report_new() {
                         fi
                     fi
                     if [ -n "$bw_part" ]; then
-                        current_read_bw=$(echo "$bw_part" | sed 's/BW=//' | sed 's/MiB\/s//')
+                        local bw_value=$(echo "$bw_part" | sed 's/BW=//')
+                        if echo "$bw_value" | grep -q "GiB/s"; then
+                            current_read_bw=$(echo "$bw_value" | sed 's/GiB\/s//' | awk '{printf "%.2f", $1 * 1024}')
+                        elif echo "$bw_value" | grep -q "KiB/s"; then
+                            current_read_bw=$(echo "$bw_value" | sed 's/KiB\/s//' | awk '{printf "%.2f", $1 / 1024}')
+                        else
+                            current_read_bw=$(echo "$bw_value" | sed 's/MiB\/s//')
+                        fi
                     fi
                     local bw_range=""
                     if [ -n "$bw_range_mib" ]; then
                         bw_range="$bw_range_mib"
                     elif [ -n "$bw_range_kib" ]; then
                         bw_range="$bw_range_kib"
+                    elif [ -n "$bw_range_gib" ]; then
+                        bw_range="$bw_range_gib"
                     fi
                     if [ -n "$bw_range" ]; then
                         local is_kib=false
+                        local is_gib=false
                         if echo "$bw_range" | grep -q "KiB/s"; then
                             is_kib=true
+                        elif echo "$bw_range" | grep -q "GiB/s"; then
+                            is_gib=true
                         fi
-                        local b_min=$(echo "$bw_range" | awk -F'-' '{print $1}' | sed 's/MiB\/s//' | sed 's/KiB\/s//')
-                        local b_max=$(echo "$bw_range" | awk -F'-' '{print $2}' | sed 's/MiB\/s//' | sed 's/KiB\/s//')
+                        local b_min=$(echo "$bw_range" | awk -F'-' '{print $1}' | sed 's/MiB\/s//' | sed 's/KiB\/s//' | sed 's/GiB\/s//')
+                        local b_max=$(echo "$bw_range" | awk -F'-' '{print $2}' | sed 's/MiB\/s//' | sed 's/KiB\/s//' | sed 's/GiB\/s//')
                         if [ "$is_kib" = true ]; then
                             b_min=$(awk "BEGIN {printf \"%.2f\", $b_min / 1024}")
                             b_max=$(awk "BEGIN {printf \"%.2f\", $b_max / 1024}")
+                        elif [ "$is_gib" = true ]; then
+                            b_min=$(awk "BEGIN {printf \"%.2f\", $b_min * 1024}")
+                            b_max=$(awk "BEGIN {printf \"%.2f\", $b_max * 1024}")
                         fi
                         local key="${current_server_ip}_${current_io_mode}"
                         if [ "$current_io_mode" = "randrw" ]; then
@@ -859,9 +879,10 @@ parse_io_report_new() {
                     fi
                 elif echo "$line" | grep -q -i "write:"; then
                     local iops_part=$(echo "$line" | grep -o "IOPS=[0-9.]*[kM]*")
-                    local bw_part=$(echo "$line" | grep -o "BW=[0-9.]*MiB/s")
+                    local bw_part=$(echo "$line" | grep -o "BW=[0-9.]*[GMiK]iB/s")
                     local bw_range_mib=$(echo "$line" | grep -o "[0-9.]*MiB/s-[0-9.]*MiB/s")
                     local bw_range_kib=$(echo "$line" | grep -o "[0-9.]*KiB/s-[0-9.]*KiB/s")
+                    local bw_range_gib=$(echo "$line" | grep -o "[0-9.]*GiB/s-[0-9.]*GiB/s")
                     if [ -n "$iops_part" ]; then
                         local iops_value=$(echo "$iops_part" | sed 's/IOPS=//')
                         if echo "$iops_value" | grep -q "k"; then
@@ -873,24 +894,39 @@ parse_io_report_new() {
                         fi
                     fi
                     if [ -n "$bw_part" ]; then
-                        current_write_bw=$(echo "$bw_part" | sed 's/BW=//' | sed 's/MiB\/s//')
+                        local bw_value=$(echo "$bw_part" | sed 's/BW=//')
+                        if echo "$bw_value" | grep -q "GiB/s"; then
+                            current_write_bw=$(echo "$bw_value" | sed 's/GiB\/s//' | awk '{printf "%.2f", $1 * 1024}')
+                        elif echo "$bw_value" | grep -q "KiB/s"; then
+                            current_write_bw=$(echo "$bw_value" | sed 's/KiB\/s//' | awk '{printf "%.2f", $1 / 1024}')
+                        else
+                            current_write_bw=$(echo "$bw_value" | sed 's/MiB\/s//')
+                        fi
                     fi
                     local bw_range=""
                     if [ -n "$bw_range_mib" ]; then
                         bw_range="$bw_range_mib"
                     elif [ -n "$bw_range_kib" ]; then
                         bw_range="$bw_range_kib"
+                    elif [ -n "$bw_range_gib" ]; then
+                        bw_range="$bw_range_gib"
                     fi
                     if [ -n "$bw_range" ]; then
                         local is_kib=false
+                        local is_gib=false
                         if echo "$bw_range" | grep -q "KiB/s"; then
                             is_kib=true
+                        elif echo "$bw_range" | grep -q "GiB/s"; then
+                            is_gib=true
                         fi
-                        local b_min=$(echo "$bw_range" | awk -F'-' '{print $1}' | sed 's/MiB\/s//' | sed 's/KiB\/s//')
-                        local b_max=$(echo "$bw_range" | awk -F'-' '{print $2}' | sed 's/MiB\/s//' | sed 's/KiB\/s//')
+                        local b_min=$(echo "$bw_range" | awk -F'-' '{print $1}' | sed 's/MiB\/s//' | sed 's/KiB\/s//' | sed 's/GiB\/s//')
+                        local b_max=$(echo "$bw_range" | awk -F'-' '{print $2}' | sed 's/MiB\/s//' | sed 's/KiB\/s//' | sed 's/GiB\/s//')
                         if [ "$is_kib" = true ]; then
                             b_min=$(awk "BEGIN {printf \"%.2f\", $b_min / 1024}")
                             b_max=$(awk "BEGIN {printf \"%.2f\", $b_max / 1024}")
+                        elif [ "$is_gib" = true ]; then
+                            b_min=$(awk "BEGIN {printf \"%.2f\", $b_min * 1024}")
+                            b_max=$(awk "BEGIN {printf \"%.2f\", $b_max * 1024}")
                         fi
                         local key="${current_server_ip}_${current_io_mode}"
                         if [ "$current_io_mode" = "randrw" ]; then

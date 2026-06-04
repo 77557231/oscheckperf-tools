@@ -408,6 +408,24 @@ get_memory_slots_detail() {
         in_device && /^[ \t]*Manufacturer:/ { manufacturer=substr($0, index($0,$2)); gsub(/^[ \t]+|[ \t]+$/, "", manufacturer); next }
         in_device && /^[ \t]*Part Number:/ { part_num=substr($0, index($0,$3)); gsub(/^[ \t]+|[ \t]+$/, "", part_num); next }
         END {
+            if (in_device) {
+                print "Slot " slot_count ":"
+                if (bank_locator != "") print "  Locator: " bank_locator
+                else if (locator != "") print "  Locator: " locator
+                if (found_size == 1) {
+                    print "  Size: " size
+                } else {
+                    print "  Size: None"
+                }
+                if (mem_type != "" && mem_type != "Unknown") print "  Type: " mem_type
+                if (manufacturer != "" && manufacturer != "Unknown") print "  Manufacturer: " manufacturer
+                else if (size ~ /No Module Installed/) print "  Manufacturer: NO DIMM"
+                if (part_num != "" && part_num != "Unknown") print "  Part Number: " part_num
+                else if (size ~ /No Module Installed/) print "  Part Number: NO DIMM"
+                if (size !~ /^(No Module Installed|Unknown)$/ && found_size == 1 && size !~ /^0+\s*(MB|GB|bytes)$/) {
+                    used_count++
+                }
+            }
             print "USED_COUNT=" used_count
         }
     ')
