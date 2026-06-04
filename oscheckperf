@@ -2114,7 +2114,7 @@ run_fio_test() {
         
         # Calculate size per job: total_size / numjobs
         # Important: fio size is per job, all jobs share the same file
-        # e.g., IO_TOTAL_SIZE=1G, FIO_NRFILES=4, FIO_NUMJOBS=4 → size per job = 256M
+        # e.g., IO_TOTAL_SIZE=1G, FIO_NUMJOBS=4 → size per job = 256M
         # Total = 256M * 4 jobs = 1G (expected)
         local per_file_size="auto"
         local size_value=$(echo "$total_size" | sed -E 's/([0-9]+)([GMK])/\1/')
@@ -4533,14 +4533,17 @@ generate_report() {
         fi
         printf -- "%-28s %-20s %-25s\n" "Threads" "SYSBENCH_THREADS" "$sysbench_threads_val" >> "$report_file"
     fi
-    # Add per file size calculation for fio
+    # Add per file size calculation for fio (per-profile values)
     if [ "$IO_TOOL" = "fio" ]; then
         local fio_total_size="$IO_TOTAL_SIZE"
         local fio_file_num="$FIO_NRFILES"
-        local fio_numjobs="$FIO_NUMJOBS"
         local fio_size_value=$(echo "$fio_total_size" | sed -E 's/([0-9]+)([GMK])/\1/')
         local fio_size_unit=$(echo "$fio_total_size" | sed -E 's/([0-9]+)([GMK])/\2/')
-        local fio_per_file_size="auto"
+        
+        IFS=' ' read -r -a profiles_array <<< "$FIO_PROFILES"
+        IFS=' ' read -r -a numjobs_array <<< "$FIO_NUMJOBS"
+        
+        local fio_per_file_size=""
         if [ "$fio_file_num" -gt 0 ] && [ "$fio_size_value" -gt 0 ] && [ -n "$fio_size_unit" ]; then
             local fio_size_in_mb=$fio_size_value
             case "$fio_size_unit" in
@@ -4548,8 +4551,20 @@ generate_report() {
                 M) fio_size_in_mb=$fio_size_value ;;
                 K) fio_size_in_mb=$((fio_size_value / 1024)) ;;
             esac
-            local fio_per_size=$((fio_size_in_mb / (fio_file_num * fio_numjobs)))
-            fio_per_file_size="${fio_per_size}M"
+            
+            local first=true
+            for index in "${!profiles_array[@]}"; do
+                local profile="${profiles_array[$index]}"
+                local numjobs="${numjobs_array[$index]:-${numjobs_array[0]}}"
+                local per_size=$((fio_size_in_mb / numjobs))
+                
+                if [ "$first" = true ]; then
+                    fio_per_file_size="${profile}:${per_size}M"
+                    first=false
+                else
+                    fio_per_file_size="${fio_per_file_size}, ${profile}:${per_size}M"
+                fi
+            done
         else
             fio_per_file_size="${fio_total_size}"
         fi
