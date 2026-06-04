@@ -259,15 +259,16 @@ cat output/original_data_*_all_results.log
 | 参数             | 默认值                             | 说明                                                                             |
 | -------------- | ------------------------------- | ------------------------------------------------------------------------------ |
 | `FIO_PROFILES` | `read write randread randwrite` | fio 测试模式，空格分隔（read/write/randread/randwrite/rw/randrw/trim/randtrim/trimwrite） |
-| `FIO_BS`       | `128K 128K 4K 4K`               | fio 块大小，支持多值配置（与FIO_PROFILES一一对应）；单值时应用于所有profile（参考阿里云块存储测试规范） |
-| `FIO_IODEPTH`  | `128 128 32 32`                 | fio I/O 深度，支持多值配置（与FIO_PROFILES一一对应）；单值时应用于所有profile（参考阿里云块存储测试规范） |
-| `FIO_NUMJOBS`  | `1 1 4 4`                       | fio 工作线程数，支持多值配置（与FIO_PROFILES一一对应）；单值时应用于所有profile；设置为0时自动使用CPU核心数 |
+| `FIO_BS`       | `128K 128K 4K 4K`               | fio 块大小，支持多值配置（与FIO\_PROFILES一一对应）；单值时应用于所有profile（参考阿里云块存储测试规范）               |
+| `FIO_IODEPTH`  | `128 128 32 32`                 | fio I/O 深度，支持多值配置（与FIO\_PROFILES一一对应）；单值时应用于所有profile（参考阿里云块存储测试规范）            |
+| `FIO_NUMJOBS`  | `1 1 4 4`                       | fio 工作线程数，支持多值配置（与FIO\_PROFILES一一对应）；单值时应用于所有profile；设置为0时自动使用CPU核心数           |
 | `FIO_DIRECT`   | `1`                             | fio 直接 I/O 模式                                                                  |
-| `FIO_NRFILES` | `1`                             | fio 测试文件数量（模拟多数据文件场景）                                                          |
+| `FIO_NRFILES`  | `1`                             | fio 测试文件数量（模拟多数据文件场景）                                                          |
 | `FIO_IOENGINE` | `libaio`                        | fio IO 引擎（libaio/sync/posixaio）                                                |
 | `FIO_DURATION` | `DURATION`                      | fio 测试时长                                                                       |
 
 **多值参数映射说明**：`FIO_BS`、`FIO_IODEPTH`、`FIO_NUMJOBS` 支持空格分隔的多值配置，按索引与 `FIO_PROFILES` 一一对应。例如默认配置：
+
 - `FIO_PROFILES="read write randread randwrite"`
 - `FIO_BS="128K 128K 4K 4K"` → read用128K，write用128K，randread用4K，randwrite用4K
 - 如果参数值数量少于profile数量，不足部分使用第一个值
@@ -308,12 +309,12 @@ cat output/original_data_*_all_results.log
 
 #### 网络测试参数
 
-| 参数                 | 默认值      | 说明                        |
-| ------------------ | -------- | ------------------------- |
-| `NETWORK_PARALLEL` | `4`      | 网络测试并行连接数（iperf3 的 -P 参数） |
-| `NETWORK_PORT`     | `25201`  | 网络测试端口                    |
-| `NETWORK_MODE`     | `matrix` | 网络测试模式（serial/matrix）     |
-| `NETWORK_DURATION` | `DURATION`| 网络测试时长（秒），未设置时使用全局DURATION |
+| 参数                 | 默认值        | 说明                         |
+| ------------------ | ---------- | -------------------------- |
+| `NETWORK_PARALLEL` | `4`        | 网络测试并行连接数（iperf3 的 -P 参数）  |
+| `NETWORK_PORT`     | `25201`    | 网络测试端口                     |
+| `NETWORK_MODE`     | `matrix`   | 网络测试模式（serial/matrix）      |
+| `NETWORK_DURATION` | `DURATION` | 网络测试时长（秒），未设置时使用全局DURATION |
 
 #### 参数说明
 
@@ -453,14 +454,11 @@ cat output/original_data_*_all_results.log
 #### fio 文件大小
 
 ```
-每个 job 的大小 = IO_TOTAL_SIZE / FIO_NUMJOBS
-文件大小 = 每个 job 的大小（所有 job 共享同一文件）
-总计 = 文件大小 × FIO_NUMJOBS = IO_TOTAL_SIZE
+每个job的大小 = IO_TOTAL_SIZE / FIO_NUMJOBS
+文件大小 = 每个 job 的大小（每个 job 拥有独立文件）
 ```
 
 例如：`IO_TOTAL_SIZE=1G`，`FIO_NUMJOBS=4` → 文件大小 256M，总写入量 1G
-
-> **说明**：`FIO_NRFILES`（对应 fio 的 `nrfiles`）在当前配置下不影响文件大小计算，因为所有 job 共享同一个测试文件。
 
 ### Q6: IO\_TOTAL\_SIZE 和 DURATION 的关系？RAID 缓存有影响吗？
 

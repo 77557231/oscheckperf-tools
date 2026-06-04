@@ -2113,9 +2113,9 @@ run_fio_test() {
         local total_size="$IO_TOTAL_SIZE"
         
         # Calculate size per job: total_size / numjobs
-        # Important: fio size is per job, all jobs share the same file
-        # e.g., IO_TOTAL_SIZE=1G, FIO_NUMJOBS=4 → size per job = 256M
-        # Total = 256M * 4 jobs = 1G (expected)
+        # Important: fio size is per job, each job has independent files
+        # Total files = numjobs * nrfiles
+        # e.g., IO_TOTAL_SIZE=1G, FIO_NUMJOBS=4, FIO_NRFILES=1 → size per job = 256M, total files = 4
         local per_file_size="auto"
         local size_value=$(echo "$total_size" | sed -E 's/([0-9]+)([GMK])/\1/')
         local size_unit=$(echo "$total_size" | sed -E 's/([0-9]+)([GMK])/\2/')
