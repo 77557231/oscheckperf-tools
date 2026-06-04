@@ -760,8 +760,8 @@ show_help() {
     echo ""
     echo "Threads test parameters:"
     echo "  THREADS_NUM=<number>        Number of threads (default: auto, cpu_cores*4)"
-    echo "  THREADS_YIELDS=<number>     Number of yields per thread (default: 100)"
-    echo "  THREADS_LOCKS=<number>      Number of locks (default: 4)"
+    echo "  THREADS_YIELDS=<number>     Number of yields per thread (default: 1000)"
+    echo "  THREADS_LOCKS=<number>      Number of locks (default: 8)"
     echo ""
     echo "Mutex test parameters:"
     echo "  MUTEX_THREADS=<number>      Mutex test threads, 0=auto (default: 0)"
@@ -4966,8 +4966,8 @@ main() {
 
     # Threads test default values
     THREADS_NUM="${THREADS_NUM:-0}"
-    THREADS_YIELDS="${THREADS_YIELDS:-100}"
-    THREADS_LOCKS="${THREADS_LOCKS:-4}"
+    THREADS_YIELDS="${THREADS_YIELDS:-1000}"
+    THREADS_LOCKS="${THREADS_LOCKS:-8}"
 
     # Mutex test default values
     MUTEX_THREADS="${MUTEX_THREADS:-0}"

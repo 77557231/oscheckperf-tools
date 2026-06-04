@@ -278,8 +278,8 @@ cat output/original_data_*_all_results.log
 | 参数               | 默认值              | 说明                                  |
 | ---------------- | ---------------- | ----------------------------------- |
 | `THREADS_NUM`    | `auto (cores*4)` | 线程数（未设置时自动根据 CPU 核心数计算，公式：cores\*4） |
-| `THREADS_YIELDS` | `100`            | 每个线程的 yield 次数                      |
-| `THREADS_LOCKS`  | `4`              | 锁数量                                 |
+| `THREADS_YIELDS` | `1000`           | 每个线程的 yield 次数                      |
+| `THREADS_LOCKS`  | `8`              | 锁数量                                 |
 
 #### Memory 参数
 
