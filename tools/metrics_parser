@@ -98,6 +98,32 @@ parse_extract() {
 # Report Output Functions
 # ================================================================================
 
+sort_io_results_by_mode() {
+    local input_file="$1"
+    local mode_field="$2"
+    awk -F'|' -v mode_col="$mode_field" 'BEGIN {
+        order["read"] = 1;
+        order["write"] = 2;
+        order["randread"] = 3;
+        order["randwrite"] = 4;
+        order["rw"] = 5;
+        order["randrw"] = 6;
+        order["trim"] = 7;
+        order["randtrim"] = 8;
+        order["trimwrite"] = 9;
+        order["seqrd"] = 1;
+        order["seqwr"] = 2;
+        order["rndrd"] = 3;
+        order["rndwr"] = 4;
+    } {
+        ip = $1;
+        mode = $(mode_col);
+        sort_val = order[mode];
+        if (sort_val == "") sort_val = 100;
+        printf "%s|%03d|%s\n", ip, sort_val, $0;
+    }' "$input_file" | sort -t'|' -k1,1 -k2,2n | cut -d'|' -f3-
+}
+
 report_cpu_metrics() {
     local output_file="$1"
     local server_ip="$(metrics_get 'SERVER_IP')"
@@ -1067,7 +1093,7 @@ parse_io_report_new() {
                 local fmt_p99=$(if [ "$p99" != "N/A" ]; then awk -v val="$p99" 'BEGIN {if (val == int(val)) printf "%d", val; else printf "%.2f", val}' 2>/dev/null || echo "$p99"; else echo "N/A"; fi)
                 printf "  %-20s %-11s %-11s %-11s %-11s %-11s %-11s %-13s %-10s %-8s\n" "$server_ip" "$fmt_read_iops" "$fmt_write_iops" "$fmt_total_iops" "$fmt_read_bw" "$fmt_write_bw" "$fmt_total_bw" "$fmt_avg_lat" "$fmt_p99" "$io_mode" >> "$report_file"
             fi
-        done < <(sort -t'|' -k1,1 "$results_temp_file")
+        done < <(sort_io_results_by_mode "$results_temp_file" 12)
 
         if [ "$is_sysbench" = true ]; then
             echo "" >> "$report_file"
@@ -1086,7 +1112,7 @@ parse_io_report_new() {
                 local fmt_fsync=$(if [ "$fsync_iops" != "N/A" ]; then awk "BEGIN {printf \"%.2f\", $fsync_iops}" 2>/dev/null || echo "$fsync_iops"; else echo "N/A"; fi)
 
                 printf "  %-20s %-10s %-10s %-10s %-12s %-8s\n" "$server_ip" "$fmt_p95" "$fmt_min" "$fmt_max" "$fmt_fsync" "$io_mode" >> "$report_file"
-            done < <(sort -t'|' -k1,1 "$results_temp_file")
+            done < <(sort_io_results_by_mode "$results_temp_file" 12)
         fi
 
         if [ "$is_sysbench" = false ]; then
@@ -1116,7 +1142,7 @@ parse_io_report_new() {
 
                 printf "  %-15s %-9s %-9s %-6s %-9s %-9s %-8s %-8s %-7s %-13s %-13s %-6s %-6s %-6s\n" \
                     "$ext_ip" "$slat" "$clat" "$iodepth" "$cpu_usr" "$cpu_sys" "$b_min" "$b_max" "$ctx" "$aggrios" "$aggrticks" "$util" "$aggrutil" "$ext_mode" >> "$report_file"
-            done < <(sort -t'|' -k1,1 "$fio_extended_file")
+            done < <(sort_io_results_by_mode "$fio_extended_file" 2)
         fi
     else
         echo "  Test not executed" >> "$report_file"
