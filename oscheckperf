@@ -1002,7 +1002,7 @@ get_network_advanced_info"
 }
 # Debug log function - always writes to log file, only prints to terminal when DEBUG is enabled
 # Usage: debug_log "message" [var1=value1] [var2=value2] ...
-# Log file: $TMP_DIR/debug_${TIMESTAMP}.log
+# Output: stderr when DEBUG mode is enabled
 debug_log() {
     local message="$1"
     shift
@@ -1013,12 +1013,6 @@ debug_log() {
     for arg in "$@"; do
         log_line="$log_line | $arg"
     done
-    
-    # Always write to log file if TMP_DIR is set
-    if [ -n "$TMP_DIR" ] && [ -d "$TMP_DIR" ]; then
-        local debug_log_file="$TMP_DIR/debug_${TIMESTAMP}.log"
-        echo "$log_line" >> "$debug_log_file" 2>/dev/null
-    fi
     
     # Print to stderr only when DEBUG mode is enabled
     if [ "$DEBUG" = "true" ]; then
