@@ -132,7 +132,7 @@ calc_eps() {
     local events="$1"
     local time="$2"
     if [ -n "$events" ] && [ -n "$time" ] && [ "$time" != "0" ]; then
-        awk "BEGIN {printf \"%.2f\", $events / $time}" 2>/dev/null || echo "N/A"
+        awk "BEGIN {printf \"%.2f\", $events / $time}" || echo "N/A"
     else
         echo "N/A"
     fi
@@ -1290,7 +1290,7 @@ run_all_selected_tests() {
 format_number() {
     local num="$1"
     if [ "$num" != "N/A" ] && [ -n "$num" ]; then
-        awk "BEGIN {printf \"%.2f\", $num}" 2>/dev/null || echo "$num"
+        awk "BEGIN {printf \"%.2f\", $num}" || echo "$num"
     else
         echo "N/A"
     fi
@@ -1795,12 +1795,12 @@ cleanup_residual_processes() {
 parse_cpu_result() {
     local result_file="$1"
     
-    local events_per_sec=$(grep "events per second" "$result_file" 2>/dev/null | awk -F: '{print $2}' | tr -d ' ' || echo "0")
-    local avg_latency=$(grep "avg:" "$result_file" 2>/dev/null | head -1 | awk '{print $NF}' | tr -d ',' || echo "0")
-    local min_latency=$(grep -A5 "Latency (ms):" "$result_file" 2>/dev/null | grep "min:" | awk '{print $NF}' | tr -d ',' || echo "N/A")
-    local p95_latency=$(grep "95th percentile" "$result_file" 2>/dev/null | awk '{print $NF}' | head -1 | tr -d ',' || echo "0")
-    local p99_latency=$(grep "99th percentile" "$result_file" 2>/dev/null | awk '{print $NF}' | head -1 | tr -d ',' || echo "0")
-    local max_latency=$(grep -A5 "Latency (ms):" "$result_file" 2>/dev/null | grep "max:" | awk '{print $NF}' | tr -d ',' || echo "N/A")
+    local events_per_sec=$(grep "events per second" "$result_file" | awk -F: '{print $2}' | tr -d ' ' || echo "0")
+    local avg_latency=$(grep "avg:" "$result_file" | head -1 | awk '{print $NF}' | tr -d ',' || echo "0")
+    local min_latency=$(grep -A5 "Latency (ms):" "$result_file" | grep "min:" | awk '{print $NF}' | tr -d ',' || echo "N/A")
+    local p95_latency=$(grep "95th percentile" "$result_file" | awk '{print $NF}' | head -1 | tr -d ',' || echo "0")
+    local p99_latency=$(grep "99th percentile" "$result_file" | awk '{print $NF}' | head -1 | tr -d ',' || echo "0")
+    local max_latency=$(grep -A5 "Latency (ms):" "$result_file" | grep "max:" | awk '{print $NF}' | tr -d ',' || echo "N/A")
     
     # Calculate Sum Latency: events_per_sec * duration * avg_latency (approximation)
     local cpu_duration="$DURATION"
@@ -1810,8 +1810,8 @@ parse_cpu_result() {
     fi
     
     # Extract Threads fairness metrics
-    local threads_fairness_events=$(grep -A2 "Threads fairness:" "$result_file" 2>/dev/null | grep "events" | head -1)
-    local threads_fairness_time=$(grep -A2 "Threads fairness:" "$result_file" 2>/dev/null | grep "execution time" | head -1)
+    local threads_fairness_events=$(grep -A2 "Threads fairness:" "$result_file" | grep "events" | head -1)
+    local threads_fairness_time=$(grep -A2 "Threads fairness:" "$result_file" | grep "execution time" | head -1)
     
     # Display detailed summary
     echo ""
@@ -1847,24 +1847,24 @@ parse_memory_result() {
     local oper_type="$2"
     
     # Extract Total operations and operations per second
-    local total_ops_line=$(grep "Total operations:" "$result_file" 2>/dev/null)
+    local total_ops_line=$(grep "Total operations:" "$result_file")
     local total_ops=$(echo "$total_ops_line" | awk '{print $3}' || echo "0")
     local ops_per_sec=$(echo "$total_ops_line" | awk -F'[()]' '{print $2}' | awk '{print $1}' || echo "0")
     
     # Extract transferred data and MiB/sec
-    local transferred_line=$(grep "MiB transferred" "$result_file" 2>/dev/null)
+    local transferred_line=$(grep "MiB transferred" "$result_file")
     local transferred=$(echo "$transferred_line" | awk '{print $1}' || echo "0")
     local mib_per_sec=$(echo "$transferred_line" | awk -F'[()]' '{print $2}' | awk '{print $1}' || echo "0")
     
-    local avg_latency=$(grep "avg:" "$result_file" 2>/dev/null | head -1 | awk '{print $NF}' | tr -d ',' || echo "0")
-    local min_latency=$(grep -A5 "Latency (ms):" "$result_file" 2>/dev/null | grep "min:" | awk '{print $NF}' | tr -d ',' || echo "N/A")
-    local max_latency=$(grep -A5 "Latency (ms):" "$result_file" 2>/dev/null | grep "max:" | awk '{print $NF}' | tr -d ',' || echo "N/A")
+    local avg_latency=$(grep "avg:" "$result_file" | head -1 | awk '{print $NF}' | tr -d ',' || echo "0")
+    local min_latency=$(grep -A5 "Latency (ms):" "$result_file" | grep "min:" | awk '{print $NF}' | tr -d ',' || echo "N/A")
+    local max_latency=$(grep -A5 "Latency (ms):" "$result_file" | grep "max:" | awk '{print $NF}' | tr -d ',' || echo "N/A")
     
     # Extract p95 latency
-    local p95_latency=$(grep "95th percentile" "$result_file" 2>/dev/null | awk '{print $NF}' | head -1 | tr -d ',' || echo "0")
+    local p95_latency=$(grep "95th percentile" "$result_file" | awk '{print $NF}' | head -1 | tr -d ',' || echo "0")
     
     # Calculate Sum Latency: total_ops * avg_latency
-    local sum_latency=$(echo "$total_ops" "$avg_latency" 2>/dev/null | awk '{if($2>0) printf "%.2f", $1 * $2; else print "N/A"}')
+    local sum_latency=$(echo "$total_ops" "$avg_latency" | awk '{if($2>0) printf "%.2f", $1 * $2; else print "N/A"}')
     
     # Display detailed summary
     echo ""
@@ -2197,12 +2197,12 @@ EOF
             local write_avg_lat=$(jq -r '.jobs[0].write.lat_ns.mean // 0' "$json_output")
             
             # Convert BW from KB/s to MB/s
-            local read_bw_mb=$(awk "BEGIN {printf \"%.2f\", $read_bw / 1024}" 2>/dev/null || echo "0")
-            local write_bw_mb=$(awk "BEGIN {printf \"%.2f\", $write_bw / 1024}" 2>/dev/null || echo "0")
+            local read_bw_mb=$(awk "BEGIN {printf \"%.2f\", $read_bw / 1024}" || echo "0")
+            local write_bw_mb=$(awk "BEGIN {printf \"%.2f\", $write_bw / 1024}" || echo "0")
             
             # Convert latency from ns to ms
-            local read_avg_lat_ms=$(awk "BEGIN {printf \"%.2f\", $read_avg_lat / 1000000}" 2>/dev/null || echo "0")
-            local write_avg_lat_ms=$(awk "BEGIN {printf \"%.2f\", $write_avg_lat / 1000000}" 2>/dev/null || echo "0")
+            local read_avg_lat_ms=$(awk "BEGIN {printf \"%.2f\", $read_avg_lat / 1000000}" || echo "0")
+            local write_avg_lat_ms=$(awk "BEGIN {printf \"%.2f\", $write_avg_lat / 1000000}" || echo "0")
             
             # Display basic results
             echo ""
@@ -2295,21 +2295,21 @@ generate_fio_text_from_json() {
     # Convert nanoseconds to microseconds for display
     read_clat_min=$((read_clat_min / 1000))
     read_clat_max=$((read_clat_max / 1000))
-    read_clat_avg=$(awk "BEGIN {printf \"%.2f\", $read_clat_avg / 1000}" 2>/dev/null || echo "0")
+    read_clat_avg=$(awk "BEGIN {printf \"%.2f\", $read_clat_avg / 1000}" || echo "0")
     read_clat_p50=$((read_clat_p50 / 1000))
     read_clat_p95=$((read_clat_p95 / 1000))
     read_clat_p99=$((read_clat_p99 / 1000))
     
     write_clat_min=$((write_clat_min / 1000))
     write_clat_max=$((write_clat_max / 1000))
-    write_clat_avg=$(awk "BEGIN {printf \"%.2f\", $write_clat_avg / 1000}" 2>/dev/null || echo "0")
+    write_clat_avg=$(awk "BEGIN {printf \"%.2f\", $write_clat_avg / 1000}" || echo "0")
     write_clat_p50=$((write_clat_p50 / 1000))
     write_clat_p95=$((write_clat_p95 / 1000))
     write_clat_p99=$((write_clat_p99 / 1000))
     
     # Convert bw from KB/s to MB/s using awk to handle large numbers
-    local read_bw_mb=$(awk "BEGIN {printf \"%.2f\", $read_bw_kb / 1024}" 2>/dev/null || echo "0")
-    local write_bw_mb=$(awk "BEGIN {printf \"%.2f\", $write_bw_kb / 1024}" 2>/dev/null || echo "0")
+    local read_bw_mb=$(awk "BEGIN {printf \"%.2f\", $read_bw_kb / 1024}" || echo "0")
+    local write_bw_mb=$(awk "BEGIN {printf \"%.2f\", $write_bw_kb / 1024}" || echo "0")
     
     # Generate text output
     cat > "$output_file" << EOF
@@ -2359,19 +2359,19 @@ parse_sysbench_fileio_result() {
     local result_file="$1"
     
     # Extract metrics
-    local read_iops=$(grep "reads/s:" "$result_file" 2>/dev/null | awk '{print $NF}' || echo "0")
-    local write_iops=$(grep "writes/s:" "$result_file" 2>/dev/null | awk '{print $NF}' || echo "0")
-    local fsync_iops=$(grep "fsyncs/s:" "$result_file" 2>/dev/null | awk '{print $NF}' || echo "N/A")
-    local total_iops=$(awk "BEGIN {printf \"%.2f\", $read_iops + $write_iops}" 2>/dev/null || echo "0")
-    local read_bw=$(grep "read, MiB/s:" "$result_file" 2>/dev/null | awk '{print $NF}' || echo "0")
-    local write_bw=$(grep "written, MiB/s:" "$result_file" 2>/dev/null | awk '{print $NF}' || echo "0")
-    local total_bw=$(awk "BEGIN {printf \"%.2f\", $read_bw + $write_bw}" 2>/dev/null || echo "0")
-    local avg_latency=$(grep "avg:" "$result_file" 2>/dev/null | head -1 | awk '{print $NF}' | tr -d ',' || echo "0")
-    local min_latency=$(grep -A10 "Latency (ms):" "$result_file" 2>/dev/null | grep "min:" | awk '{print $NF}' | tr -d ',' || echo "N/A")
-    local max_latency=$(grep -A10 "Latency (ms):" "$result_file" 2>/dev/null | grep "max:" | awk '{print $NF}' | tr -d ',' || echo "N/A")
-    local p95_latency=$(grep "95th percentile" "$result_file" 2>/dev/null | awk '{print $NF}' || echo "N/A")
-    local events_fair=$(grep -A10 "Threads fairness:" "$result_file" 2>/dev/null | grep "events (avg/stddev):" | head -1)
-    local execution_fair=$(grep -A10 "Threads fairness:" "$result_file" 2>/dev/null | grep "execution time (avg/stddev):" | head -1)
+    local read_iops=$(grep "reads/s:" "$result_file" | awk '{print $NF}' || echo "0")
+    local write_iops=$(grep "writes/s:" "$result_file" | awk '{print $NF}' || echo "0")
+    local fsync_iops=$(grep "fsyncs/s:" "$result_file" | awk '{print $NF}' || echo "N/A")
+    local total_iops=$(awk "BEGIN {printf \"%.2f\", $read_iops + $write_iops}" || echo "0")
+    local read_bw=$(grep "read, MiB/s:" "$result_file" | awk '{print $NF}' || echo "0")
+    local write_bw=$(grep "written, MiB/s:" "$result_file" | awk '{print $NF}' || echo "0")
+    local total_bw=$(awk "BEGIN {printf \"%.2f\", $read_bw + $write_bw}" || echo "0")
+    local avg_latency=$(grep "avg:" "$result_file" | head -1 | awk '{print $NF}' | tr -d ',' || echo "0")
+    local min_latency=$(grep -A10 "Latency (ms):" "$result_file" | grep "min:" | awk '{print $NF}' | tr -d ',' || echo "N/A")
+    local max_latency=$(grep -A10 "Latency (ms):" "$result_file" | grep "max:" | awk '{print $NF}' | tr -d ',' || echo "N/A")
+    local p95_latency=$(grep "95th percentile" "$result_file" | awk '{print $NF}' || echo "N/A")
+    local events_fair=$(grep -A10 "Threads fairness:" "$result_file" | grep "events (avg/stddev):" | head -1)
+    local execution_fair=$(grep -A10 "Threads fairness:" "$result_file" | grep "execution time (avg/stddev):" | head -1)
     
     # Display summary
     echo ""
@@ -3573,10 +3573,10 @@ parse_iperf3_matrix_result() {
     fi
     
     # Extract JSON content by removing any leading non-JSON text
-    local json_content=$(awk 'BEGIN{found=0} /^\{/{found=1} found{print} /^\}/{if(found) exit}' "$json_file" 2>/dev/null || cat "$json_file")
+    local json_content=$(awk 'BEGIN{found=0} /^\{/{found=1} found{print} /^\}/{if(found) exit}' "$json_file" || cat "$json_file")
     
     # Extract metrics
-    local bandwidth_bps=$(echo "$json_content" | jq -r '.end.sum_received.bits_per_second // 0' 2>/dev/null)
+    local bandwidth_bps=$(echo "$json_content" | jq -r '.end.sum_received.bits_per_second // 0')
     if [ "$bandwidth_bps" = "0" ]; then
         log_warn "PARSE_RESULT_EXTRACT" "file=$json_file" "bps=$bandwidth_bps" "json_has_end=$(echo "$json_content" | jq -e '.end' >/dev/null 2>&1 && echo "yes" || echo "no")"
     else
@@ -3584,7 +3584,7 @@ parse_iperf3_matrix_result() {
     fi
     
     # Convert bps to MB/s: 1 MB/s = 8,000,000 bps
-    local bandwidth_mbs=$(awk "BEGIN {printf \"%.2f\", $bandwidth_bps / 8000000}" 2>/dev/null || echo "0")
+    local bandwidth_mbs=$(awk "BEGIN {printf \"%.2f\", $bandwidth_bps / 8000000}" || echo "0")
     
     echo "$bandwidth_mbs"
 }
@@ -3701,30 +3701,30 @@ parse_iperf3_result() {
     fi
     
     # Extract JSON content by removing any leading non-JSON text
-    local json_content=$(awk 'BEGIN{found=0} /^\{/{found=1} found{print} /^\}/{if(found) exit}' "$json_file" 2>/dev/null || cat "$json_file")
+    local json_content=$(awk 'BEGIN{found=0} /^\{/{found=1} found{print} /^\}/{if(found) exit}' "$json_file" || cat "$json_file")
     
     # Extract metrics
-    local bandwidth_bps=$(echo "$json_content" | jq -r '.end.sum_received.bits_per_second // 0' 2>/dev/null)
+    local bandwidth_bps=$(echo "$json_content" | jq -r '.end.sum_received.bits_per_second // 0')
     # Convert bps to MB/s: 1 MB/s = 8,000,000 bps
-    local bandwidth_mbs=$(awk "BEGIN {printf \"%.2f\", $bandwidth_bps / 8000000}" 2>/dev/null || echo "0")
+    local bandwidth_mbs=$(awk "BEGIN {printf \"%.2f\", $bandwidth_bps / 8000000}" || echo "0")
     
     # Extract extended metrics
-    local retransmits=$(echo "$json_content" | jq -r '.end.sum_received.retransmits // "N/A"' 2>/dev/null)
-    local rtt_avg=$(echo "$json_content" | jq -r '.end.streams[0].sender.mean_rtt // "N/A"' 2>/dev/null)
-    local rtt_min=$(echo "$json_content" | jq -r '.end.streams[0].sender.min_rtt // "N/A"' 2>/dev/null)
-    local rtt_max=$(echo "$json_content" | jq -r '.end.streams[0].sender.max_rtt // "N/A"' 2>/dev/null)
-    local cpu_sender=$(echo "$json_content" | jq -r '.end.cpu_utilization_percent.sender // "N/A"' 2>/dev/null)
-    local cpu_receiver=$(echo "$json_content" | jq -r '.end.cpu_utilization_percent.receiver // "N/A"' 2>/dev/null)
+    local retransmits=$(echo "$json_content" | jq -r '.end.sum_received.retransmits // "N/A"')
+    local rtt_avg=$(echo "$json_content" | jq -r '.end.streams[0].sender.mean_rtt // "N/A"')
+    local rtt_min=$(echo "$json_content" | jq -r '.end.streams[0].sender.min_rtt // "N/A"')
+    local rtt_max=$(echo "$json_content" | jq -r '.end.streams[0].sender.max_rtt // "N/A"')
+    local cpu_sender=$(echo "$json_content" | jq -r '.end.cpu_utilization_percent.sender // "N/A"')
+    local cpu_receiver=$(echo "$json_content" | jq -r '.end.cpu_utilization_percent.receiver // "N/A"')
     
     # Convert RTT from microseconds to milliseconds if available
     if [ "$rtt_avg" != "N/A" ] && [ "$rtt_avg" != "null" ]; then
-        rtt_avg=$(awk "BEGIN {printf \"%.3f\", $rtt_avg / 1000}" 2>/dev/null || echo "$rtt_avg")
+        rtt_avg=$(awk "BEGIN {printf \"%.3f\", $rtt_avg / 1000}" || echo "$rtt_avg")
     fi
     if [ "$rtt_min" != "N/A" ] && [ "$rtt_min" != "null" ]; then
-        rtt_min=$(awk "BEGIN {printf \"%.3f\", $rtt_min / 1000}" 2>/dev/null || echo "$rtt_min")
+        rtt_min=$(awk "BEGIN {printf \"%.3f\", $rtt_min / 1000}" || echo "$rtt_min")
     fi
     if [ "$rtt_max" != "N/A" ] && [ "$rtt_max" != "null" ]; then
-        rtt_max=$(awk "BEGIN {printf \"%.3f\", $rtt_max / 1000}" 2>/dev/null || echo "$rtt_max")
+        rtt_max=$(awk "BEGIN {printf \"%.3f\", $rtt_max / 1000}" || echo "$rtt_max")
     fi
     
     # Display summary
@@ -3745,14 +3745,14 @@ parse_iperf3_result() {
     
     # Only show jitter and packet loss for UDP tests (not applicable for TCP)
     if [ "$NETWORK_PROTOCOL" = "udp" ]; then
-        local jitter_ms=$(jq -r '.end.sum_received.jitter_ms // 0' "$json_file" 2>/dev/null)
-        local lost_packets=$(jq -r '.end.sum_received.lost_packets // 0' "$json_file" 2>/dev/null)
-        local total_packets=$(jq -r '.end.sum_received.packets // 0' "$json_file" 2>/dev/null)
+        local jitter_ms=$(jq -r '.end.sum_received.jitter_ms // 0' "$json_file")
+        local lost_packets=$(jq -r '.end.sum_received.lost_packets // 0' "$json_file")
+        local total_packets=$(jq -r '.end.sum_received.packets // 0' "$json_file")
         
         # Calculate packet loss rate
         local packet_loss="0"
         if [ "$total_packets" -gt 0 ] 2>/dev/null; then
-            packet_loss=$(awk "BEGIN {printf \"%.2f\", $lost_packets * 100 / $total_packets}" 2>/dev/null || echo "0")
+            packet_loss=$(awk "BEGIN {printf \"%.2f\", $lost_packets * 100 / $total_packets}" || echo "0")
         fi
         
         echo "  Jitter: ${jitter_ms} ms"
@@ -3776,35 +3776,45 @@ generate_iperf3_text_from_json() {
         return
     fi
     
-    # Generate text-like output from JSON using a single jq call for efficiency
-    # The key fix: save root context in $root variable, so we can access .end after processing .intervals
-    jq -r '
-        . as $root |
-        "iperf3 text output (generated from JSON)",
-        "=========================================",
-        "",
-        ($root.intervals // []) | to_entries[] | 
-        ([.key + 1, .value.streams[0].start // 0, (.value.streams[0].start // 0) + 1,
-          (.value.streams[0].sum.bytes // 0) / 1048576,
-          .value.streams[0].sum.bits_per_second // 0]) |
-        "[\\(.[0])] \\(.[1] | . * 100 | round / 100)-\\(.[2] | . * 100 | round / 100) sec  \\(.[3] | . * 100 | round / 100) MBytes  " +
-        (if .[4] > 1000000000 then (. [4] / 1000000000 | . * 100 | round / 100) + " Gbits/sec"
-         else (. [4] / 1000000 | . * 100 | round / 100) + " Mbits/sec" end),
-        "",
-        "- - - - - - - - - - - - - - - - - - - - - - - - - - - - - -",
-        "",
-        "[SUM] 0.00-\\(($root.end.sum_received.seconds // 0) | . * 100 | round / 100) sec  \\(($root.end.sum_received.bytes // 0) / 1048576 | . * 100 | round / 100) MBytes  " +
-        (if ($root.end.sum_received.bits_per_second // 0) > 1000000000 
-         then (($root.end.sum_received.bits_per_second // 0) / 1000000000 | . * 100 | round / 100) + " Gbits/sec"
-         else (($root.end.sum_received.bits_per_second // 0) / 1000000 | . * 100 | round / 100) + " Mbits/sec" 
-         end) + "  sender",
-        "[SUM] 0.00-\\(($root.end.sum_received.seconds // 0) | . * 100 | round / 100) sec  \\(($root.end.sum_received.bytes // 0) / 1048576 | . * 100 | round / 100) MBytes  " +
-        (if ($root.end.sum_received.bits_per_second // 0) > 1000000000 
-         then (($root.end.sum_received.bits_per_second // 0) / 1000000000 | . * 100 | round / 100) + " Gbits/sec"
-         else (($root.end.sum_received.bits_per_second // 0) / 1000000 | . * 100 | round / 100) + " Mbits/sec" 
-         end) + "  receiver"
-    ' "$json_file" > "$output_file" 2>/dev/null || {
-        # Fallback to simpler output if jq fails
+    local json_content=$(awk 'BEGIN{found=0} /^\{/{found=1} found{print} /^\}/{if(found) exit}' "$json_file" || cat "$json_file")
+    
+    {
+        echo "iperf3 text output (generated from JSON)"
+        echo "========================================="
+        echo ""
+        
+        echo "$json_content" | jq -r '
+            (.intervals // []) | to_entries[] |
+            .key + 1 as $idx |
+            .value.streams[0].start // 0 as $start |
+            (.value.streams[0].end // ($start + 1)) as $end |
+            (.value.streams[0].bytes // .value.streams[0].sum.bytes // 0) / 1048576 as $mb |
+            (.value.streams[0].bits_per_second // .value.streams[0].sum.bits_per_second // 0) as $bps |
+            ($start * 100 | round / 100) as $start_fmt |
+            ($end * 100 | round / 100) as $end_fmt |
+            ($mb * 100 | round / 100) as $mb_fmt |
+            (if $bps > 1000000000 then ($bps / 1000000000 * 100 | round / 100) as $bps_fmt | $bps_fmt | tostring + " Gbits/sec" else ($bps / 1000000 * 100 | round / 100) as $bps_fmt | $bps_fmt | tostring + " Mbits/sec" end) as $bps_str |
+            "[\($idx)] \($start_fmt)-\($end_fmt) sec  \($mb_fmt) MBytes  \($bps_str)"
+        ' 2>/dev/null || true
+        
+        echo ""
+        echo "- - - - - - - - - - - - - - - - - - - - - - - - - - - - - -"
+        echo ""
+        
+        local sum_sec=$(echo "$json_content" | jq -r '(.end.sum_received.seconds // 0) * 100 | round / 100' 2>/dev/null || echo "0")
+        local sum_mb=$(echo "$json_content" | jq -r '(.end.sum_received.bytes // 0) / 1048576 * 100 | round / 100' 2>/dev/null || echo "0")
+        local sum_bps=$(echo "$json_content" | jq -r '.end.sum_received.bits_per_second // 0' 2>/dev/null || echo "0")
+        
+        local sum_bps_str
+        if [ "$(echo "$sum_bps > 1000000000" | bc)" -eq 1 ]; then
+            sum_bps_str=$(echo "$sum_bps / 1000000000 * 100" | bc | awk '{printf "%.2f", $1/100}')" Gbits/sec"
+        else
+            sum_bps_str=$(echo "$sum_bps / 1000000 * 100" | bc | awk '{printf "%.2f", $1/100}')" Mbits/sec"
+        fi
+        
+        echo "[SUM] 0.00-$sum_sec sec  $sum_mb MBytes  $sum_bps_str  sender"
+        echo "[SUM] 0.00-$sum_sec sec  $sum_mb MBytes  $sum_bps_str  receiver"
+    } > "$output_file" || {
         echo "iperf3 text output (generated from JSON)" > "$output_file"
         echo "=========================================" >> "$output_file"
     }
@@ -3820,29 +3830,29 @@ parse_iperf3_json_to_metrics() {
     fi
     
     # Extract metrics from JSON
-    local retransmits=$(jq -r '.end.sum_received.retransmits // 0' "$json_file" 2>/dev/null || echo "N/A")
+    local retransmits=$(jq -r '.end.sum_received.retransmits // 0' "$json_file" || echo "N/A")
     
     # Extract RTT metrics
-    local rtt_min=$(jq -r '.end.streams[0].sender.min_rtt // 0' "$json_file" 2>/dev/null || echo "N/A")
-    local rtt_max=$(jq -r '.end.streams[0].sender.max_rtt // 0' "$json_file" 2>/dev/null || echo "N/A")
-    local rtt_avg=$(jq -r '.end.streams[0].sender.mean_rtt // 0' "$json_file" 2>/dev/null || echo "N/A")
+    local rtt_min=$(jq -r '.end.streams[0].sender.min_rtt // 0' "$json_file" || echo "N/A")
+    local rtt_max=$(jq -r '.end.streams[0].sender.max_rtt // 0' "$json_file" || echo "N/A")
+    local rtt_avg=$(jq -r '.end.streams[0].sender.mean_rtt // 0' "$json_file" || echo "N/A")
     
     # Extract CPU metrics
-    local cpu_host=$(jq -r '.end.cpu_utilization_percent.host_total // 0' "$json_file" 2>/dev/null || echo "N/A")
-    local cpu_remote=$(jq -r '.end.cpu_utilization_percent.remote_total // 0' "$json_file" 2>/dev/null || echo "N/A")
+    local cpu_host=$(jq -r '.end.cpu_utilization_percent.host_total // 0' "$json_file" || echo "N/A")
+    local cpu_remote=$(jq -r '.end.cpu_utilization_percent.remote_total // 0' "$json_file" || echo "N/A")
     
     # Extract TCP congestion control algorithm
-    local tcp_congestion=$(jq -r '.start.stored_tcp_congestion // "N/A"' "$json_file" 2>/dev/null || echo "N/A")
+    local tcp_congestion=$(jq -r '.start.stored_tcp_congestion // "N/A"' "$json_file" || echo "N/A")
     
     # Format RTT to milliseconds (convert from microseconds if needed)
     if [[ "$rtt_min" != "N/A" ]] && [[ "$rtt_min" =~ [0-9] ]]; then
-        rtt_min=$(awk "BEGIN {printf \"%.2f\", $rtt_min / 1000}" 2>/dev/null || echo "$rtt_min")
+        rtt_min=$(awk "BEGIN {printf \"%.2f\", $rtt_min / 1000}" || echo "$rtt_min")
     fi
     if [[ "$rtt_max" != "N/A" ]] && [[ "$rtt_max" =~ [0-9] ]]; then
-        rtt_max=$(awk "BEGIN {printf \"%.2f\", $rtt_max / 1000}" 2>/dev/null || echo "$rtt_max")
+        rtt_max=$(awk "BEGIN {printf \"%.2f\", $rtt_max / 1000}" || echo "$rtt_max")
     fi
     if [[ "$rtt_avg" != "N/A" ]] && [[ "$rtt_avg" =~ [0-9] ]]; then
-        rtt_avg=$(awk "BEGIN {printf \"%.2f\", $rtt_avg / 1000}" 2>/dev/null || echo "$rtt_avg")
+        rtt_avg=$(awk "BEGIN {printf \"%.2f\", $rtt_avg / 1000}" || echo "$rtt_avg")
     fi
     
     # Return all metrics as pipe-separated string
@@ -3860,55 +3870,55 @@ parse_fio_json_to_metrics() {
     fi
     
     # Extract metrics from JSON
-    local lat_p99_read=$(jq -r '.jobs[0].read.clat_ns.percentile."99.000000" // 0' "$json_file" 2>/dev/null || echo "0")
-    local lat_p99_write=$(jq -r '.jobs[0].write.clat_ns.percentile."99.000000" // 0' "$json_file" 2>/dev/null || echo "0")
+    local lat_p99_read=$(jq -r '.jobs[0].read.clat_ns.percentile."99.000000" // 0' "$json_file" || echo "0")
+    local lat_p99_write=$(jq -r '.jobs[0].write.clat_ns.percentile."99.000000" // 0' "$json_file" || echo "0")
     
-    local lat_max_read=$(jq -r '.jobs[0].read.clat_ns.max // 0' "$json_file" 2>/dev/null || echo "0")
-    local lat_max_write=$(jq -r '.jobs[0].write.clat_ns.max // 0' "$json_file" 2>/dev/null || echo "0")
+    local lat_max_read=$(jq -r '.jobs[0].read.clat_ns.max // 0' "$json_file" || echo "0")
+    local lat_max_write=$(jq -r '.jobs[0].write.clat_ns.max // 0' "$json_file" || echo "0")
     
     local disk_util="N/A"
     if [ -f "$normal_output_file" ]; then
-        disk_util=$(grep -oP 'util=\K[0-9.]+' "$normal_output_file" | head -n1 | awk '{printf "%.2f", $1}' 2>/dev/null || echo "N/A")
+        disk_util=$(grep -oP 'util=\K[0-9.]+' "$normal_output_file" | head -n1 | awk '{printf "%.2f", $1}' || echo "N/A")
     fi
-    local cpu_usr=$(jq -r '.jobs[0].usr_cpu // 0' "$json_file" 2>/dev/null || echo "N/A")
-    local cpu_sys=$(jq -r '.jobs[0].sys_cpu // 0' "$json_file" 2>/dev/null || echo "N/A")
+    local cpu_usr=$(jq -r '.jobs[0].usr_cpu // 0' "$json_file" || echo "N/A")
+    local cpu_sys=$(jq -r '.jobs[0].sys_cpu // 0' "$json_file" || echo "N/A")
     
-    local bw_min_read=$(jq -r '.jobs[0].read.bw_min // 0' "$json_file" 2>/dev/null || echo "0")
-    local bw_max_read=$(jq -r '.jobs[0].read.bw_max // 0' "$json_file" 2>/dev/null || echo "0")
-    local bw_min_write=$(jq -r '.jobs[0].write.bw_min // 0' "$json_file" 2>/dev/null || echo "0")
-    local bw_max_write=$(jq -r '.jobs[0].write.bw_max // 0' "$json_file" 2>/dev/null || echo "0")
+    local bw_min_read=$(jq -r '.jobs[0].read.bw_min // 0' "$json_file" || echo "0")
+    local bw_max_read=$(jq -r '.jobs[0].read.bw_max // 0' "$json_file" || echo "0")
+    local bw_min_write=$(jq -r '.jobs[0].write.bw_min // 0' "$json_file" || echo "0")
+    local bw_max_write=$(jq -r '.jobs[0].write.bw_max // 0' "$json_file" || echo "0")
     
-    local slat_avg_read=$(jq -r '.jobs[0].read.slat_ns.mean // 0' "$json_file" 2>/dev/null || echo "0")
-    local clat_avg_read=$(jq -r '.jobs[0].read.clat_ns.mean // 0' "$json_file" 2>/dev/null || echo "0")
-    local slat_avg_write=$(jq -r '.jobs[0].write.slat_ns.mean // 0' "$json_file" 2>/dev/null || echo "0")
-    local clat_avg_write=$(jq -r '.jobs[0].write.clat_ns.mean // 0' "$json_file" 2>/dev/null || echo "0")
+    local slat_avg_read=$(jq -r '.jobs[0].read.slat_ns.mean // 0' "$json_file" || echo "0")
+    local clat_avg_read=$(jq -r '.jobs[0].read.clat_ns.mean // 0' "$json_file" || echo "0")
+    local slat_avg_write=$(jq -r '.jobs[0].write.slat_ns.mean // 0' "$json_file" || echo "0")
+    local clat_avg_write=$(jq -r '.jobs[0].write.clat_ns.mean // 0' "$json_file" || echo "0")
     
-    local ctx=$(jq -r '.jobs[0].ctx // 0' "$json_file" 2>/dev/null || echo "N/A")
-    local majf=$(jq -r '.jobs[0].majf // 0' "$json_file" 2>/dev/null || echo "N/A")
-    local minf=$(jq -r '.jobs[0].minf // 0' "$json_file" 2>/dev/null || echo "N/A")
+    local ctx=$(jq -r '.jobs[0].ctx // 0' "$json_file" || echo "N/A")
+    local majf=$(jq -r '.jobs[0].majf // 0' "$json_file" || echo "N/A")
+    local minf=$(jq -r '.jobs[0].minf // 0' "$json_file" || echo "N/A")
     
-    local iodepth_level=$(jq -r '.jobs[0].read.io_depth_level // "N/A"' "$json_file" 2>/dev/null || echo "N/A")
+    local iodepth_level=$(jq -r '.jobs[0].read.io_depth_level // "N/A"' "$json_file" || echo "N/A")
     
     # Convert nanoseconds to milliseconds
-    lat_p99_read=$(awk "BEGIN {printf \"%.6f\", $lat_p99_read / 1000000}" 2>/dev/null || echo "$lat_p99_read")
-    lat_p99_write=$(awk "BEGIN {printf \"%.6f\", $lat_p99_write / 1000000}" 2>/dev/null || echo "$lat_p99_write")
-    lat_max_read=$(awk "BEGIN {printf \"%.6f\", $lat_max_read / 1000000}" 2>/dev/null || echo "$lat_max_read")
-    lat_max_write=$(awk "BEGIN {printf \"%.6f\", $lat_max_write / 1000000}" 2>/dev/null || echo "$lat_max_write")
+    lat_p99_read=$(awk "BEGIN {printf \"%.6f\", $lat_p99_read / 1000000}" || echo "$lat_p99_read")
+    lat_p99_write=$(awk "BEGIN {printf \"%.6f\", $lat_p99_write / 1000000}" || echo "$lat_p99_write")
+    lat_max_read=$(awk "BEGIN {printf \"%.6f\", $lat_max_read / 1000000}" || echo "$lat_max_read")
+    lat_max_write=$(awk "BEGIN {printf \"%.6f\", $lat_max_write / 1000000}" || echo "$lat_max_write")
     
-    slat_avg_read=$(awk "BEGIN {printf \"%.6f\", $slat_avg_read / 1000000}" 2>/dev/null || echo "$slat_avg_read")
-    clat_avg_read=$(awk "BEGIN {printf \"%.6f\", $clat_avg_read / 1000000}" 2>/dev/null || echo "$clat_avg_read")
-    slat_avg_write=$(awk "BEGIN {printf \"%.6f\", $slat_avg_write / 1000000}" 2>/dev/null || echo "$slat_avg_write")
-    clat_avg_write=$(awk "BEGIN {printf \"%.6f\", $clat_avg_write / 1000000}" 2>/dev/null || echo "$clat_avg_write")
+    slat_avg_read=$(awk "BEGIN {printf \"%.6f\", $slat_avg_read / 1000000}" || echo "$slat_avg_read")
+    clat_avg_read=$(awk "BEGIN {printf \"%.6f\", $clat_avg_read / 1000000}" || echo "$clat_avg_read")
+    slat_avg_write=$(awk "BEGIN {printf \"%.6f\", $slat_avg_write / 1000000}" || echo "$slat_avg_write")
+    clat_avg_write=$(awk "BEGIN {printf \"%.6f\", $clat_avg_write / 1000000}" || echo "$clat_avg_write")
     
     # Calculate averages
-    local lat_p99=$(awk "BEGIN {printf \"%.6f\", ($lat_p99_read + $lat_p99_write) / 2}" 2>/dev/null || echo "$lat_p99_read")
-    local lat_max=$(awk "BEGIN {printf \"%.6f\", ($lat_max_read > $lat_max_write) ? $lat_max_read : $lat_max_write}" 2>/dev/null || echo "$lat_max_read")
-    local bw_min=$(awk "BEGIN {printf \"%.2f\", ($bw_min_read < $bw_min_write) ? $bw_min_read : $bw_min_write}" 2>/dev/null || echo "$bw_min_read")
-    local bw_max=$(awk "BEGIN {printf \"%.2f\", ($bw_max_read > $bw_max_write) ? $bw_max_read : $bw_max_write}" 2>/dev/null || echo "$bw_max_read")
+    local lat_p99=$(awk "BEGIN {printf \"%.6f\", ($lat_p99_read + $lat_p99_write) / 2}" || echo "$lat_p99_read")
+    local lat_max=$(awk "BEGIN {printf \"%.6f\", ($lat_max_read > $lat_max_write) ? $lat_max_read : $lat_max_write}" || echo "$lat_max_read")
+    local bw_min=$(awk "BEGIN {printf \"%.2f\", ($bw_min_read < $bw_min_write) ? $bw_min_read : $bw_min_write}" || echo "$bw_min_read")
+    local bw_max=$(awk "BEGIN {printf \"%.2f\", ($bw_max_read > $bw_max_write) ? $bw_max_read : $bw_max_write}" || echo "$bw_max_read")
     
     # Calculate slat and clat averages
-    local slat=$(awk "BEGIN {printf \"%.6f\", ($slat_avg_read + $slat_avg_write) / 2}" 2>/dev/null || echo "$slat_avg_read")
-    local clat=$(awk "BEGIN {printf \"%.6f\", ($clat_avg_read + $clat_avg_write) / 2}" 2>/dev/null || echo "$clat_avg_read")
+    local slat=$(awk "BEGIN {printf \"%.6f\", ($slat_avg_read + $slat_avg_write) / 2}" || echo "$slat_avg_read")
+    local clat=$(awk "BEGIN {printf \"%.6f\", ($clat_avg_read + $clat_avg_write) / 2}" || echo "$clat_avg_read")
     
     # Return all metrics as pipe-separated string
     echo "lat_p99=${lat_p99}|lat_max=${lat_max}|disk_util=${disk_util}|cpu_usr=${cpu_usr}|cpu_sys=${cpu_sys}|bw_min=${bw_min}|bw_max=${bw_max}|slat=${slat}|clat=${clat}|ctx=${ctx}|majf=${majf}|minf=${minf}|iodepth=${iodepth_level}"
