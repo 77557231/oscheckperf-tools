@@ -306,6 +306,7 @@ cat output/original_data_*_all_results.log
 | `IO_TOOL`          | `fio`                       | IO 测试工具（sysbench/fio）                |
 | `EXEC_MODE`        | `parallel`                  | 执行模式（parallel/serial）                |
 | `NETWORK_PROTOCOL` | `tcp`                       | 网络协议（tcp/udp）                        |
+| `LOG_LEVEL`        | `INFO`                      | 日志级别（INFO/WARN/ERROR），INFO显示所有日志，WARN仅显示警告和错误，ERROR仅显示错误 |
 
 #### 网络测试参数
 
@@ -393,15 +394,15 @@ cat output/original_data_*_all_results.log
   - **并行度**：自动计算为 `floor(主机数 / 2)`，无需手动配置
   - **批次内**：多个主机对同时测试，无资源竞争
   - **批次间**：顺序执行，确保测试准确性
-  - **端口偏移**：批次内不同主机对使用不同端口（NETWORK\_PORT + 序号）
+  - **端口复用**：批次内所有主机对使用相同端口（`NETWORK_PORT`），不同主机上的iperf3服务器互不冲突
 
 | 主机数 | 并行度 | 总测试对 | 总批次数 | 所需端口数 |
 | --- | --- | ---- | ---- | ----- |
 | 2   | 1   | 1    | 1    | 1     |
 | 3   | 1   | 3    | 3    | 1     |
-| 4   | 2   | 6    | 3    | 2     |
-| 6   | 3   | 15   | 5    | 3     |
-| 8   | 4   | 28   | 7    | 4     |
+| 4   | 2   | 6    | 3    | 1     |
+| 6   | 3   | 15   | 5    | 1     |
+| 8   | 4   | 28   | 7    | 1     |
 
 ### 硬件信息及检查
 
@@ -433,7 +434,7 @@ cat output/original_data_*_all_results.log
 
 串行模式下，只需要25201端口
 
-矩阵模式下，当主机数 > 3 时会自动分配偏移端口（`NETWORK_PORT + 序号`），偏移量取决批次内主机个数，有防火墙时建议开发端口参考`matrix`部分所列端口数。
+矩阵模式下，所有主机对使用相同端口（`NETWORK_PORT`），不同主机上的iperf3服务器互不冲突，因此无论主机数多少，只需开放一个端口即可。
 
 ### Q4: 执行工具的用户（协调机）与 server\_list 中的用户必须一致吗？
 

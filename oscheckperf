@@ -1,7 +1,7 @@
 #!/bin/bash
 #--------------------------------------------------------------------------------
 #-- File name:   oscheckperf
-#-- Version:     v1.2.4
+#-- Version:     v1.2.5
 #-- Purpose:     Database System Benchmark Tool
 #-- Author:      Wanping Pan 
 #-- Description: One-click system benchmarking tool, supports configuration via config file or command line parameters
@@ -493,17 +493,14 @@ parse_args() {
                 exit 0
                 ;;
             --version)
-                echo "Version: 1.2.4"
+                echo "Version: 1.2.5"
                 exit 0
                 ;;
             --dry-run)
                 DRY_RUN=true
                 i=$((i + 1))
                 ;;
-            --debug)  
-                DEBUG=true  
-                i=$((i + 1))  
-                ;;
+
             --parallel)
                 export EXEC_MODE="parallel"
                 i=$((i + 1))
@@ -700,7 +697,6 @@ show_help() {
     echo "                    oscheckperf: update only the script"
     echo "                    all: delete old directory and recompile all components"
     echo "  -h                Show this help message"
-    echo "  --debug           Enable debug mode (show detailed logs)"
     echo "  --version         Show version information"
     echo "  --dry-run         Dry run mode (show commands without execution)"
     echo "  --parallel        Execute tests on multiple servers in parallel (default)"
@@ -711,6 +707,7 @@ show_help() {
     echo "  OUTPUT_DIR=<path>           Output directory (default: ./output)"
     echo "  SSH_PORT=<port>             SSH port for remote server connections (default: 22)"
     echo "  REPORT_HARDWARE_INFO=true|false  Include hardware information in report (default: true)"
+    echo "  LOG_LEVEL=INFO|WARN|ERROR   Log verbosity level (default: INFO)"
     echo ""
     echo "CPU test parameters:"
     echo "  CPU_THREADS=<number>        CPU test threads, 0=auto (default: 0)"
@@ -1000,52 +997,65 @@ get_network_advanced_info"
         echo "$ssh_output"
     fi
 }
-# Debug log function - always writes to log file, only prints to terminal when DEBUG is enabled
-# Usage: debug_log "message" [var1=value1] [var2=value2] ...
-# Output: stderr when DEBUG mode is enabled
-debug_log() {
+LOG_LEVEL="${LOG_LEVEL:-INFO}"
+
+log_info() {
+    if [ "$LOG_LEVEL" = "INFO" ]; then
+        local message="$1"
+        shift
+        local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+        local log_line="\033[92m[INFO]\033[0m $timestamp - $message"
+        for arg in "$@"; do
+            log_line="$log_line | $arg"
+        done
+        echo -e "$log_line" >&2
+    fi
+}
+
+log_warn() {
+    if [ "$LOG_LEVEL" = "INFO" ] || [ "$LOG_LEVEL" = "WARN" ]; then
+        local message="$1"
+        shift
+        local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+        local log_line="\033[93m[WARN]\033[0m $timestamp - $message"
+        for arg in "$@"; do
+            log_line="$log_line | $arg"
+        done
+        echo -e "$log_line" >&2
+    fi
+}
+
+log_error() {
     local message="$1"
     shift
-    
-    # Build log line
     local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
-    local log_line="[DEBUG] $timestamp - $message"
+    local log_line="\033[91m[ERROR]\033[0m $timestamp - $message"
     for arg in "$@"; do
         log_line="$log_line | $arg"
     done
-    
-    # Print to stderr only when DEBUG mode is enabled
-    if [ "$DEBUG" = "true" ]; then
-        echo "$log_line" >&2
-    fi
+    echo -e "$log_line" >&2
+}
+
+debug_log() {
+    log_info "$@"
 }
 
 # Timer functions for performance tracking
 declare -A TIMER_START_TIMES
 declare -A TIMER_ACCUMULATED
 
-# Start timer for a named phase
-# Usage: start_timer "phase_name"
 start_timer() {
-    if [ "$DEBUG" != "true" ]; then
-        return
-    fi
     local phase_name="$1"
     TIMER_START_TIMES["$phase_name"]=$(date +%s%3N)
-    echo "[DEBUG] $(date '+%Y-%m-%d %H:%M:%S') - ⏱️ Starting phase: $phase_name"
+    log_info "Starting phase: $phase_name"
 }
 
-# End timer for a named phase and print elapsed time
-# Usage: end_timer "phase_name"
 end_timer() {
-    if [ "$DEBUG" != "true" ]; then
-        return
-    fi
     local phase_name="$1"
     local start_time="${TIMER_START_TIMES[$phase_name]}"
     
     if [ -z "$start_time" ]; then
-        echo "[DEBUG] $(date '+%Y-%m-%d %H:%M:%S') - ⏱️ Timer not started for phase: $phase_name"
+        log_warn "Timer not started for phase: $phase_name"
         return
     fi
     
@@ -1053,38 +1063,29 @@ end_timer() {
     local elapsed_ms=$((end_time - start_time))
     local elapsed_sec=$(awk "BEGIN {printf \"%.2f\", $elapsed_ms / 1000}")
     
-    # Accumulate time
     if [ -z "${TIMER_ACCUMULATED[$phase_name]}" ]; then
         TIMER_ACCUMULATED["$phase_name"]=0
     fi
     TIMER_ACCUMULATED["$phase_name"]=$((TIMER_ACCUMULATED["$phase_name"] + elapsed_ms))
     
-    # Calculate accumulated seconds using awk with proper quoting
     local accumulated_sec=$(awk "BEGIN {printf \"%.2f\", ${TIMER_ACCUMULATED[$phase_name]} / 1000}")
-    echo "[DEBUG] $(date '+%Y-%m-%d %H:%M:%S') - ⏱️ Completed phase: $phase_name (elapsed: ${elapsed_sec}s, accumulated: ${accumulated_sec}s)"
+    log_info "Completed phase: $phase_name (elapsed: ${elapsed_sec}s, accumulated: ${accumulated_sec}s)"
 }
 
-# Print timer summary
-# Usage: print_timer_summary
 print_timer_summary() {
-    if [ "$DEBUG" != "true" ]; then
-        return
-    fi
-    
-    echo ""
-    echo "[DEBUG] $(date '+%Y-%m-%d %H:%M:%S') - ===== TIMER SUMMARY ====="
+    log_info "===== TIMER SUMMARY ====="
     
     local total_ms=0
     for phase in "${!TIMER_ACCUMULATED[@]}"; do
         local elapsed_ms="${TIMER_ACCUMULATED[$phase]}"
         local elapsed_sec=$(awk "BEGIN {printf \"%.2f\", $elapsed_ms / 1000}")
-        echo "[DEBUG]         $phase: ${elapsed_sec}s"
+        log_info "         $phase: ${elapsed_sec}s"
         total_ms=$((total_ms + elapsed_ms))
     done
     
     local total_sec=$(awk "BEGIN {printf \"%.2f\", $total_ms / 1000}")
-    echo "[DEBUG]         Total measured: ${total_sec}s"
-    echo "[DEBUG] ======================="
+    log_info "         Total measured: ${total_sec}s"
+    log_info "======================="
 }
 
 # ==============================================
@@ -2695,7 +2696,7 @@ run_serial_network_test() {
         else
             set_ssh_password "$server_ip"
             local server_ssh=$(get_ssh_command "$server_ip")
-            eval "$server_ssh 'killall iperf3 2>/dev/null || true'" > /dev/null 2>&1
+            eval "$server_ssh 'killall -9 iperf3 2>/dev/null || true'" > /dev/null 2>&1
         fi
         sleep 1
     fi
@@ -2865,7 +2866,7 @@ run_single_matrix_pair() {
                 generate_iperf3_text_from_json "$client_output_file" "$client_text_output"
             else
                 echo "  ⚠ Test failed: $src -> $dst"
-                eval "$dst_ssh 'killall iperf3 2>/dev/null || true'" > /dev/null 2>&1
+                eval "$dst_ssh 'killall -9 iperf3 2>/dev/null || true'" > /dev/null 2>&1
                 echo "$src|$dst|0"
                 return
             fi
@@ -2877,7 +2878,7 @@ run_single_matrix_pair() {
                 generate_iperf3_text_from_json "$client_output_file" "$client_text_output"
             else
                 echo "  ⚠ Test failed: $src -> $dst"
-                eval "$dst_ssh 'killall iperf3 2>/dev/null || true'" > /dev/null 2>&1
+                eval "$dst_ssh 'killall -9 iperf3 2>/dev/null || true'" > /dev/null 2>&1
                 echo "$src|$dst|0"
                 return
             fi
@@ -2905,7 +2906,7 @@ run_single_matrix_pair() {
         echo "[DRY RUN] Would stop iperf3 server on $dst"
         echo "[DRY RUN] $dst_ssh 'pkill -f \"iperf3 -s -p $port\"'"
     else
-        eval "$dst_ssh 'killall iperf3 2>/dev/null || true'" > /dev/null 2>&1
+        eval "$dst_ssh 'killall -9 iperf3 2>/dev/null || true'" > /dev/null 2>&1
         sleep 1
     fi
     
@@ -2935,7 +2936,6 @@ run_matrix_batch() {
     echo "  [Batch $batch_idx] Running $batch_size pairs in parallel..."
     
     # Start all batch servers in parallel
-    local server_ports=()
     local server_dsts=()
     local pair_idx=0
     
@@ -2950,7 +2950,7 @@ run_matrix_batch() {
     
     for pair in "${pairs[@]}"; do
         IFS='|' read -r src dst <<< "$pair"
-        local port=$((base_port + pair_idx))
+        local port="$base_port"
         
         echo "    Starting server on $dst with port $port..."
         set_ssh_password "$dst"
@@ -2959,17 +2959,14 @@ run_matrix_batch() {
         if [ "$DRY_RUN" = true ]; then
             echo "    [DRY RUN] $dst_ssh 'iperf3 -s -p $port -D --idle-timeout $server_idle_timeout --rcv-timeout $server_rcv_timeout'"
         else
-            # iperf3 -D daemonizes itself, so no & needed; SSH session returns immediately
-            if [ "$DEBUG" = "true" ]; then
-                # Capture output for diagnostic when debug mode is enabled
-                local server_output
-                server_output=$(eval "$dst_ssh 'iperf3 -s -p $port -D --idle-timeout $server_idle_timeout --rcv-timeout $server_rcv_timeout'" 2>&1)
-                local server_exit=$?
-                debug_log "SERVER_START_RESULT" "pair=$src|$dst" "port=$port" "exit_code=$server_exit" "output=$server_output"
+            local server_output
+            server_output=$(eval "$dst_ssh 'iperf3 -s -p $port -D --idle-timeout $server_idle_timeout --rcv-timeout $server_rcv_timeout'" 2>&1)
+            local server_exit=$?
+            if [ $server_exit -ne 0 ]; then
+                log_error "SERVER_START_FAILED" "pair=$src|$dst" "port=$port" "exit_code=$server_exit" "output=$server_output"
             else
-                eval "$dst_ssh 'iperf3 -s -p $port -D --idle-timeout $server_idle_timeout --rcv-timeout $server_rcv_timeout'"
+                log_info "SERVER_START_OK" "pair=$src|$dst" "port=$port" "exit_code=$server_exit"
             fi
-            server_ports+=("$port")
             server_dsts+=("$dst")
         fi
         
@@ -2992,7 +2989,7 @@ run_matrix_batch() {
                     IFS='|' read -r src dst <<< "$pair"
                     set_ssh_password "$dst"
                     local dst_ssh=$(get_ssh_command "$dst")
-                    eval "$dst_ssh 'killall iperf3 2>/dev/null || true'" > /dev/null 2>&1
+                    eval "$dst_ssh 'killall -9 iperf3 2>/dev/null || true'" > /dev/null 2>&1
                     retry_pair=$((retry_pair + 1))
                 done
                 sleep 1
@@ -3000,7 +2997,7 @@ run_matrix_batch() {
                 pair_idx=0
                 for pair in "${pairs[@]}"; do
                     IFS='|' read -r src dst <<< "$pair"
-                    local port=$((base_port + pair_idx))
+                    local port="$base_port"
                     set_ssh_password "$dst"
                     local dst_ssh=$(get_ssh_command "$dst")
                     eval "$dst_ssh 'iperf3 -s -p $port -D --idle-timeout $server_idle_timeout --rcv-timeout $server_rcv_timeout'"
@@ -3010,26 +3007,21 @@ run_matrix_batch() {
             fi
 
             server_ready=true
-            local pair_check=0
             for pair in "${pairs[@]}"; do
                 IFS='|' read -r src dst <<< "$pair"
-                local port=$((base_port + pair_check))
+                local port="$base_port"
 
                 set_ssh_password "$dst"
                 local dst_ssh=$(get_ssh_command "$dst")
 
-                # wait_for_iperf3_server internally polls every 1s up to timeout seconds
-                debug_log "SERVER_CHECK_START" "pair=$src|$dst" "port=$port" "timeout=15"
                 if wait_for_iperf3_server "$dst_ssh" "$port" "true" 15 "true"; then
                     echo "    ✓ Server $dst:$port ready"
-                    debug_log "SERVER_CHECK_OK" "pair=$src|$dst" "port=$port"
+                    log_info "SERVER_CHECK_OK" "pair=$src|$dst" "port=$port"
                 else
                     echo "    ✗ Server $dst:$port not ready"
-                    debug_log "SERVER_CHECK_FAIL" "pair=$src|$dst" "port=$port" "retry=$retry"
+                    log_warn "SERVER_CHECK_FAIL" "pair=$src|$dst" "port=$port" "retry=$retry"
                     server_ready=false
                 fi
-
-                pair_check=$((pair_check + 1))
             done
 
             if [ "$server_ready" = true ]; then
@@ -3041,7 +3033,16 @@ run_matrix_batch() {
 
         if [ "$server_ready" = false ]; then
             echo "    ✗ ERROR: Server startup failed after $max_retries retries"
-            # Still return results for all pairs with 0 bandwidth
+            echo "    --- Server diagnostics ---"
+            for pair in "${pairs[@]}"; do
+                IFS='|' read -r src dst <<< "$pair"
+                set_ssh_password "$dst"
+                local dst_ssh=$(get_ssh_command "$dst")
+                echo "    [$dst]"
+                eval "$dst_ssh 'echo \"  iperf3 processes: \$(ps aux 2>/dev/null | grep -E \"[i]perf3\" | wc -l)\"; echo \"  Port $base_port status: \$(ss -tlnp 2>/dev/null | grep \":$base_port\" || netstat -tlnp 2>/dev/null | grep \":$base_port\" || echo \"not listening\")\"; echo \"  iperf3 version: \$(iperf3 --version 2>/dev/null | head -1 || echo \"not found\")\"; echo \"  Firewall status: \$(systemctl is-active firewalld 2>/dev/null || systemctl is-active iptables 2>/dev/null || echo \"unknown\")\"'" | sed 's/^/      /'
+                log_error "SERVER_STARTUP_DIAGNOSTICS" "dst=$dst" "port=$base_port" "status=FAILED"
+            done
+            echo "    ---------------------------"
             for pair in "${pairs[@]}"; do
                 IFS='|' read -r src dst <<< "$pair"
                 echo "RESULT:$src|$dst|0"
@@ -3060,7 +3061,7 @@ run_matrix_batch() {
     
     for pair in "${pairs[@]}"; do
         IFS='|' read -r src dst <<< "$pair"
-        local port=$((base_port + pair_idx))
+        local port="$base_port"
         local client_output_file="$TMP_DIR/network_matrix_${batch_idx}_${pair_idx}_${TIMESTAMP}.json"
         local client_text_output="$TMP_DIR/network_matrix_${batch_idx}_${pair_idx}_${TIMESTAMP}_text.log"
         local client_timeout=$((duration + 30))  # Increased from 15s to 30s buffer
@@ -3100,16 +3101,18 @@ run_matrix_batch() {
     # Wait for all clients to complete
     if [ "$DRY_RUN" != true ]; then
         local wait_idx=0
-        debug_log "CLIENT_WAIT_START" "waiting_for=${#client_pids[@]} clients"
+        log_info "CLIENT_WAIT_START" "waiting_for=${#client_pids[@]} clients"
         for pid in "${client_pids[@]}"; do
             wait $pid 2>/dev/null
             local exit_code=$?
-            debug_log "CLIENT_WAIT_RESULT" "pid=$pid" "idx=$wait_idx" "exit_code=$exit_code"
+            if [ $exit_code -ne 0 ]; then
+                log_warn "CLIENT_WAIT_RESULT" "pid=$pid" "idx=$wait_idx" "exit_code=$exit_code"
+            else
+                log_info "CLIENT_WAIT_RESULT" "pid=$pid" "idx=$wait_idx" "exit_code=$exit_code"
+            fi
             wait_idx=$((wait_idx + 1))
         done
         
-        # Add a small delay to ensure file system cache is flushed
-        # This prevents race conditions where results may be read before fully written
         sleep 2
         
         # Parse results for all pairs
@@ -3118,24 +3121,37 @@ run_matrix_batch() {
             IFS='|' read -r client_output_file client_text_output src dst <<< "$output_info"
             IFS='|' read -r pair_src pair_dst <<< "${pairs[$pair_idx]}"
             
-            debug_log "RESULT_PARSE_START" "pair=$pair_src->$pair_dst" "json_file=$client_output_file"
+            log_info "RESULT_PARSE_START" "pair=$pair_src->$pair_dst" "json_file=$client_output_file"
             
             if [ -f "$client_output_file" ]; then
                 local file_size
                 file_size=$(wc -c < "$client_output_file" 2>/dev/null || echo "unknown")
-                debug_log "RESULT_FILE_INFO" "pair=$pair_src->$pair_dst" "size=${file_size}bytes" "first_200=$(head -c 200 "$client_output_file" 2>/dev/null | tr '\n' ' ')"
+                log_info "RESULT_FILE_INFO" "pair=$pair_src->$pair_dst" "size=${file_size}bytes"
+                
+                local file_content=$(cat "$client_output_file" 2>/dev/null | tr '\n' ' ')
+                
+                if [ "$file_size" -lt 100 ]; then
+                    log_warn "RESULT_FILE_TOO_SMALL" "pair=$pair_src->$pair_dst" "size=${file_size}bytes" "content=$file_content"
+                fi
                 
                 generate_iperf3_text_from_json "$client_output_file" "$client_text_output"
                 local bandwidth=$(parse_iperf3_matrix_result "$client_output_file")
-                debug_log "RESULT_BANDWIDTH" "pair=$pair_src->$pair_dst" "bandwidth=$bandwidth"
+                log_info "RESULT_BANDWIDTH" "pair=$pair_src->$pair_dst" "bandwidth=$bandwidth"
                 
                 display_per_second_throughput "$client_text_output" "$pair_dst (from $pair_src)"
                 append_to_original "NETWORK MATRIX TEST RESULTS ($pair_src -> $pair_dst)" "$client_text_output"
                 
-                # Check for zero bandwidth - indicates connection failure
                 if [ "$bandwidth" = "0" ] || [ "$bandwidth" = "0.00" ]; then
-                    echo "    ✗ ERROR: Zero bandwidth for $pair_src -> $pair_dst (server may not have started properly)"
-                    debug_log "RESULT_ZERO_BW" "pair=$pair_src->$pair_dst" "json_file=$client_output_file" "full_content=$(cat "$client_output_file" 2>/dev/null | tr '\n' ' ')"
+                    echo "    ✗ ERROR: Zero bandwidth for $pair_src -> $pair_dst"
+                    log_error "RESULT_ZERO_BW" "pair=$pair_src->$pair_dst" "json_file=$client_output_file"
+                    echo "    --- Client diagnostics ---"
+                    echo "    Output file size: ${file_size} bytes"
+                    if [ -n "$file_content" ]; then
+                        echo "    Output content: $file_content"
+                    else
+                        echo "    Output content: (empty)"
+                    fi
+                    echo "    ---------------------------"
                     client_results+=("$pair_src|$pair_dst|0")
                 else
                     echo "    ✓ Test completed: $pair_src -> $pair_dst = ${bandwidth} MB/s"
@@ -3143,7 +3159,7 @@ run_matrix_batch() {
                 fi
             else
                 echo "    ⚠ Test failed: $pair_src -> $pair_dst (timeout or error)"
-                debug_log "RESULT_FILE_MISSING" "pair=$pair_src->$pair_dst" "expected_file=$client_output_file"
+                log_error "RESULT_FILE_MISSING" "pair=$pair_src->$pair_dst" "expected_file=$client_output_file"
                 client_results+=("$pair_src|$pair_dst|0")
             fi
             
@@ -3156,29 +3172,30 @@ run_matrix_batch() {
         pair_idx=0
         for pair in "${pairs[@]}"; do
             IFS='|' read -r src dst <<< "$pair"
-            local port=$((base_port + pair_idx))
+            local port="$base_port"
             set_ssh_password "$dst"
             local dst_ssh=$(get_ssh_command "$dst")
-            echo "    [DRY RUN] $dst_ssh 'killall iperf3'"
+            echo "    [DRY RUN] $dst_ssh 'killall -9 iperf3'"
             pair_idx=$((pair_idx + 1))
         done
     else
-        debug_log "SERVER_CLEANUP_START" "batch=$batch_idx" "server_count=${#server_dsts[@]}"
+        log_info "SERVER_CLEANUP_START" "batch=$batch_idx" "server_count=${#server_dsts[@]}"
         pair_idx=0
         for dst in "${server_dsts[@]}"; do
-            local port=${server_ports[$pair_idx]}
+            local port="$base_port"
             set_ssh_password "$dst"
             local dst_ssh=$(get_ssh_command "$dst")
-            if [ "$DEBUG" = "true" ]; then
-                local cleanup_output
-                cleanup_output=$(eval "$dst_ssh 'killall iperf3 2>/dev/null || true'" 2>&1)
-                debug_log "SERVER_CLEANUP_RESULT" "dst=$dst" "port=$port" "output=$cleanup_output"
+            local cleanup_output
+            cleanup_output=$(eval "$dst_ssh 'killall -9 iperf3 2>/dev/null || true'" 2>&1)
+            local cleanup_exit=$?
+            if [ $cleanup_exit -ne 0 ] && [ -n "$cleanup_output" ]; then
+                log_warn "SERVER_CLEANUP_RESULT" "dst=$dst" "port=$port" "exit_code=$cleanup_exit" "output=$cleanup_output"
             else
-                eval "$dst_ssh 'killall iperf3 2>/dev/null || true'" > /dev/null 2>&1
+                log_info "SERVER_CLEANUP_RESULT" "dst=$dst" "port=$port" "exit_code=$cleanup_exit"
             fi
             pair_idx=$((pair_idx + 1))
         done
-        debug_log "SERVER_CLEANUP_WAIT" "wait=2s"
+        log_info "SERVER_CLEANUP_WAIT" "wait=2s"
         sleep 2
     fi
     
@@ -3247,7 +3264,7 @@ run_matrix_network_test() {
     for host in "${host_ips[@]}"; do
         set_ssh_password "$host"
         local host_ssh=$(get_ssh_command "$host")
-        eval "$host_ssh 'killall iperf3 2>/dev/null || true'" > /dev/null 2>&1
+        eval "$host_ssh 'killall -9 iperf3 2>/dev/null || true'" > /dev/null 2>&1
     done
     
     # Determine execution mode: serial vs batch parallel
@@ -3311,13 +3328,27 @@ run_matrix_network_test() {
             # Add sleep between batches to ensure old processes are fully cleaned up
             # and ports are released before starting next batch
             if [ $((batch_idx + 1)) -lt $num_batches ] && [ "$DRY_RUN" != true ]; then
-                echo "  Waiting for batch cleanup (2s)..."
-                debug_log "BATCH_CLEANUP_WAIT" "after_batch=$((batch_idx + 1))" "wait=2s"
+                log_info "BATCH_CLEANUP_WAIT" "after_batch=$((batch_idx + 1))" "wait=2s"
                 sleep 2
+            elif [ $((batch_idx + 1)) -eq $num_batches ] && [ "$DRY_RUN" != true ]; then
+                log_info "FINAL_BATCH_CLEANUP_WAIT" "after_batch=$((batch_idx + 1))" "wait=8s"
+                sleep 8
             fi
         done
         
-        debug_log "ALL_BATCHES_COMPLETED" "results_count=${#results[@]}"
+        log_info "ALL_BATCHES_COMPLETED" "results_count=${#results[@]}"
+        
+        # Check for zero bandwidth results and warn
+        local zero_count=0
+        for result in "${results[@]}"; do
+            local bw=$(echo "$result" | cut -d'|' -f3)
+            if [ "$bw" = "0" ] || [ "$bw" = "0.00" ]; then
+                zero_count=$((zero_count + 1))
+            fi
+        done
+        if [ $zero_count -gt 0 ]; then
+            log_warn "ZERO_BANDWIDTH_RESULTS" "count=$zero_count" "total=${#results[@]}"
+        fi
     else
         # Original serial execution mode
         # Generate host pairs (A→B only, no B→A duplicates)
@@ -3397,7 +3428,7 @@ run_matrix_network_test() {
                         results+=("$src|$dst|0")
                         echo "  ⚠ Test failed: $src -> $dst"
                         # Stop iperf3 server on destination
-                        eval "$dst_ssh 'killall iperf3 2>/dev/null || true'" > /dev/null 2>&1
+                        eval "$dst_ssh 'killall -9 iperf3 2>/dev/null || true'" > /dev/null 2>&1
                         continue
                     fi
                 else
@@ -3411,7 +3442,7 @@ run_matrix_network_test() {
                         results+=("$src|$dst|0")
                         echo "  ⚠ Test failed: $src -> $dst"
                         # Stop iperf3 server on destination
-                        eval "$dst_ssh 'killall iperf3 2>/dev/null || true'" > /dev/null 2>&1
+                        eval "$dst_ssh 'killall -9 iperf3 2>/dev/null || true'" > /dev/null 2>&1
                         continue
                     fi
                 fi
@@ -3444,7 +3475,7 @@ run_matrix_network_test() {
                 echo "[DRY RUN] Would stop iperf3 server on $dst"
                 echo "[DRY RUN] $dst_ssh 'pkill -f \"iperf3 -s -p $port\"'"
             else
-                eval "$dst_ssh 'killall iperf3 2>/dev/null || true'" > /dev/null 2>&1
+                eval "$dst_ssh 'killall -9 iperf3 2>/dev/null || true'" > /dev/null 2>&1
                 sleep 1
             fi
         done
@@ -3455,7 +3486,7 @@ run_matrix_network_test() {
     for host in "${host_ips[@]}"; do
         set_ssh_password "$host"
         local host_ssh=$(get_ssh_command "$host")
-        eval "$host_ssh 'killall iperf3 2>/dev/null || true'" > /dev/null 2>&1
+        eval "$host_ssh 'killall -9 iperf3 2>/dev/null || true'" > /dev/null 2>&1
     done
     
     # Generate matrix report
@@ -3474,199 +3505,6 @@ run_matrix_network_test() {
     echo "✓ Matrix network test completed"
     
     end_timer "network_test_matrix"
-}
-
-# Parallel network test (concurrent testing)
-run_parallel_network_test() {
-    start_timer "network_test_parallel"
-    echo "=== Parallel Network Performance Test ==="
-    
-    local port="$NETWORK_PORT"
-    local duration="$DURATION"
-    local parallel="${NETWORK_PARALLEL:-4}"
-    
-    # Create output directory if it doesn't exist
-    local output_dir="$OUTPUT_DIR"
-    mkdir -p "$output_dir"
-    
-    # Get all host IPs from server list or NETWORK_CLIENT_IP
-    local host_ips=()
-    if [ ${#target_servers[@]} -gt 0 ]; then
-        host_ips=(${target_servers[@]})
-    else
-        # Use NETWORK_CLIENT_IP if server list not provided
-        local client_ip="${NETWORK_CLIENT_IP:-}"
-        if [ -z "$client_ip" ]; then
-            echo "Skipping parallel network test: No client IPs configured"
-            return 0
-        fi
-        host_ips=($client_ip)
-    fi
-    
-    local num_hosts=${#host_ips[@]}
-    
-    if [ $num_hosts -lt 2 ]; then
-        echo "Skipping parallel network test: At least 2 hosts required"
-        return 0
-    fi
-    
-    echo "Starting parallel network test..."
-    echo "  Hosts: ${host_ips[*]}"
-    echo "  Test duration: ${duration}s"
-    echo "  Parallel connections: $parallel"
-    
-    # Use the first host as server
-    local server_ip="${host_ips[0]}"
-    echo "  Server: $server_ip"
-    
-    # Start iperf3 server on the first host
-    echo "  Starting iperf3 server on $server_ip..."
-    set_ssh_password "$server_ip"
-    local server_ssh=$(get_ssh_command "$server_ip")
-    
-    if [ "$DRY_RUN" = true ]; then
-        echo "[DRY RUN] $server_ssh 'iperf3 -s -p $port -D'"
-    else
-        eval "$server_ssh 'iperf3 -s -p $port -D'" > /dev/null 2>&1
-        sleep 3  # Wait for server to start
-    fi
-    
-    # Create results array
-    local results=()
-    local pids=()
-    local output_files=()
-    
-    # Run tests sequentially for all other hosts as clients (more reliable)
-    local client_idx=0
-    for ((i=1; i<num_hosts; i++)); do
-        local client_ip="${host_ips[$i]}"
-        client_idx=$((client_idx + 1))
-        
-        echo "  Starting test $client_idx: $client_ip -> $server_ip"
-        
-        local client_output_file="$TMP_DIR/network_parallel_${client_idx}_${TIMESTAMP}.json"
-        local client_text_output="$TMP_DIR/network_parallel_${client_idx}_${TIMESTAMP}_text.log"
-        
-        if [ "$DRY_RUN" = true ]; then
-            set_ssh_password "$client_ip"
-            local client_ssh=$(get_ssh_command "$client_ip")
-            echo "[DRY RUN] $client_ssh 'iperf3 -c $server_ip -p $port -t $duration -P $parallel -J'"
-            echo "[DRY RUN] $client_ssh 'iperf3 -c $server_ip -p $port -t $duration -P $parallel 2>&1 | grep -v ^$'"
-            results+=("$client_ip|$server_ip|0")
-            echo "  [DRY RUN] Test would complete: $client_ip -> $server_ip"
-        else
-            # Run iperf3 client sequentially with timeout
-            # Calculate timeout: duration + 15s buffer
-            local client_timeout=$((duration + 15))
-            set_ssh_password "$client_ip"
-            local client_ssh=$(get_ssh_command "$client_ip")
-            eval "timeout --signal=KILL $client_timeout $client_ssh 'iperf3 -c $server_ip -p $port -t $duration -P $parallel -J'" > "$client_output_file" 2>&1
-            local exit_status=$?
-            
-            if [ $exit_status -eq 0 ]; then
-                # Parse result
-                if [ -f "$client_output_file" ]; then
-                    local bandwidth=$(parse_iperf3_matrix_result "$client_output_file")
-                    results+=("$client_ip|$server_ip|$bandwidth")
-                    echo "  ✓ Test completed: $client_ip -> $server_ip = ${bandwidth} MB/s"
-                else
-                    results+=("$client_ip|$server_ip|0")
-                    echo "  ⚠ Test failed: $client_ip -> $server_ip (no output file)"
-                fi
-            else
-                results+=("$client_ip|$server_ip|0")
-                echo "  ⚠ Test failed: $client_ip -> $server_ip (timeout or error)"
-            fi
-        fi
-    done
-    
-    # Stop iperf3 server
-    if [ "$DRY_RUN" = true ]; then
-        echo "[DRY RUN] $server_ssh 'pkill -f \"iperf3 -s -p $port\"'"
-    else
-        eval "$server_ssh 'killall iperf3 2>/dev/null || true'" > /dev/null 2>&1
-        sleep 1
-    fi
-    
-    # Generate parallel test report
-    generate_parallel_report results "$server_ip"
-    
-    # Output summary of results to terminal
-    if [ ${#results[@]} -gt 0 ]; then
-        echo ""
-        for result in "${results[@]}"; do
-            IFS='|' read -r src dst bw <<< "$result"
-            echo "- $src -> $dst = ${bw} MB/s"
-        done
-    fi
-    
-    echo ""
-    echo "✓ Parallel network test completed"
-    
-    end_timer "network_test_parallel"
-}
-
-# Generate parallel test report
-generate_parallel_report() {
-    local -n results_arr=$1
-    local server_ip="$2"
-    local report_file="$TMP_DIR/network_parallel_report_${TIMESTAMP}.log"
-    
-    echo "Generating parallel network test report..."
-    
-    # Create report header
-    cat > "$report_file" << EOF
-================================================================================
-                           Parallel Network Test Report
-================================================================================
-
-Test Time: $(date '+%Y-%m-%d %H:%M:%S')
-Test Duration: $DURATIONs
-Parallel Connections: ${NETWORK_PARALLEL}
-Server: $server_ip
-
-================================================================================
-                               Test Results
-================================================================================
-EOF
-    
-    # Create results table
-    echo -n "Client IP" >> "$report_file"
-    printf "\t%15s" "Bandwidth (MB/s)" >> "$report_file"
-    echo >> "$report_file"
-    
-    # Output results to table
-    for result in "${results_arr[@]}"; do
-        IFS='|' read -r client_ip r_server_ip r_bw <<< "$result"
-        printf "%15s" "$client_ip" >> "$report_file"
-        printf "\t%15s" "$r_bw" >> "$report_file"
-        echo >> "$report_file"
-    done
-    
-    # Calculate statistics using common function
-    local stats=$(calculate_stats "${results_arr[@]}")
-    IFS='|' read -r total_bw avg_bw min_bw max_bw median_bw count <<< "$stats"
-    
-    # Add statistics to report
-    cat >> "$report_file" << EOF
-
-================================================================================
-                                Statistics
-================================================================================
-Total bandwidth: $(printf "%.2f" $total_bw) MB/s
-Average bandwidth: $(printf "%.2f" $avg_bw) MB/s
-Minimum bandwidth: $(printf "%.2f" $min_bw) MB/s
-Maximum bandwidth: $(printf "%.2f" $max_bw) MB/s
-Median bandwidth: $(printf "%.2f" $median_bw) MB/s
-Total test clients: $count
-
-================================================================================
-EOF
-    
-    echo "  ✓ Parallel report generated: $report_file"
-    
-    # Append report to combined results
-    append_to_original "PARALLEL NETWORK TEST REPORT" "$report_file"
 }
 
 # Parse iperf3 result for matrix test
@@ -3723,13 +3561,13 @@ parse_iperf3_matrix_result() {
     local json_file="$1"
     
     if [ ! -f "$json_file" ]; then
-        debug_log "PARSE_RESULT_FAIL" "file_not_found=$json_file"
+        log_error "PARSE_RESULT_FAIL" "file_not_found=$json_file"
         echo "0"
         return
     fi
     
     if ! jq_available; then
-        debug_log "PARSE_RESULT_FAIL" "jq_not_available"
+        log_error "PARSE_RESULT_FAIL" "jq_not_available"
         echo "0"
         return
     fi
@@ -3739,7 +3577,11 @@ parse_iperf3_matrix_result() {
     
     # Extract metrics
     local bandwidth_bps=$(echo "$json_content" | jq -r '.end.sum_received.bits_per_second // 0' 2>/dev/null)
-    debug_log "PARSE_RESULT_EXTRACT" "file=$json_file" "bps=$bandwidth_bps" "json_has_end=$(echo "$json_content" | jq -e '.end' >/dev/null 2>&1 && echo "yes" || echo "no")"
+    if [ "$bandwidth_bps" = "0" ]; then
+        log_warn "PARSE_RESULT_EXTRACT" "file=$json_file" "bps=$bandwidth_bps" "json_has_end=$(echo "$json_content" | jq -e '.end' >/dev/null 2>&1 && echo "yes" || echo "no")"
+    else
+        log_info "PARSE_RESULT_EXTRACT" "file=$json_file" "bps=$bandwidth_bps"
+    fi
     
     # Convert bps to MB/s: 1 MB/s = 8,000,000 bps
     local bandwidth_mbs=$(awk "BEGIN {printf \"%.2f\", $bandwidth_bps / 8000000}" 2>/dev/null || echo "0")
