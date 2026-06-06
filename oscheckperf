@@ -3101,14 +3101,11 @@ run_matrix_batch() {
     # Wait for all clients to complete
     if [ "$DRY_RUN" != true ]; then
         local wait_idx=0
-        log_info "CLIENT_WAIT_START" "waiting_for=${#client_pids[@]} clients"
         for pid in "${client_pids[@]}"; do
             wait $pid 2>/dev/null
             local exit_code=$?
             if [ $exit_code -ne 0 ]; then
                 log_warn "CLIENT_WAIT_RESULT" "pid=$pid" "idx=$wait_idx" "exit_code=$exit_code"
-            else
-                log_info "CLIENT_WAIT_RESULT" "pid=$pid" "idx=$wait_idx" "exit_code=$exit_code"
             fi
             wait_idx=$((wait_idx + 1))
         done
@@ -3126,7 +3123,6 @@ run_matrix_batch() {
             if [ -f "$client_output_file" ]; then
                 local file_size
                 file_size=$(wc -c < "$client_output_file" 2>/dev/null || echo "unknown")
-                log_info "RESULT_FILE_INFO" "pair=$pair_src->$pair_dst" "size=${file_size}bytes"
                 
                 local file_content=$(cat "$client_output_file" 2>/dev/null | tr '\n' ' ')
                 
@@ -3179,7 +3175,6 @@ run_matrix_batch() {
             pair_idx=$((pair_idx + 1))
         done
     else
-        log_info "SERVER_CLEANUP_START" "batch=$batch_idx" "server_count=${#server_dsts[@]}"
         pair_idx=0
         for dst in "${server_dsts[@]}"; do
             local port="$base_port"
@@ -3190,12 +3185,9 @@ run_matrix_batch() {
             local cleanup_exit=$?
             if [ $cleanup_exit -ne 0 ] && [ -n "$cleanup_output" ]; then
                 log_warn "SERVER_CLEANUP_RESULT" "dst=$dst" "port=$port" "exit_code=$cleanup_exit" "output=$cleanup_output"
-            else
-                log_info "SERVER_CLEANUP_RESULT" "dst=$dst" "port=$port" "exit_code=$cleanup_exit"
             fi
             pair_idx=$((pair_idx + 1))
         done
-        log_info "SERVER_CLEANUP_WAIT" "wait=2s"
         sleep 2
     fi
     
@@ -3328,10 +3320,8 @@ run_matrix_network_test() {
             # Add sleep between batches to ensure old processes are fully cleaned up
             # and ports are released before starting next batch
             if [ $((batch_idx + 1)) -lt $num_batches ] && [ "$DRY_RUN" != true ]; then
-                log_info "BATCH_CLEANUP_WAIT" "after_batch=$((batch_idx + 1))" "wait=2s"
                 sleep 2
             elif [ $((batch_idx + 1)) -eq $num_batches ] && [ "$DRY_RUN" != true ]; then
-                log_info "FINAL_BATCH_CLEANUP_WAIT" "after_batch=$((batch_idx + 1))" "wait=8s"
                 sleep 8
             fi
         done
