@@ -1,7 +1,7 @@
 #!/bin/bash
 #--------------------------------------------------------------------------------
 #-- File name:   oscheckperf
-#-- Version:     v1.2.6
+#-- Version:     v1.2.7
 #-- Purpose:     Database System Benchmark Tool
 #-- Author:      Wanping Pan 
 #-- Description: One-click system benchmarking tool, supports configuration via config file or command line parameters
@@ -493,7 +493,7 @@ parse_args() {
                 exit 0
                 ;;
             --version)
-                echo "Version: 1.2.6"
+                echo "Version: 1.2.7"
                 exit 0
                 ;;
             --dry-run)
@@ -2206,7 +2206,7 @@ bs=${bs}
 iodepth=${iodepth}
 numjobs=${numjobs}
 nrfiles=${file_num}
-filename=$IO_PATH/fio_test_${profile}_
+directory=$IO_PATH
 EOF
         
         # Show configuration file content (also shown in dry run mode)
@@ -2246,7 +2246,11 @@ EOF
         rm -f "$fio_conf"
         
         # Cleanup fio test files (support multiple files)
-        rm -f "$IO_PATH/fio_test_${profile}_"* 2>/dev/null || true
+        # Use if condition to ensure profile and IO_PATH are valid before deletion
+        # This prevents dangerous commands like "rm -f /.*" from being executed
+        if [ -n "$profile" ] && [ -d "$IO_PATH" ]; then
+            rm -f "$IO_PATH/${profile}."* 2>/dev/null || true
+        fi
         
         # Parse result
         if [ "$DRY_RUN" != true ] && [ -f "$json_output" ] && jq_available; then
