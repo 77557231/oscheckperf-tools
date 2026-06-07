@@ -1119,7 +1119,7 @@ parse_io_report_new() {
             echo "" >> "$report_file"
             echo "  # FIO Extended Metrics" >> "$report_file"
             echo "  -----------------------------------------------------------------------------------------------------------------------------------------" >> "$report_file"
-            printf "  %-15s %-9s %-9s %-6s %-9s %-9s %-8s %-8s %-7s %-12s %-12s %-6s %-6s %-6s\n" "Server IP" "slat(us)" "clat(us)" "Depth" "CPU(usr)" "CPU(sys)" "bw_min" "bw_max" "ctx" "aggrios" "aggrticks" "util" "aggrutil" "Mode" >> "$report_file"
+            printf "  %-15s %-9s %-9s %-6s %-9s %-9s %-8s %-8s %-7s %-13s %-13s %-6s %-6s %-6s\n" "Server IP" "slat(us)" "clat(us)" "Depth" "CPU(usr)" "CPU(sys)" "bw_min" "bw_max" "ctx" "aggrios" "aggrticks" "util" "aggrutil" "Mode" >> "$report_file"
             echo "  -----------------------------------------------------------------------------------------------------------------------------------------" >> "$report_file"
 
             while IFS='|' read -r ext_ip ext_mode ext_p99 ext_disk ext_cpu_usr ext_cpu_sys ext_slat ext_clat ext_iodepth ext_ctx ext_aggrios ext_aggrticks ext_aggrinque ext_aggrutil ext_bw_min ext_bw_max; do
@@ -1140,7 +1140,7 @@ parse_io_report_new() {
                 local b_min="${ext_bw_min:-N/A}"
                 local b_max="${ext_bw_max:-N/A}"
 
-                printf "  %-15s %-9s %-9s %-6s %-9s %-9s %-8s %-8s %-7s %-12s %-12s %-6s %-6s %-6s\n" \
+                printf "  %-15s %-9s %-9s %-6s %-9s %-9s %-8s %-8s %-7s %-13s %-13s %-6s %-6s %-6s\n" \
                     "$ext_ip" "$slat" "$clat" "$iodepth" "$cpu_usr" "$cpu_sys" "$b_min" "$b_max" "$ctx" "$aggrios" "$aggrticks" "$util" "$aggrutil" "$ext_mode" >> "$report_file"
             done < <(sort_io_results_by_mode "$fio_extended_file" 2)
         fi
