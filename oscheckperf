@@ -722,7 +722,7 @@ show_help() {
     echo "IO test parameters:"
     echo "  Common IO parameters:"
     echo "    IO_TOOL=sysbench|fio        IO test tool (default: fio)"
-    echo "    IO_TOTAL_SIZE=<size>        Total file size for IO test (default: 10G, supports: G/M/K units)"
+    echo "    IO_TOTAL_SIZE=<size>        Total file size for IO test (default: 70% of available space, min 1G, max 1024G, supports: G/M units)"
     echo "    IO_PATH=<path>              IO test directory path (default: \$HOME/oscheckperf/io_test)"
     echo ""
     echo "  sysbench-specific parameters:"
@@ -855,6 +855,68 @@ get_cpu_cores() {
 get_disk_available_kb() {
     local path="${1:-$BASE_DIR}"
     df -P "$path" | awk 'NR==2 {print $4}'
+}
+
+
+# Calculate IO_TOTAL_SIZE based on available disk space
+# Returns: IO_TOTAL_SIZE value (e.g., "70G", "1G", "1024G")
+# Logic: available_space * 70%, min 1G, max 1024G, fallback to 10G on error
+calculate_io_total_size() {
+    local io_path="${1:-$IO_PATH}"
+    local available_kb=$(get_disk_available_kb "$io_path")
+    
+    if [ -z "$available_kb" ] || ! [[ "$available_kb" =~ ^[0-9]+$ ]]; then
+        echo "10G"
+        return
+    fi
+    
+    local available_gb=$((available_kb / 1024 / 1024))
+    local default_size_gb=$((available_gb * 7 / 10))
+    
+    if [ "$default_size_gb" -lt 1 ]; then
+        echo "1G"
+    elif [ "$default_size_gb" -gt 1024 ]; then
+        echo "1024G"
+    else
+        echo "${default_size_gb}G"
+    fi
+}
+
+
+# Collect available disk space from all target servers (local + remote)
+# Returns: minimum available space in KB across all servers
+# Args: $1 - IO_PATH to check (optional, defaults to IO_PATH)
+collect_remote_disk_space() {
+    local io_path="${1:-$IO_PATH}"
+    local min_available_kb
+    local local_available_kb=$(get_disk_available_kb "$io_path")
+    
+    if [ -z "$local_available_kb" ] || ! [[ "$local_available_kb" =~ ^[0-9]+$ ]]; then
+        echo "0"
+        return
+    fi
+    
+    min_available_kb="$local_available_kb"
+    
+    if [ ${#target_servers[@]} -gt 0 ]; then
+        local get_disk_func=$(declare -f get_disk_available_kb)
+        
+        for ip in "${target_servers[@]}"; do
+            local ssh_cmd=$(get_ssh_command "$ip")
+            local remote_available_kb=$(eval "$ssh_cmd 'cd ~/oscheckperf && ($get_disk_func; get_disk_available_kb \"$io_path\")' 2>/dev/null")
+            
+            if [ -z "$remote_available_kb" ] || ! [[ "$remote_available_kb" =~ ^[0-9]+$ ]]; then
+                echo "0"
+                return
+            fi
+            
+            if [ "$remote_available_kb" -lt "$min_available_kb" ]; then
+                min_available_kb="$remote_available_kb"
+            fi
+        done
+    fi
+    
+    echo "$min_available_kb"
 }
 
 
@@ -4754,7 +4816,7 @@ main() {
     
     # Update default values based on requirements
     IO_TOOL="${IO_TOOL:-fio}"
-    IO_TOTAL_SIZE="${IO_TOTAL_SIZE:-10G}"
+    IO_TOTAL_SIZE="${IO_TOTAL_SIZE:-}"
     NETWORK_PARALLEL="${NETWORK_PARALLEL:-4}"
     SYSBENCH_PROFILES="${SYSBENCH_PROFILES:-seqrd seqwr rndrd rndwr}"
     FIO_PROFILES="${FIO_PROFILES:-read write randread randwrite}"
@@ -4943,6 +5005,29 @@ main() {
             
             # Set network test parameters
             export NETWORK_CLIENT_IP="$client_ips"
+        fi
+    fi
+    
+    # Calculate IO_TOTAL_SIZE dynamically based on available disk space
+    # This must be after target_servers is initialized for multi-server scenarios
+    if [ -z "$IO_TOTAL_SIZE" ]; then
+        if [ ${#target_servers[@]} -gt 0 ]; then
+            local min_kb=$(collect_remote_disk_space "$IO_PATH")
+            if [ "$min_kb" -gt 0 ]; then
+                local min_gb=$((min_kb / 1024 / 1024))
+                local default_size_gb=$((min_gb * 7 / 10))
+                if [ "$default_size_gb" -lt 1 ]; then
+                    IO_TOTAL_SIZE="1G"
+                elif [ "$default_size_gb" -gt 1024 ]; then
+                    IO_TOTAL_SIZE="1024G"
+                else
+                    IO_TOTAL_SIZE="${default_size_gb}G"
+                fi
+            else
+                IO_TOTAL_SIZE="10G"
+            fi
+        else
+            IO_TOTAL_SIZE=$(calculate_io_total_size "$IO_PATH")
         fi
     fi
     

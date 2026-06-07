@@ -29,8 +29,8 @@ yum install ethtool numactl
 
 > **重要**：必须先手动安装编译依赖库：
 >
-> - CentOS/RHEL: `sudo yum install -y automake autoconf libtool gcc make libaio-devel pkg-config`
-> - Ubuntu/Debian: `sudo apt-get install -y automake autoconf libtool libtool-bin gcc make libaio-dev pkg-config`
+> - CentOS/RHEL: `yum install -y automake autoconf libtool gcc make libaio-devel pkg-config`
+> - Ubuntu/Debian: `apt-get install -y automake autoconf libtool libtool-bin gcc make libaio-dev pkg-config`
 
 **编译安装组件**
 
@@ -88,7 +88,7 @@ yum install ethtool numactl
 
 ### 3. 服务器认证方式
 
-#### 方式一：SSH 免密登录（推荐）
+#### 方式一：SSH 免密登陆
 
 **服务器列表文件格式**：
 
@@ -149,7 +149,7 @@ yum install ethtool numactl
 # 查看最终性能报告
 cat output/report_benchmark_*.log
 
-# 查看解析后的测试数据
+# 查看终端输出日志
 cat output/data_*_all_results.log
 
 # 查看原始测试数据
@@ -299,14 +299,14 @@ cat output/original_data_*_all_results.log
 
 #### 通用参数
 
-| 参数                 | 默认值                         | 说明                                   |
-| ------------------ | --------------------------- | ------------------------------------ |
-| `IO_PATH`          | `$HOME/oscheckperf/io_test` | 测试文件目录，默认`$HOME/oscheckperf/io_test` |
-| `IO_TOTAL_SIZE`    | `10G`                       | 测试文件总大小（sysbench 和 fio 通用）           |
-| `IO_TOOL`          | `fio`                       | IO 测试工具（sysbench/fio）                |
-| `EXEC_MODE`        | `parallel`                  | 执行模式（parallel/serial）                |
-| `NETWORK_PROTOCOL` | `tcp`                       | 网络协议（tcp/udp）                        |
-| `LOG_LEVEL`        | `INFO`                      | 日志级别（INFO/WARN/ERROR），INFO显示所有日志，WARN仅显示警告和错误，ERROR仅显示错误 |
+| 参数                 | 默认值                         | 说明                                                                       |
+| ------------------ | --------------------------- | ------------------------------------------------------------------------ |
+| `IO_PATH`          | `$HOME/oscheckperf/io_test` | 测试文件目录，默认`$HOME/oscheckperf/io_test`                                     |
+| `IO_TOTAL_SIZE`    | 动态计算（剩余空间的70%，最小1G，最大1024G） | 测试文件总大小（sysbench 和 fio 通用），默认根据 IO\_PATH 对应文件系统剩余空间的70%动态计算，最小1G，最大1024G |
+| `IO_TOOL`          | `fio`                       | IO 测试工具（sysbench/fio）                                                    |
+| `EXEC_MODE`        | `parallel`                  | 执行模式（parallel/serial）                                                    |
+| `NETWORK_PROTOCOL` | `tcp`                       | 网络协议（tcp/udp）                                                            |
+| `LOG_LEVEL`        | `INFO`                      | 日志级别（INFO/WARN/ERROR），INFO显示所有日志，WARN仅显示警告和错误，ERROR仅显示错误                 |
 
 #### 网络测试参数
 
