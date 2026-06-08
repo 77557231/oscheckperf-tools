@@ -1,6 +1,6 @@
 # oscheckperf - 系统性能基准测试工具
 
-**oscheckperf** 是一款专为数据库场景设计的系统级性能基准测试工具，解决**硬件选型盲区**（CPU核数和内存大小无法验证实际性能）、**性能问题排查难**（缺乏基线数据无法定位根因）、**多机环境差异**、**工具碎片化**（多个压测工具手动执行效率低）等核心痛点。适用**性能分析**、 **POC选型**、**上线前系统规格检查**、**业务压测前基础性能摸底**、**更换硬件后性能回归**、**TPCC压测配套基线测试**、**迁移目标端/新环境性能评估**等场景，通过一键测试 CPU、内存、磁盘 IO、网络吞吐、线程调度、互斥锁六大核心维度，快速建立性能基线，识别潜在瓶颈，为数据库性能优化和稳定运行提供坚实的硬件数据支撑。支持单机和多机压测，提供一站式服务器硬件性能评估能力。
+**oscheckperf** 是一款专为数据库场景设计的系统级性能基准测试工具，支持 **CPU、内存、磁盘 IO、网络、线程、互斥锁** 六大核心维度的一键压测。适用于性能分析、POC 选型、上线前系统规格检查、性能回归验证等场景，支持单机和多机部署，提供快速、统一的硬件性能评估能力。
 
 ## 快速开始
 
@@ -156,90 +156,6 @@ cat output/data_*_all_results.log
 cat output/original_data_*_all_results.log
 ```
 
-## 输出指标说明
-
-### CPU 测试
-
-- **events/sec**：每秒执行事件数（越高越好）
-- **Avg Latency**：平均延迟（越低越好）
-- **Min Latency**：最小延迟（越低越好）
-- **P95 Latency**：95 百分位延迟（越低越好）
-- **P99 Latency**：99 百分位延迟（越低越好）
-- **Max Latency**：最大延迟（越低越好）
-- **Sum Latency**：累计延迟（越低越好）
-- **Threads fairness (events)**：线程事件公平性（格式为 avg/stddev，stddev 越小表示分布越均匀）
-- **Threads fairness (execution time)**：线程执行时间公平性
-
-### 内存测试
-
-- **Total operations**：总操作数
-- **operations/sec**：每秒内存操作数（越高越好）
-- **Transferred**：实际传输数据量（MiB）
-- **throughput**：内存吞吐量 MiB/s（越高越好）
-- **Avg Latency**：平均延迟（越低越好）
-- **Min Latency**：最小延迟（越低越好）
-- **Max Latency**：最大延迟（越低越好）
-- **P95 Latency**：95 百分位延迟（越低越好）
-- **Sum Latency**：累计延迟（越低越好）
-
-### IO 测试（sysbench）
-
-- **Read IOPS**：每秒读操作数（越高越好）
-- **Write IOPS**：每秒写操作数（越高越好）
-- **Total IOPS**：每秒总 IO 操作数（越高越好）
-- **fsyncs/s**：每秒 fsync 操作数（衡量同步写入性能）
-- **Read BW**：读吞吐量 MB/s（越高越好）
-- **Write BW**：写吞吐量 MB/s（越高越好）
-- **Total BW**：总吞吐量 MB/s（越高越好）
-- **Avg Latency**：平均延迟（越低越好）
-- **Min/Max Latency**：最小/最大延迟（越低越好）
-- **P95/P99 Latency**：95/99 百分位延迟（越低越好）
-- **Threads fairness**：线程公平性（events/execution time）
-
-### IO 测试（fio）
-
-- **Read/Write IOPS**：每秒读/写操作数（越高越好）
-- **Read/Write BW**：读/写吞吐量 MB/s（越高越好）
-- **Avg Latency**：平均延迟（越低越好）
-- **Min/Max/P95/P99 Latency**：最小/最大/95/99 百分位延迟（越低越好）
-- **Device utilization**：设备利用率（%）
-- **CPU user/system**：CPU 用户态/系统态利用率（%）
-- **bw\_min/bw\_max**：最小/最大带宽（反映带宽稳定性）
-- **slat/clat**：提交延迟/完成延迟（slat 指 IO 提交到设备的时间，clat 指设备处理完成的时间）
-- **ctx/majf/minf**：上下文切换/主要页错误/次要页错误（反映系统资源使用情况）
-- **iodepth\_level**：IO 队列深度级别（反映 IO 并发程度）
-
-### 网络测试
-
-- **Bandwidth (MB/s)**：网络带宽（越高越好）
-- **Retrans**：TCP 重传次数（越少越好）
-- **RTT(ms)**：往返时间（格式：平均值 (Min: 最小值, Max: 最大值)）
-- **CPU(%)**：发送端/接收端 CPU 利用率（格式：senderCPU%/receiverCPU%）
-
-### 线程测试
-
-- **total number of events**：总事件数
-- **total time**：总耗时（秒）
-- **Events/sec**：每秒线程事件数（越高越好）
-- **Avg Latency**：平均延迟（越低越好）
-- **Min Latency**：最小延迟（越低越好）
-- **Max Latency**：最大延迟（越低越好）
-- **P95 Latency**：95 百分位延迟（越低越好）
-- **Sum Latency**：累计延迟（越低越好）
-- **Threads fairness (events)**：线程事件公平性（格式 avg/stddev）
-
-### 互斥锁测试
-
-- **total number of events**：总事件数
-- **total time**：总耗时（秒）
-- **Transactions**：事务数（越高越好）
-- **TPS**：每秒事务数（越高越好）
-- **Avg Latency**：平均延迟（越低越好）
-- **Min Latency**：最小延迟（越低越好）
-- **Max Latency**：最大延迟（越低越好）
-- **P95 Latency**：95 百分位延迟（越低越好）
-- **Sum Latency**：累计延迟（越低越好）
-
 ## 常用参数
 
 #### sysbench 参数
@@ -325,6 +241,59 @@ cat output/original_data_*_all_results.log
 - 当配置 `FIO_FILE_NUM` 时，每个文件大小 = `IO_TOTAL_SIZE / FIO_FILE_NUM`
 - 例如：`IO_TOTAL_SIZE=1G`，`FIO_FILE_NUM=4` → 每个文件 256M
 
+## 输出指标说明
+
+### CPU 测试
+
+- **events/sec**：每秒执行事件数（越高越好）
+- **Avg Latency**：平均延迟（越低越好）
+- **Min Latency**：最小延迟（越低越好）
+- **P95 Latency**：95 百分位延迟（越低越好）
+- **P99 Latency**：99 百分位延迟（越低越好）
+- **Max Latency**：最大延迟（越低越好）
+- **Sum Latency**：累计延迟（越低越好）
+- **Threads fairness (events)**：线程事件公平性（格式为 avg/stddev，stddev 越小表示分布越均匀）
+- **Threads fairness (execution time)**：线程执行时间公平性
+
+### 内存测试
+
+- **Total operations**：总操作数
+- **operations/sec**：每秒内存操作数（越高越好）
+- **Transferred**：实际传输数据量（MiB）
+- **throughput**：内存吞吐量 MiB/s（越高越好）
+- **Avg Latency**：平均延迟（越低越好）
+- **Min Latency**：最小延迟（越低越好）
+- **Max Latency**：最大延迟（越低越好）
+- **P95 Latency**：95 百分位延迟（越低越好）
+- **Sum Latency**：累计延迟（越低越好）
+
+### IO 测试（sysbench）
+
+- **Read IOPS**：每秒读操作数（越高越好）
+- **Write IOPS**：每秒写操作数（越高越好）
+- **Total IOPS**：每秒总 IO 操作数（越高越好）
+- **fsyncs/s**：每秒 fsync 操作数（衡量同步写入性能）
+- **Read BW**：读吞吐量 MB/s（越高越好）
+- **Write BW**：写吞吐量 MB/s（越高越好）
+- **Total BW**：总吞吐量 MB/s（越高越好）
+- **Avg Latency**：平均延迟（越低越好）
+- **Min/Max Latency**：最小/最大延迟（越低越好）
+- **P95/P99 Latency**：95/99 百分位延迟（越低越好）
+- **Threads fairness**：线程公平性（events/execution time）
+
+### IO 测试（fio）
+
+- **Read/Write IOPS**：每秒读/写操作数（越高越好）
+- **Read/Write BW**：读/写吞吐量 MB/s（越高越好）
+- **Avg Latency**：平均延迟（越低越好）
+- **Min/Max/P95/P99 Latency**：最小/最大/95/99 百分位延迟（越低越好）
+- **Device utilization**：设备利用率（%）
+- **CPU user/system**：CPU 用户态/系统态利用率（%）
+- **bw\_min/bw\_max**：最小/最大带宽（反映带宽稳定性）
+- **slat/clat**：提交延迟/完成延迟（slat 指 IO 提交到设备的时间，clat 指设备处理完成的时间）
+- **ctx/majf/minf**：上下文切换/主要页错误/次要页错误（反映系统资源使用情况）
+- **iodepth\_level**：IO 队列深度级别（反映 IO 并发程度）
+
 ### 网络测试
 
 - **Bandwidth (MB/s)**：网络带宽（越高越好）
@@ -334,53 +303,52 @@ cat output/original_data_*_all_results.log
 
 ### 线程测试
 
-- **events/sec**：每秒线程事件数（越高越好）
-- **latency**：线程调度延迟（越低越好）
+- **total number of events**：总事件数
+- **total time**：总耗时（秒）
+- **Events/sec**：每秒线程事件数（越高越好）
+- **Avg Latency**：平均延迟（越低越好）
+- **Min Latency**：最小延迟（越低越好）
+- **Max Latency**：最大延迟（越低越好）
+- **P95 Latency**：95 百分位延迟（越低越好）
+- **Sum Latency**：累计延迟（越低越好）
+- **Threads fairness (events)**：线程事件公平性（格式 avg/stddev）
 
 ### 互斥锁测试
 
-- **transactions**：事务数（越高越好）
+- **total number of events**：总事件数
+- **total time**：总耗时（秒）
+- **Transactions**：事务数（越高越好）
 - **TPS**：每秒事务数（越高越好）
-- **latency**：锁等待延迟（越低越好）
+- **Avg Latency**：平均延迟（越低越好）
+- **Min Latency**：最小延迟（越低越好）
+- **Max Latency**：最大延迟（越低越好）
+- **P95 Latency**：95 百分位延迟（越低越好）
+- **Sum Latency**：累计延迟（越低越好）
 
-### 输出文件说明（`output` 可通过参数修改）：
+## 输出文件说明
+
+测试完成后，`output` 目录下生成三类文件：
 
 | 文件类型       | 路径                              | 说明          | 用途        |
-| ---------- | ------------------------------- | ----------- | --------- |
+| :--------- | :------------------------------ | :---------- | :-------- |
 | **原始测试数据** | `output/original_data_*.log`    | 所有测试的完整原始输出 | 问题排查、追溯   |
 | **命令输出结果** | `output/data_*.log`             | 结构化的测试结果    | 数据处理、二次分析 |
 | **最终报告**   | `output/report_benchmark_*.log` | 格式化的性能报告    | 直接查看、分享   |
 
-## 实用场景示例
+## 场景示例
 
 ### IO场景测试
-
-```bash
-# Vastbase/openGauss 数据库场景（高IOPS要求）
-./oscheckperf io IO_TOOL=fio FIO_PROFILES="randrw read" FIO_NUMJOBS=8 FIO_IODEPTH=64
-
-# MySQL 场景（混合读写）
-./oscheckperf io IO_TOOL=sysbench SYSBENCH_PROFILES="rndrw"
-
-# PostgreSQL 场景（高吞吐量）
-./oscheckperf io IO_TOOL=fio FIO_PROFILES="randrw" FIO_BS=16K FIO_NUMJOBS=16
-```
-
-### 阿里云云盘性能对标测试
 
 ```bash
 # 使用默认配置一键压测四个核心指标（参考阿里云官方测试规范）
 # read/write: bs=128K, iodepth=128, numjobs=1（测试吞吐量）
 # randread/randwrite: bs=4K, iodepth=32, numjobs=4（测试IOPS）
-./oscheckperf io IO_TOOL=fio
-
-# 自定义测试参数（保持原有逻辑，单值应用于所有profile）
-./oscheckperf io IO_TOOL=fio FIO_PROFILES="randread randwrite" FIO_BS=8K
+./oscheckperf io 
 
 # 自定义多值参数（与profile一一对应）
 ./oscheckperf io IO_TOOL=fio FIO_PROFILES="randread read" FIO_BS="4K 256K" FIO_IODEPTH="64 256"
 
-# 混合使用（部分参数多值，部分参数单值）
+# 自定义测试参数（部分参数多值，部分参数单值）
 ./oscheckperf io IO_TOOL=fio FIO_PROFILES="randread read" FIO_BS="4K 128K" FIO_NUMJOBS=8
 ```
 
@@ -390,27 +358,34 @@ cat output/original_data_*_all_results.log
   - 支持本地和远程服务器（自动检测）
   - 第一个主机为本机时直接执行，无需SSH开销
 - `matrix`：执行全矩阵交叉测试（每对服务器之间都进行测试）
-  - **自动分批并行**：当主机数 > 3 时，自动启用分批并行执行（参考 gpcheckperf）
+  - **自动分批并行**：当主机数 > 3 时，自动启用分批并行执行
   - **并行度**：自动计算为 `floor(主机数 / 2)`，无需手动配置
-  - **批次内**：多个主机对同时测试，无资源竞争
+  - **批次内**：多个主机对同时测试
   - **批次间**：顺序执行，确保测试准确性
   - **端口复用**：批次内所有主机对使用相同端口（`NETWORK_PORT`），不同主机上的iperf3服务器互不冲突
 
-| 主机数 | 并行度 | 总测试对 | 总批次数 | 所需端口数 |
-| --- | --- | ---- | ---- | ----- |
-| 2   | 1   | 1    | 1    | 1     |
-| 3   | 1   | 3    | 3    | 1     |
-| 4   | 2   | 6    | 3    | 1     |
-| 6   | 3   | 15   | 5    | 1     |
-| 8   | 4   | 28   | 7    | 1     |
+| 主机数 | batch并行度 | 总测试对 | 总批次数 | 所需端口数 |
+| --- | -------- | ---- | ---- | ----- |
+| 2   | 1        | 1    | 1    | 1     |
+| 3   | 1        | 3    | 3    | 1     |
+| 4   | 2        | 6    | 3    | 1     |
+| 6   | 3        | 15   | 5    | 1     |
+| 8   | 4        | 28   | 7    | 1     |
+
+<br />
+
+```shellscript
+# 仅测试网络信息（多机）
+./oscheckperf network -f server_list DURATION=300
+```
 
 ### 硬件信息及检查
 
 ```bash
-# 仅查看硬件信息
+# 仅查看多机硬件信息
 ./oscheckperf hardware -f server_list
 
-# 检查系统环境（依赖、权限、磁盘、网络）
+# 检查多机系统环境（依赖、权限、磁盘、网络）
 ./oscheckperf check -f server_list
 
 ```
@@ -419,11 +394,11 @@ cat output/original_data_*_all_results.log
 
 ### Q1: 测试需要 root 权限吗？
 
-非 root 用户运行时，硬件信息可能显示不完整（主要集中在dmidecode ），不影响测试功能。
+**A**: 非 root 用户运行时，硬件信息可能显示不完整（主要集中在dmidecode ），不影响测试功能。
 
 ### Q2: IO测试文件会自动清理吗？如何自定义测试路径？
 
-**A**: IO压测写入指定 `IO_PATH` 参数目录（默认 `$HOME/oscheckperf/io_test`），测试完成后会自动清理。可通过参数自定义路径：`./oscheckperf io IO_PATH=/data`
+IO压测写入指定 `IO_PATH` 参数目录（默认 `$HOME/oscheckperf/io_test`），测试完成后会自动清理。可通过参数自定义路径：`./oscheckperf io IO_PATH=/data`
 
 ### Q3: 需要哪些端口？
 
@@ -442,7 +417,7 @@ cat output/original_data_*_all_results.log
 
 ### Q5: IO 压测文件大小如何计算？
 
-**A**: sysbench 和 fio 的文件大小计算方式不同：
+sysbench 和 fio 的文件大小计算方式不同：
 
 #### sysbench 文件大小
 
@@ -463,9 +438,7 @@ cat output/original_data_*_all_results.log
 
 ### Q6: IO\_TOTAL\_SIZE 和 DURATION 的关系？RAID 缓存有影响吗？
 
-**A**:
-
-- `IO_TOTAL_SIZE` 是测试文件总大小，`DURATION` 是测试持续时间，两者独立配置
-- 当`IO_TOTAL_SIZE`较小时，`DURATION`内工具会反复读或写`IO_PATH`文件；sysbench 和 fio 都支持此机制
+- `IO_TOTAL_SIZE` 是测试文件总大小，`DURATION` 是测试持续时间，两者独立配置，当`IO_TOTAL_SIZE`较小时，`DURATION`内工具会反复读或写`IO_PATH`文件
 - `direct=1` 只绕过操作系统缓存，**无法绕过 RAID 卡缓存，**`IO_TOTAL_SIZE`和`DURATION`应合理设置大小，否则结果偏高。
+- `IO_TOTAL_SIZE` 已支持动态计算压测文件大小，详见前面参数说明
 
