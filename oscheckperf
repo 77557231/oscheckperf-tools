@@ -1,7 +1,7 @@
 #!/bin/bash
 #--------------------------------------------------------------------------------
 #-- File name:   oscheckperf
-#-- Version:     v1.2.7
+#-- Version:     v1.2.8
 #-- Purpose:     Database System Benchmark Tool
 #-- Author:      Wanping Pan 
 #-- Description: One-click system benchmarking tool, supports configuration via config file or command line parameters
@@ -493,7 +493,7 @@ parse_args() {
                 exit 0
                 ;;
             --version)
-                echo "Version: 1.2.7"
+                echo "Version: 1.2.8"
                 exit 0
                 ;;
             --dry-run)
@@ -3841,16 +3841,18 @@ generate_iperf3_text_from_json() {
         
         echo "$json_content" | jq -r '
             (.intervals // []) | to_entries[] |
-            .key + 1 as $idx |
-            .value.streams[0].start // 0 as $start |
-            (.value.streams[0].end // ($start + 1)) as $end |
-            (.value.streams[0].bytes // .value.streams[0].sum.bytes // 0) / 1048576 as $mb |
-            (.value.streams[0].bits_per_second // .value.streams[0].sum.bits_per_second // 0) as $bps |
-            ($start * 100 | round / 100) as $start_fmt |
-            ($end * 100 | round / 100) as $end_fmt |
-            ($mb * 100 | round / 100) as $mb_fmt |
-            (if $bps > 1000000000 then ($bps / 1000000000 * 100 | round / 100) as $bps_fmt | $bps_fmt | tostring + " Gbits/sec" else ($bps / 1000000 * 100 | round / 100) as $bps_fmt | $bps_fmt | tostring + " Mbits/sec" end) as $bps_str |
-            "[\($idx)] \($start_fmt)-\($end_fmt) sec  \($mb_fmt) MBytes  \($bps_str)"
+            {
+                idx: (.key + 1),
+                start: (.value.streams[0].start // 0),
+                end: (.value.streams[0].end // ((.value.streams[0].start // 0) + 1)),
+                mb: (([.value.streams[].bytes // .value.streams[].sum.bytes // 0] | add) / 1048576),
+                bps: ([.value.streams[].bits_per_second // .value.streams[].sum.bits_per_second // 0] | add)
+            } |
+            ((.start * 100 | round / 100) as $sf |
+            (.end * 100 | round / 100) as $ef |
+            (.mb * 100 | round / 100) as $mf |
+            (if .bps > 1000000000 then (.bps / 1000000000 * 100 | round / 100 | tostring + " Gbits/sec") else (.bps / 1000000 * 100 | round / 100 | tostring + " Mbits/sec") end) as $bs |
+            "[\(.idx)] \($sf)-\($ef) sec  \($mf) MBytes  \($bs)")
         ' 2>/dev/null || true
         
         echo ""
@@ -5499,7 +5501,11 @@ compile_package() {
     
     if [ -z "$actual_src_dir" ] || [ ! -d "$actual_src_dir" ]; then
         echo "  ✗ Failed to find source directory for $package_name"
-        find . -maxdepth 1 -type d -name "*${src_dir}*" -exec rm -rf {} \; 2>/dev/null || true
+        # Use if condition to ensure src_dir is valid before deletion
+        # This prevents dangerous commands like "rm -rf *" from being executed
+        if [ -n "$src_dir" ]; then
+            rm -rf "./${src_dir}" "./${package_name}-${src_dir}" "./${src_dir}-${package_name}" 2>/dev/null || true
+        fi
         rm -f "$log_file"
         return 1
     fi
