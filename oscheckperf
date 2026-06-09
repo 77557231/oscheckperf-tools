@@ -4462,36 +4462,38 @@ generate_report() {
     printf -- "%-28s %-20s %-25s\n" "Parallel Connections" "NETWORK_PARALLEL" "$NETWORK_PARALLEL" >> "$report_file"
     printf -- "\n" >> "$report_file"
     
-    # Threads Test Configuration Table
-    printf -- "[Threads Test Configuration]\n" >> "$report_file"
-    printf -- "--------------------------------------------------------------------------------\n" >> "$report_file"
-    printf -- "%-28s %-20s %-25s\n" "Parameter" "Env Var" "Value" >> "$report_file"
-    printf -- "--------------------------------------------------------------------------------\n" >> "$report_file"
-    printf -- "%-28s %-20s %-25s\n" "Enabled" "THREADS_ENABLED" "$THREADS_ENABLED" >> "$report_file"
-    printf -- "%-28s %-20s %-25s\n" "Duration" "DURATION" "${unified_duration}s" >> "$report_file"
-    printf -- "%-28s %-20s %-25s\n" "Yields" "THREADS_YIELDS" "$THREADS_YIELDS" >> "$report_file"
-    printf -- "%-28s %-20s %-25s\n" "Locks" "THREADS_LOCKS" "$THREADS_LOCKS" >> "$report_file"
-    if [ "$THREADS_NUM" != "0" ]; then
-        printf -- "%-28s %-20s %-25s\n" "Threads" "THREADS_NUM" "$THREADS_NUM" >> "$report_file"
-    else
-        printf -- "%-28s %-20s %-25s\n" "Threads" "THREADS_NUM" "auto" >> "$report_file"
+    if [ "$THREADS_ENABLED" = "true" ]; then
+        printf -- "[Threads Test Configuration]\n" >> "$report_file"
+        printf -- "--------------------------------------------------------------------------------\n" >> "$report_file"
+        printf -- "%-28s %-20s %-25s\n" "Parameter" "Env Var" "Value" >> "$report_file"
+        printf -- "--------------------------------------------------------------------------------\n" >> "$report_file"
+        printf -- "%-28s %-20s %-25s\n" "Enabled" "THREADS_ENABLED" "$THREADS_ENABLED" >> "$report_file"
+        printf -- "%-28s %-20s %-25s\n" "Duration" "DURATION" "${unified_duration}s" >> "$report_file"
+        printf -- "%-28s %-20s %-25s\n" "Yields" "THREADS_YIELDS" "$THREADS_YIELDS" >> "$report_file"
+        printf -- "%-28s %-20s %-25s\n" "Locks" "THREADS_LOCKS" "$THREADS_LOCKS" >> "$report_file"
+        if [ "$THREADS_NUM" != "0" ]; then
+            printf -- "%-28s %-20s %-25s\n" "Threads" "THREADS_NUM" "$THREADS_NUM" >> "$report_file"
+        else
+            printf -- "%-28s %-20s %-25s\n" "Threads" "THREADS_NUM" "auto" >> "$report_file"
+        fi
+        printf -- "\n" >> "$report_file"
     fi
-    printf -- "\n" >> "$report_file"
     
-    # Mutex Test Configuration Table
-    printf -- "[Mutex Test Configuration]\n" >> "$report_file"
-    printf -- "--------------------------------------------------------------------------------\n" >> "$report_file"
-    printf -- "%-28s %-20s %-25s\n" "Parameter" "Env Var" "Value" >> "$report_file"
-    printf -- "--------------------------------------------------------------------------------\n" >> "$report_file"
-    printf -- "%-28s %-20s %-25s\n" "Enabled" "MUTEX_ENABLED" "$MUTEX_ENABLED" >> "$report_file"
-    printf -- "%-28s %-20s %-25s\n" "Duration" "DURATION" "${unified_duration}s" >> "$report_file"
-    printf -- "%-28s %-20s %-25s\n" "Mutex Num" "MUTEX_NUM" "$MUTEX_NUM" >> "$report_file"
-    if [ "$MUTEX_THREADS" != "0" ]; then
-        printf -- "%-28s %-20s %-25s\n" "Threads" "MUTEX_THREADS" "$MUTEX_THREADS" >> "$report_file"
-    else
-        printf -- "%-28s %-20s %-25s\n" "Threads" "MUTEX_THREADS" "auto" >> "$report_file"
+    if [ "$MUTEX_ENABLED" != "false" ]; then
+        printf -- "[Mutex Test Configuration]\n" >> "$report_file"
+        printf -- "--------------------------------------------------------------------------------\n" >> "$report_file"
+        printf -- "%-28s %-20s %-25s\n" "Parameter" "Env Var" "Value" >> "$report_file"
+        printf -- "--------------------------------------------------------------------------------\n" >> "$report_file"
+        printf -- "%-28s %-20s %-25s\n" "Enabled" "MUTEX_ENABLED" "$MUTEX_ENABLED" >> "$report_file"
+        printf -- "%-28s %-20s %-25s\n" "Duration" "DURATION" "${unified_duration}s" >> "$report_file"
+        printf -- "%-28s %-20s %-25s\n" "Mutex Num" "MUTEX_NUM" "$MUTEX_NUM" >> "$report_file"
+        if [ "$MUTEX_THREADS" != "0" ]; then
+            printf -- "%-28s %-20s %-25s\n" "Threads" "MUTEX_THREADS" "$MUTEX_THREADS" >> "$report_file"
+        else
+            printf -- "%-28s %-20s %-25s\n" "Threads" "MUTEX_THREADS" "auto" >> "$report_file"
+        fi
+        printf -- "\n" >> "$report_file"
     fi
-    printf -- "\n" >> "$report_file"
     printf -- "================================================================================\n" >> "$report_file"
     printf -- "                           Test Results Summary\n" >> "$report_file"
     printf -- "================================================================================\n" >> "$report_file"
@@ -4849,7 +4851,7 @@ main() {
     MEMORY_ENABLED="${MEMORY_ENABLED:-true}"
     IO_ENABLED="${IO_ENABLED:-true}"
     THREADS_ENABLED="${THREADS_ENABLED:-true}"
-    MUTEX_ENABLED="${MUTEX_ENABLED:-true}"
+    MUTEX_ENABLED="${MUTEX_ENABLED:-false}"
     NETWORK_ENABLED="${NETWORK_ENABLED:-true}"
     
     # Save config file ENABLED flags BEFORE parse_args resets them
