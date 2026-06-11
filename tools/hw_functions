@@ -3,6 +3,8 @@
 # This file contains all hardware info functions used by oscheckperf
 # Both local and remote execution use the same source
 
+declare -a HARDWARE_SUMMARY_LINES=()
+
 # Get CPU architecture
 get_cpu_arch() {
     uname -m 2>/dev/null || echo "unknown"
@@ -485,7 +487,20 @@ get_disk_info_detailed() {
                     fi
                     if [ -f "/sys/block/$name/queue/rotational" ]; then
                         rotational=$(cat "/sys/block/$name/queue/rotational" 2>/dev/null)
-                        if [ "$rotational" = "0" ]; then
+                        local is_virtual="false"
+                        if command -v systemd-detect-virt &>/dev/null; then
+                            local virt_output=$(systemd-detect-virt 2>/dev/null)
+                            if [ "$virt_output" != "none" ] && [ -n "$virt_output" ]; then
+                                is_virtual="true"
+                            fi
+                        else
+                            if grep -qi 'kvm' /proc/cpuinfo 2>/dev/null || grep -qi 'qemu' /sys/devices/virtual/dmi/id/product_name 2>/dev/null || grep -qi 'vmware' /sys/devices/virtual/dmi/id/product_name 2>/dev/null || grep -qi 'hypervisor' /proc/cpuinfo 2>/dev/null; then
+                                is_virtual="true"
+                            fi
+                        fi
+                        if [ "$is_virtual" = "true" ]; then
+                            disk_type="Virtual"
+                        elif [ "$rotational" = "0" ]; then
                             disk_type="SSD"
                         elif [ "$rotational" = "1" ]; then
                             disk_type="HDD"
@@ -1416,6 +1431,7 @@ print_node_hardware_info() {
     local report_file="$1"
     local node_info="$2"
     local prefix="$3"
+    local node_ip="${4:-}"
     
     local cpu_arch="N/A"
     local machine_type="N/A"
@@ -1432,6 +1448,9 @@ print_node_hardware_info() {
     local mem_freq="N/A"
     local mem_channels="N/A"
     local mem_slots_detail=""
+    local mem_total_slots="N/A"
+    local mem_used_slots="N/A"
+    local mem_manufacturer="N/A"
     local net_bond="N/A"
     local net_count="N/A"
     local in_disk="false"
@@ -1539,6 +1558,18 @@ print_node_hardware_info() {
             network_lines+=("$line")
         elif [ "$in_slots" = "true" ] && [ -n "$line" ]; then
             mem_slots_detail="$mem_slots_detail$line"$'\n'
+            if [ "$mem_total_slots" = "N/A" ]; then
+                local total=$(echo "$line" | grep -o 'Total Slots: [0-9]*' | awk '{print $NF}')
+                [ -n "$total" ] && mem_total_slots="$total"
+            fi
+            if [ "$mem_used_slots" = "N/A" ]; then
+                local used=$(echo "$line" | grep -o 'Used Slots: [0-9]*' | awk '{print $NF}')
+                [ -n "$used" ] && mem_used_slots="$used"
+            fi
+            if [ "$mem_manufacturer" = "N/A" ]; then
+                local mf=$(echo "$line" | grep -o 'Manufacturer: [A-Za-z0-9 ]*' | cut -d':' -f2- | xargs)
+                [ -n "$mf" ] && mem_manufacturer="$mf"
+            fi
         elif [ "$in_cpu_advanced" = "true" ] && [ -n "$line" ]; then
             if [[ "$line" == CPU_L1D_CACHE:* ]]; then cpu_l1d_cache="${line#CPU_L1D_CACHE: }"
             elif [[ "$line" == CPU_L2_CACHE:* ]]; then cpu_l2_cache="${line#CPU_L2_CACHE: }"
@@ -1627,6 +1658,26 @@ print_node_hardware_info() {
     print_inode_section "$report_file" "$prefix" "${inode_lines[@]}"
     print_disk_io_settings "$report_file" "$prefix" "$disk_queue_depth" "$disk_read_ahead" "$disk_trim" "$disk_max_sectors"
     print_network_info "$report_file" "$prefix" "$net_count" "$net_bond" "${all_network_lines[@]}"
+
+    local disk_lines_str=$(printf "%s\n" "${disk_lines[@]}")
+    local network_lines_str=$(printf "%s\n" "${all_network_lines[@]}")
+    
+    local mount_point="N/A"
+    if [ -n "$mount_options" ]; then
+        mount_point=$(echo "$mount_options" | awk '{print $1}')
+    fi
+    
+    if [ -z "$node_ip" ]; then
+        node_ip=$(get_machine_ip 2>/dev/null || echo "127.0.0.1")
+    fi
+    
+    print_hardware_summary "$report_file" "$prefix" \
+        "$node_ip" "$os_info" "$kernel_version" "$uptime" \
+        "$cpu_arch" "$machine_type" "$cpu_model" "$cpu_physical_cores" "$cpu_logical_cores" "$cpu_freq" "$cpu_governor" \
+        "$mem_total" "$mem_type" "$mem_channels" "$mem_total_slots" "$mem_used_slots" "$mem_manufacturer" "$numa_node_count" \
+        "$disk_lines_str" "$disk_queue_depth" \
+        "$net_bond" "$net_count" "$network_lines_str" \
+        "$mount_point"
 }
 
 # Unified hardware report function - supports both single and multi-node modes
@@ -1655,7 +1706,7 @@ generate_hardware_report_unified() {
             fi
             
             local node_info=$(get_node_hardware_info "$ip" "$is_local")
-            print_node_hardware_info "$report_file" "$node_info" "  "
+            print_node_hardware_info "$report_file" "$node_info" "  " "$ip"
             
             node_idx=$((node_idx + 1))
             printf -- "\n" >> "$report_file"
@@ -1755,9 +1806,179 @@ generate_hardware_report_unified() {
         print_inode_section "$report_file" "" "${inode_lines[@]}"
         print_disk_io_settings "$report_file" "" "$disk_queue" "$disk_ra" "$disk_trim_val" "$disk_ms"
         print_network_info "$report_file" "" "$net_count" "$net_bond" "${all_network_lines[@]}"
+
+        local disk_lines_str=$(printf "%s\n" "${disk_lines[@]}")
+        local network_lines_str=$(printf "%s\n" "${all_network_lines[@]}")
+        
+        local mem_total_slots="N/A"
+        local mem_used_slots="N/A"
+        local mem_manufacturer="N/A"
+        if [ -n "$mem_slots_detail" ]; then
+            mem_total_slots=$(echo "$mem_slots_detail" | grep -o 'Total Slots: [0-9]*' | awk '{print $NF}' | head -1)
+            mem_used_slots=$(echo "$mem_slots_detail" | grep -o 'Used Slots: [0-9]*' | awk '{print $NF}' | head -1)
+            mem_manufacturer=$(echo "$mem_slots_detail" | grep -o 'Manufacturer: [A-Za-z0-9 ]*' | cut -d':' -f2- | xargs | head -1)
+        fi
+        [ -z "$mem_total_slots" ] && mem_total_slots="N/A"
+        [ -z "$mem_used_slots" ] && mem_used_slots="N/A"
+        [ -z "$mem_manufacturer" ] && mem_manufacturer="N/A"
+        
+        local local_ip=$(get_machine_ip 2>/dev/null || echo "127.0.0.1")
+        
+        local mount_point="N/A"
+        if [ -n "$mount_opts" ] && [ "$mount_opts" != "N/A" ]; then
+            mount_point=$(echo "$mount_opts" | awk '{print $1}')
+        fi
+        
+        print_hardware_summary "$report_file" "" \
+            "$local_ip" "$os_info" "$kernel_version" "$uptime" \
+            "$cpu_arch" "$machine_type" "$cpu_model" "$cpu_physical_cores" "$cpu_logical_cores" "$cpu_freq" "$cpu_governor" \
+            "$mem_total" "$mem_type" "$mem_channels" "$mem_total_slots" "$mem_used_slots" "$mem_manufacturer" "$numa_count" \
+            "$disk_lines_str" "$disk_queue" \
+            "$net_bond" "$net_count" "$network_lines_str" \
+            "$mount_point"
     fi
     
+    print_hardware_comparison_tables "$report_file" ""
+    
     echo "$report_file"
+}
+
+print_hardware_summary() {
+    local report_file="$1"
+    local prefix="$2"
+    local node_ip="$3"
+    local os_info="$4"
+    local kernel_version="$5"
+    local uptime="$6"
+    local cpu_arch="$7"
+    local machine_type="$8"
+    local cpu_model="$9"
+    local cpu_physical_cores="${10}"
+    local cpu_logical_cores="${11}"
+    local cpu_freq="${12}"
+    local cpu_governor="${13}"
+    local mem_total="${14}"
+    local mem_type="${15}"
+    local mem_channels="${16}"
+    local mem_total_slots="${17}"
+    local mem_used_slots="${18}"
+    local mem_manufacturer="${19}"
+    local numa_count="${20}"
+    local disk_lines_str="${21}"
+    local disk_queue_depth="${22}"
+    local net_bond="${23}"
+    local net_count="${24}"
+    local network_lines_str="${25}"
+    local mount_point="${26:-N/A}"
+
+    local disk_type="N/A"
+    local disk_vendor="N/A"
+    local disk_model="N/A"
+    local scheduler="N/A"
+    local wcache="N/A"
+    local mountpoint="$mount_point"
+    local network_speed="N/A"
+    local network_mtu="N/A"
+    local network_driver="N/A"
+
+    IFS=$'\n' read -r -d '' -a disk_lines <<< "$disk_lines_str"
+    for disk_line in "${disk_lines[@]}"; do
+        if [ -n "$disk_line" ]; then
+            IFS='|' read -r name size type fstype mp dt vendor model sched wcache_val <<< "$disk_line"
+            if [ "$type" = "disk" ]; then
+                [ "$dt" != "-" ] && disk_type="$dt"
+                [ "$vendor" != "-" ] && disk_vendor="$vendor"
+                [ "$model" != "-" ] && disk_model="$model"
+                [ "$sched" != "-" ] && scheduler="$sched"
+                [ "$wcache_val" != "-" ] && wcache="$wcache_val"
+            elif [ "$type" = "part" ] && [ "$mountpoint" = "N/A" ] && [ "$mp" != "-" ]; then
+                mountpoint="$mp"
+            fi
+        fi
+    done
+
+    IFS=$'\n' read -r -d '' -a network_lines <<< "$network_lines_str"
+    for net_line in "${network_lines[@]}"; do
+        if [ -n "$net_line" ]; then
+            local speed=$(echo "$net_line" | grep -o 'Speed=[^,]*' | cut -d'=' -f2)
+            local mtu=$(echo "$net_line" | grep -o 'MTU=[^,]*' | cut -d'=' -f2)
+            local driver=$(echo "$net_line" | grep -o 'Driver=[^,]*' | cut -d'=' -f2)
+            if [ -n "$speed" ]; then
+                network_speed="$speed"
+            fi
+            if [ -n "$mtu" ]; then
+                network_mtu="$mtu"
+            fi
+            if [ -n "$driver" ]; then
+                network_driver="$driver"
+            fi
+        fi
+    done
+
+    if [ -n "$node_ip" ]; then
+        local summary_line="$node_ip|$os_info|$kernel_version|$uptime|$cpu_arch|$machine_type|$cpu_model|$cpu_physical_cores|$cpu_logical_cores|$cpu_freq|$cpu_governor|$mem_total|$mem_type|$mem_channels|$mem_total_slots|$mem_used_slots|$mem_manufacturer|$numa_count|$mountpoint|$disk_type|$disk_vendor|$disk_model|$scheduler|$wcache|$net_bond|$network_speed|$network_mtu|$network_driver|$net_count"
+        HARDWARE_SUMMARY_LINES+=("$summary_line")
+    fi
+}
+
+print_hardware_comparison_tables() {
+    local report_file="$1"
+    local prefix="$2"
+
+    if [ ${#HARDWARE_SUMMARY_LINES[@]} -eq 0 ]; then
+        return
+    fi
+
+    printf -- "\n" >> "$report_file"
+    printf -- "%s[Hardware Comparison - System Information]\n" "$prefix" >> "$report_file"
+    printf -- "%s--------------------------------------------------------------------------------------------------------------------------------\n" "$prefix" >> "$report_file"
+    printf -- "%s%-18s | %-22s | %-32s | %-37s\n" "$prefix" "IP Address" "OS Version" "Kernel Version" "System Uptime" >> "$report_file"
+    printf -- "%s--------------------------------------------------------------------------------------------------------------------------------\n" "$prefix" >> "$report_file"
+    for line in "${HARDWARE_SUMMARY_LINES[@]}"; do
+        IFS='|' read -r ip os kernel uptime cpu_arch machine_type cpu_model cpu_physical_cores cpu_logical_cores cpu_freq cpu_governor mem_total mem_type mem_channels mem_total_slots mem_used_slots mem_manufacturer numa_count mountpoint disk_type disk_vendor disk_model scheduler wcache net_bond network_speed network_mtu net_count <<< "$line"
+        printf -- "%s%-18s | %-22s | %-32s | %-37s\n" "$prefix" "$ip" "$os" "$kernel" "$uptime" >> "$report_file"
+    done
+    printf -- "\n" >> "$report_file"
+
+    printf -- "%s[Hardware Comparison - CPU]\n" "$prefix" >> "$report_file"
+    printf -- "%s--------------------------------------------------------------------------------\n" "$prefix" >> "$report_file"
+    printf -- "%s%-18s | %-8s | %-13s | %-13s | %-6s | %-10s | %-18s | %-30s\n" "$prefix" "IP Address" "Arch" "Physical Cores" "Logical Cores" "Freq" "Governor" "Machine Type" "Model" >> "$report_file"
+    printf -- "%s--------------------------------------------------------------------------------\n" "$prefix" >> "$report_file"
+    for line in "${HARDWARE_SUMMARY_LINES[@]}"; do
+        IFS='|' read -r ip os kernel uptime cpu_arch machine_type cpu_model cpu_physical_cores cpu_logical_cores cpu_freq cpu_governor mem_total mem_type mem_channels mem_total_slots mem_used_slots mem_manufacturer numa_count mountpoint disk_type disk_vendor disk_model scheduler wcache net_bond network_speed network_mtu net_count <<< "$line"
+        printf -- "%s%-18s | %-8s | %-13s | %-13s | %-6s | %-10s | %-18s | %-30s\n" "$prefix" "$ip" "$cpu_arch" "$cpu_physical_cores" "$cpu_logical_cores" "$cpu_freq" "$cpu_governor" "$machine_type" "$cpu_model" >> "$report_file"
+    done
+    printf -- "\n" >> "$report_file"
+
+    printf -- "%s[Hardware Comparison - Memory]\n" "$prefix" >> "$report_file"
+    printf -- "%s--------------------------------------------------------------------------------\n" "$prefix" >> "$report_file"
+    printf -- "%s%-18s | %-10s | %-8s | %-10s | %-10s | %-9s | %-8s | %-12s\n" "$prefix" "IP Address" "Total(MB)" "Channels" "Total Slots" "Used Slots" "NUMA Count" "Type" "Manufacturer" >> "$report_file"
+    printf -- "%s--------------------------------------------------------------------------------\n" "$prefix" >> "$report_file"
+    for line in "${HARDWARE_SUMMARY_LINES[@]}"; do
+        IFS='|' read -r ip os kernel uptime cpu_arch machine_type cpu_model cpu_physical_cores cpu_logical_cores cpu_freq cpu_governor mem_total mem_type mem_channels mem_total_slots mem_used_slots mem_manufacturer numa_count mountpoint disk_type disk_vendor disk_model scheduler wcache net_bond network_speed network_mtu net_count <<< "$line"
+        printf -- "%s%-18s | %-10s | %-8s | %-10s | %-10s | %-9s | %-8s | %-12s\n" "$prefix" "$ip" "$mem_total" "$mem_channels" "$mem_total_slots" "$mem_used_slots" "$numa_count" "$mem_type" "$mem_manufacturer" >> "$report_file"
+    done
+    printf -- "\n" >> "$report_file"
+
+    printf -- "%s[Hardware Comparison - IO]\n" "$prefix" >> "$report_file"
+    printf -- "%s--------------------------------------------------------------------------------\n" "$prefix" >> "$report_file"
+    printf -- "%s%-18s | %-14s | %-5s | %-8s | %-12s | %-14s | %-8s\n" "$prefix" "IP Address" "Mount" "Type" "Vendor" "Model" "Scheduler" "WCACHE" >> "$report_file"
+    printf -- "%s--------------------------------------------------------------------------------\n" "$prefix" >> "$report_file"
+    for line in "${HARDWARE_SUMMARY_LINES[@]}"; do
+        IFS='|' read -r ip os kernel uptime cpu_arch machine_type cpu_model cpu_physical_cores cpu_logical_cores cpu_freq cpu_governor mem_total mem_type mem_channels mem_total_slots mem_used_slots mem_manufacturer numa_count mountpoint disk_type disk_vendor disk_model scheduler wcache net_bond network_speed network_mtu net_count <<< "$line"
+        printf -- "%s%-18s | %-14s | %-5s | %-8s | %-12s | %-14s | %-8s\n" "$prefix" "$ip" "$mountpoint" "$disk_type" "$disk_vendor" "$disk_model" "$scheduler" "$wcache" >> "$report_file"
+    done
+    printf -- "\n" >> "$report_file"
+
+    printf -- "%s[Hardware Comparison - Network]\n" "$prefix" >> "$report_file"
+    printf -- "%s--------------------------------------------------------------------------------\n" "$prefix" >> "$report_file"
+    printf -- "%s%-18s | %-14s | %-12s | %-5s | %-12s | %-13s\n" "$prefix" "IP Address" "Bond Interfaces" "Speed" "MTU" "Driver" "Interface Count" >> "$report_file"
+    printf -- "%s--------------------------------------------------------------------------------\n" "$prefix" >> "$report_file"
+    for line in "${HARDWARE_SUMMARY_LINES[@]}"; do
+        IFS='|' read -r ip os kernel uptime cpu_arch machine_type cpu_model cpu_physical_cores cpu_logical_cores cpu_freq cpu_governor mem_total mem_type mem_channels mem_total_slots mem_used_slots mem_manufacturer numa_count mountpoint disk_type disk_vendor disk_model scheduler wcache net_bond network_speed network_mtu network_driver net_count <<< "$line"
+        printf -- "%s%-18s | %-14s | %-12s | %-5s | %-12s | %-13s\n" "$prefix" "$ip" "$net_bond" "$network_speed" "$network_mtu" "$network_driver" "$net_count" >> "$report_file"
+    done
+    printf -- "\n" >> "$report_file"
 }
 
 # ================================================================================

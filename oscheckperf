@@ -1,7 +1,7 @@
 #!/bin/bash
 #--------------------------------------------------------------------------------
 #-- File name:   oscheckperf
-#-- Version:     v1.2.8
+#-- Version:     v1.2.9
 #-- Purpose:     Database System Benchmark Tool
 #-- Author:      Wanping Pan 
 #-- Description: One-click system benchmarking tool, supports configuration via config file or command line parameters
@@ -493,7 +493,7 @@ parse_args() {
                 exit 0
                 ;;
             --version)
-                echo "Version: 1.2.8"
+                echo "Version: 1.2.9"
                 exit 0
                 ;;
             --dry-run)
@@ -722,7 +722,7 @@ show_help() {
     echo "IO test parameters:"
     echo "  Common IO parameters:"
     echo "    IO_TOOL=sysbench|fio        IO test tool (default: fio)"
-    echo "    IO_TOTAL_SIZE=<size>        Total file size for IO test (default: 70% of available space, min 1G, max 1024G, supports: G/M units)"
+    echo "    IO_TOTAL_SIZE=<size>        Total file size for IO test (default: 70% of available space, min 1G, max 100G, supports: G/M units)"
     echo "    IO_PATH=<path>              IO test directory path (default: \$HOME/oscheckperf/io_test)"
     echo ""
     echo "  sysbench-specific parameters:"
@@ -838,8 +838,8 @@ get_disk_available_kb() {
 
 
 # Calculate IO_TOTAL_SIZE based on available disk space
-# Returns: IO_TOTAL_SIZE value (e.g., "70G", "1G", "1024G")
-# Logic: available_space * 70%, min 1G, max 1024G, fallback to 10G on error
+# Returns: IO_TOTAL_SIZE value (e.g., "70G", "1G", "100G")
+# Logic: available_space * 70%, min 1G, max 100G, fallback to 10G on error
 calculate_io_total_size() {
     local io_path="${1:-$IO_PATH}"
     local available_kb=$(get_disk_available_kb "$io_path")
@@ -854,8 +854,8 @@ calculate_io_total_size() {
     
     if [ "$default_size_gb" -lt 1 ]; then
         echo "1G"
-    elif [ "$default_size_gb" -gt 1024 ]; then
-        echo "1024G"
+    elif [ "$default_size_gb" -gt 100 ]; then
+        echo "100G"
     else
         echo "${default_size_gb}G"
     fi
@@ -1102,7 +1102,6 @@ end_timer() {
     
     local end_time=$(date +%s%3N)
     local elapsed_ms=$((end_time - start_time))
-    local elapsed_sec=$(awk "BEGIN {printf \"%.2f\", $elapsed_ms / 1000}")
     
     if [ -z "${TIMER_ACCUMULATED[$phase_name]}" ]; then
         TIMER_ACCUMULATED["$phase_name"]=0
@@ -1110,7 +1109,7 @@ end_timer() {
     TIMER_ACCUMULATED["$phase_name"]=$((TIMER_ACCUMULATED["$phase_name"] + elapsed_ms))
     
     local accumulated_sec=$(awk "BEGIN {printf \"%.2f\", ${TIMER_ACCUMULATED[$phase_name]} / 1000}")
-    log_info "Completed phase: $phase_name (elapsed: ${elapsed_sec}s, accumulated: ${accumulated_sec}s)"
+    log_info "Completed phase: $phase_name (accumulated: ${accumulated_sec}s)"
 }
 
 print_timer_summary() {
@@ -5005,8 +5004,8 @@ main() {
                 local default_size_gb=$((min_gb * 7 / 10))
                 if [ "$default_size_gb" -lt 1 ]; then
                     IO_TOTAL_SIZE="1G"
-                elif [ "$default_size_gb" -gt 1024 ]; then
-                    IO_TOTAL_SIZE="1024G"
+                elif [ "$default_size_gb" -gt 100 ]; then
+                    IO_TOTAL_SIZE="100G"
                 else
                     IO_TOTAL_SIZE="${default_size_gb}G"
                 fi
