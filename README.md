@@ -78,10 +78,8 @@ yum install ethtool numactl
 #多机运行
 # 检查模式配合调试
 ./oscheckperf check -f server_list 
-# 使用配置文件
-./oscheckperf  -p parameter.conf -f server_list 
 # 指定子命令和参数
-./oscheckperf io DURATION=60 IO_TOOL=fio -f server_list
+./oscheckperf io IO_PATH=/data/io_test -f server_list
 # 网络测试指定服务器列表(相同选项中参数优先级大于配置文件)
 ./oscheckperf network -f server_list -p parameter.conf
 ```
@@ -97,12 +95,6 @@ yum install ethtool numactl
 192.168.1.101
 192.168.1.102
 192.168.1.103
-```
-
-**运行测试**：
-
-```bash
-./oscheckperf network -f server_list
 ```
 
 #### 方式二：密码认证
@@ -143,10 +135,12 @@ yum install ethtool numactl
 ./oscheckperf network -f server_list --dry-run
 ```
 
-<br />
+### 6. 输出与报告
+
+#### 查看测试结果
 
 ```bash
-# 查看最终性能报告
+# 查看最终性能报告（文本格式）
 cat output/report_benchmark_*.log
 
 # 查看终端输出日志
@@ -155,6 +149,40 @@ cat output/data_*_all_results.log
 # 查看原始测试数据
 cat output/original_data_*_all_results.log
 ```
+
+#### 生成 HTML 评估报告
+
+```bash
+# 自动读取最新日志生成 HTML 报告
+./oscheckperf --report
+
+# 执行测试后自动生成 HTML 报告
+./oscheckperf -f server_list IO_PATH=/data/io_test --report
+
+```
+
+#### 多报告对比
+
+```bash
+# 比较两个报告文件
+python3 tools/SKILL/report_eval.py \
+  output/report_benchmark_xxx.log \
+  output/report_benchmark_yyy.log \
+  -o output
+
+# 使用通配符比较多个报告
+python3 tools/SKILL/report_eval.py output/report_benchmark_*.log -o output
+```
+
+#### 报告说明
+
+| 报告类型 | 文件位置 | 说明 |
+|---------|---------|------|
+| HTML 报告 | `output/report_eval_<timestamp>.html` | 单报告评估（含智能分析） |
+| 对比报告 | `output/report_compare_<timestamp>.html` | 多报告对比（含智能分析） |
+
+- HTML 报告包含：CPU、内存、磁盘 IO、线程、网络性能评估，智能分析报告
+- 阈值判断：基于预定义的基线值进行达成率评估
 
 ## 常用参数
 
