@@ -85,26 +85,20 @@ CURRENT_SERVER_IP=""
 # ================================================================================
 
 
-# Get Linux distribution
 get_linux_distro() {
-    if [ -f /etc/kylin-release ]; then echo "kylin"; return; fi
-    if [ -f /etc/neokylin-release ]; then echo "neokylin"; return; fi
-    if [ -f /etc/uos-release ]; then echo "uos"; return; fi
-    if [ -f /etc/deepin-release ]; then echo "deepin"; return; fi
-    if [ -f /etc/startos-release ]; then echo "startos"; return; fi
-    if [ -f /etc/euleros-release ]; then echo "euleros"; return; fi
-    if [ -f /etc/openEuler-release ]; then echo "openeuler"; return; fi
-    if [ -f /etc/redhat-release ]; then
-        if grep -qi centos /etc/redhat-release; then echo "centos"; return; fi
-        if grep -qi fedora /etc/redhat-release; then echo "fedora"; return; fi
-        if grep -qi oracle /etc/redhat-release; then echo "oracle"; return; fi
-        if grep -qi fangde /etc/redhat-release; then echo "fangde"; return; fi
-        echo "redhat"; return;
+    if [ -f /etc/os-release ]; then
+        grep -oP '^PRETTY_NAME="?\K[^"]+' /etc/os-release | sed 's/^[ \t]*//;s/[ \t]*$//'
+        return
     fi
-    if [ -f /etc/debian_version ]; then echo "debian"; return; fi
-    if [ -f /etc/lsb-release ]; then grep -oP "DISTRIB_ID=\K.*" /etc/lsb-release | tr "[:upper:]" "[:lower:]"; return; fi
-    if [ -f /etc/os-release ]; then grep -oP "ID=\"?\K[^\"]+" /etc/os-release | tr "[:upper:]" "[:lower:]"; return; fi
-    echo "unknown"
+    if [ -f /etc/lsb-release ]; then
+        grep -oP 'DISTRIB_DESCRIPTION="?\K[^"]+' /etc/lsb-release | sed 's/^[ \t]*//;s/[ \t]*$//'
+        return
+    fi
+    if [ -f /etc/redhat-release ]; then
+        cat /etc/redhat-release | sed 's/^[ \t]*//;s/[ \t]*$//'
+        return
+    fi
+    [ -f /etc/debian_version ] && echo "Debian $(cat /etc/debian_version)"
 }
 
 # Get package manager family (rpm/deb) by directly detecting package manager
@@ -1092,7 +1086,6 @@ declare -A TIMER_ACCUMULATED
 start_timer() {
     local phase_name="$1"
     TIMER_START_TIMES["$phase_name"]=$(date +%s%3N)
-    log_info "Starting phase: $phase_name"
 }
 
 end_timer() {
@@ -2474,6 +2467,67 @@ get_machine_ip() {
     
     # Last fallback
     echo "127.0.0.1"
+}
+
+check_local_vastbase() {
+    local vastbase_process=$(ps -ef 2>/dev/null | grep -E '/bin/vastbase(\s|$)' | grep -v grep)
+    if [ -n "$vastbase_process" ]; then
+        echo "  WARNING: Vastbase main process detected on local machine:"
+        echo "$vastbase_process" | sed 's/^/    /'
+        return 1
+    fi
+    return 0
+}
+
+check_remote_vastbase() {
+    local target_ip="$1"
+    local ssh_cmd=$(get_ssh_command "$target_ip")
+    local vastbase_process=$(eval "$ssh_cmd 'ps -ef 2>/dev/null | grep -E \"/bin/vastbase(\\s|$)\" | grep -v grep'" 2>/dev/null)
+    if [ -n "$vastbase_process" ]; then
+        echo "  WARNING: Vastbase main process detected on remote server $target_ip:"
+        echo "$vastbase_process" | sed 's/^/    /'
+        return 1
+    fi
+    return 0
+}
+
+confirm_vastbase_warning() {
+    local has_vastbase=false
+    local local_ip=$(get_machine_ip)
+    
+    echo ""
+    echo "=== Checking Vastbase main process ==="
+    echo "  This helps prevent benchmark tests from impacting production databases."
+    echo ""
+
+    if ! check_local_vastbase; then
+        has_vastbase=true
+    fi
+    
+    if [ ${#target_servers[@]} -gt 0 ]; then
+        for ip in "${target_servers[@]}"; do
+            if [ "$ip" != "$local_ip" ]; then
+                if ! check_remote_vastbase "$ip"; then
+                    has_vastbase=true
+                fi
+            fi
+        done
+    fi
+    
+    if [ "$has_vastbase" = "true" ]; then
+        echo ""
+
+        echo "  IMPORTANT: Vastbase main process is running on one or more servers!"
+        echo "  Perform benchmark tests with caution in production environments."
+        echo ""
+        read -p "  Enter YES to continue, or any other key to cancel: " confirmation
+        if [ "$confirmation" != "YES" ]; then
+            echo ""
+            echo "  Benchmark cancelled by user."
+            exit 0
+        fi
+        echo ""
+    fi
 }
 
 # Display per-second throughput
@@ -4752,15 +4806,6 @@ main() {
     done
     export EXECUTION_COMMAND="$full_command"
     
-    # Debug output before parse_args
-    debug_log "Before parse_args" \
-        "CPU_ENABLED=$CPU_ENABLED" \
-        "MEMORY_ENABLED=$MEMORY_ENABLED" \
-        "IO_ENABLED=$IO_ENABLED" \
-        "NETWORK_ENABLED=$NETWORK_ENABLED" \
-        "THREADS_ENABLED=$THREADS_ENABLED" \
-        "MUTEX_ENABLED=$MUTEX_ENABLED"
-    
     # Extract CONFIG_FILE before parse_args so we can load config first
     local early_config_file=""
     for arg in "$@"; do
@@ -4886,15 +4931,6 @@ main() {
     if [ "$CHECK_ENABLED" != "true" ]; then
         validate_all_parameters
     fi
-    
-    # Debug output after parse_args
-    debug_log "After parse_args" \
-        "CPU_ENABLED=$CPU_ENABLED" \
-        "MEMORY_ENABLED=$MEMORY_ENABLED" \
-        "IO_ENABLED=$IO_ENABLED" \
-        "NETWORK_ENABLED=$NETWORK_ENABLED" \
-        "THREADS_ENABLED=$THREADS_ENABLED" \
-        "MUTEX_ENABLED=$MUTEX_ENABLED"
     
     # Set default values after parse_args to respect command line parameters
     FORMAT="${FORMAT:-txt}"
@@ -5127,15 +5163,10 @@ main() {
     fi
     
     # Run tests for all servers
-    if [ "$REMOTE" != "true" ]; then
-        echo "Running benchmark tests for all servers..."
-        echo "======================================"
-        echo ""
-    fi
     
-    # Run system checks before benchmark tests
+    # Check Vastbase main process and run system checks before benchmark tests
     if [ "$REMOTE" != "true" ] && [ "$CHECK_ENABLED" != "true" ] && [ "$DRY_RUN" != "true" ]; then
-        # Run system checks (skip in dry-run mode)
+        confirm_vastbase_warning
         check_all
     fi
     
@@ -5788,6 +5819,22 @@ distribute_to_server() {
     echo "  Getting remote system info..."
     remote_arch=$(eval "$ssh_cmd 'uname -m'") || { echo "  ✗ Failed to get remote architecture"; return 1; }
     remote_os=$(eval "$ssh_cmd 'uname -s'") || { echo "  ✗ Failed to get remote OS"; return 1; }
+    # Get remote distro with version
+    remote_distro=$(eval "$ssh_cmd '
+        if [ -f /etc/os-release ]; then
+            grep -oP \"^PRETTY_NAME=\\\"?\\K[^\\\"]+\" /etc/os-release | sed \"s/^[ \\t]*//;s/[ \\t]*\$//\"
+            exit
+        fi
+        if [ -f /etc/lsb-release ]; then
+            grep -oP \"DISTRIB_DESCRIPTION=\\\"?\\K[^\\\"]+\" /etc/lsb-release | sed \"s/^[ \\t]*//;s/[ \\t]*\$//\"
+            exit
+        fi
+        if [ -f /etc/redhat-release ]; then
+            cat /etc/redhat-release | sed \"s/^[ \\t]*//;s/[ \\t]*\$//\"
+            exit
+        fi
+        [ -f /etc/debian_version ] && echo \"Debian \$(cat /etc/debian_version)\" || echo unknown
+    '") || { echo "  ✗ Failed to get remote distribution"; return 1; }
     # Directly detect package manager family on remote server (avoids hardcoding distros)
     remote_family=$(eval "$ssh_cmd '
         if command -v rpm &> /dev/null || [ -f /etc/yum.conf ] || [ -f /etc/dnf/dnf.conf ] || [ -f /etc/redhat-release ]; then
@@ -5802,7 +5849,7 @@ distribute_to_server() {
     # Get local package manager family
     local local_family=$(get_pkg_manager_family)
     
-    echo "  Local: $local_os $local_arch ($local_distro, $local_family), Remote: $remote_os $remote_arch ($remote_family)"
+    echo "  Local: $local_os $local_arch ($local_distro, $local_family), Remote: $remote_os $remote_arch ($remote_distro, $remote_family)"
     
     # oscheckperf script is shell-based and cross-platform, no architecture/distro restrictions
     # Only check architecture/compatibility when distributing compiled binaries (all)
@@ -5825,26 +5872,6 @@ distribute_to_server() {
         if [ "$local_os" = "Linux" ] && [ "$remote_family" != "unknown" ]; then
             if [ "$STRICT_DISTRO_CHECK" = "true" ]; then
                 # Strict mode: require exact distro match
-                # Get remote distro name for strict mode comparison
-                remote_distro=$(eval "$ssh_cmd '
-                    if [ -f /etc/os-release ]; then grep -oP \"ID=\"?\\K[^\"]+\" /etc/os-release | tr \"[:upper:]\" \"[:lower:]\"; exit; fi
-                    if [ -f /etc/lsb-release ]; then grep -oP \"DISTRIB_ID=\\K.*\" /etc/lsb-release | tr \"[:upper:]\" \"[:lower:]\"; exit; fi
-                    if [ -f /etc/debian_version ]; then echo debian; exit; fi
-                    if [ -f /etc/redhat-release ]; then
-                        if grep -qi centos /etc/redhat-release; then echo centos; exit; fi
-                        if grep -qi fedora /etc/redhat-release; then echo fedora; exit; fi
-                        if grep -qi oracle /etc/redhat-release; then echo oracle; exit; fi
-                        echo redhat; exit;
-                    fi
-                    if [ -f /etc/kylin-release ]; then echo kylin; exit; fi
-                    if [ -f /etc/neokylin-release ]; then echo neokylin; exit; fi
-                    if [ -f /etc/uos-release ]; then echo uos; exit; fi
-                    if [ -f /etc/deepin-release ]; then echo deepin; exit; fi
-                    if [ -f /etc/euleros-release ]; then echo euleros; exit; fi
-                    if [ -f /etc/openEuler-release ]; then echo openeuler; exit; fi
-                    echo unknown
-                '") || remote_distro="unknown"
-                
                 if [ "$local_distro" != "$remote_distro" ]; then
                     echo "  ✗ Distribution mismatch: local is $local_distro, remote is $remote_distro"
                     echo "  - Skipping distribution to $target_ip (requires manual remote installation)"
@@ -6209,7 +6236,12 @@ install_components() {
     local local_ip=$(get_machine_ip)
     local install_dir="$BASE_DIR"
     
+    local os_arch=$(uname -m)
+    local os_name=$(get_linux_distro)
+    local pkg_manager=$(get_pkg_manager_family)
+    
     echo "=== Oscheckperf Installation and Distribution ==="
+    echo "  System: Linux $os_arch ($os_name, $pkg_manager)"
     
     # Determine what to install
     local install_all=false
