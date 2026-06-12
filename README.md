@@ -241,16 +241,24 @@ python3 tools/SKILL/report_eval.py output/report_benchmark_*.log -o output
 | `MUTEX_THREADS` | `0`    | 互斥锁测试线程数，0=自动 |
 | `MUTEX_NUM`     | `1024` | 互斥锁数量         |
 
+#### CPU 参数
+
+| 参数              | 默认值           | 说明                                  |
+| --------------- | ------------- | ----------------------------------- |
+| `CPU_THREADS`   | `0`           | CPU 测试线程数，0=自动（与CPU核心数一致）          |
+| `CPU_MAX_PRIME` | `20000`       | CPU 测试最大质数（越大测试越耗时）                 |
+
 #### 通用参数
 
 | 参数                 | 默认值                         | 说明                                                                       |
 | ------------------ | --------------------------- | ------------------------------------------------------------------------ |
+| `DURATION`         | `90`                        | 统一测试时长（秒）                                                           |
+| `OUTPUT_DIR`       | `./output`                  | 测试结果输出目录                                                              |
+| `SSH_PORT`         | `22`                        | 远程服务器 SSH 端口                                                           |
+| `REPORT_HARDWARE_INFO` | `true`                  | 报告中是否包含硬件信息（true/false）                                               |
 | `IO_PATH`          | `$HOME/oscheckperf/io_test` | 测试文件目录，默认`$HOME/oscheckperf/io_test`                                     |
-| `IO_TOTAL_SIZE`    | 动态计算（剩余空间的70%，最小1G，最大1024G） | 测试文件总大小（sysbench 和 fio 通用），默认根据 IO\_PATH 对应文件系统剩余空间的70%动态计算，最小1G，最大1024G |
+| `IO_TOTAL_SIZE`    | 动态计算（剩余空间的70%，最小1G，最大100G） | 测试文件总大小（sysbench 和 fio 通用），默认根据 IO\_PATH 对应文件系统剩余空间的70%动态计算，最小1G，最大100G |
 | `IO_TOOL`          | `fio`                       | IO 测试工具（sysbench/fio）                                                    |
-| `EXEC_MODE`        | `parallel`                  | 执行模式（parallel/serial）                                                    |
-| `NETWORK_PROTOCOL` | `tcp`                       | 网络协议（tcp/udp）                                                            |
-| `LOG_LEVEL`        | `INFO`                      | 日志级别（INFO/WARN/ERROR），INFO显示所有日志，WARN仅显示警告和错误，ERROR仅显示错误                 |
 
 #### 网络测试参数
 

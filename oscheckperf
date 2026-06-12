@@ -707,7 +707,7 @@ show_help() {
     echo "  --serial          Execute tests on multiple servers sequentially"
     echo ""
     echo "  Common parameters (KEY=VALUE format):"
-    echo "  DURATION=<seconds>          Unified test duration (default: 60)"
+    echo "  DURATION=<seconds>          Unified test duration (default: 90)"
     echo "  OUTPUT_DIR=<path>           Output directory (default: ./output)"
     echo "  SSH_PORT=<port>             SSH port for remote server connections (default: 22)"
     echo "  REPORT_HARDWARE_INFO=true|false  Include hardware information in report (default: true)"
@@ -4792,7 +4792,7 @@ main() {
     fi
     
     # Set default for DURATION if not set by config file
-    DURATION="${DURATION:-60}"
+    DURATION="${DURATION:-90}"
     
     # Set defaults for global path/port parameters if not set by config file
     OUTPUT_DIR="${OUTPUT_DIR:-./output}"
