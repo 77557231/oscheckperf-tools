@@ -1,7 +1,7 @@
 #!/bin/bash
 #--------------------------------------------------------------------------------
 #-- File name:   oscheckperf
-#-- Version:     v1.3.0
+#-- Version:     v1.3.1
 #-- Purpose:     Database System Benchmark Tool
 #-- Author:      Wanping Pan 
 #-- Description: One-click system benchmarking tool, supports configuration via config file or command line parameters
@@ -491,7 +491,7 @@ parse_args() {
                 i=$((i + 1))
                 ;;
             --version)
-                echo "Version: 1.3.0"
+                echo "Version: 1.3.1"
                 exit 0
                 ;;
             --dry-run)
@@ -523,6 +523,7 @@ parse_args() {
                     exit 1
                 fi
                 INSTALL_TARGET="${!next_idx}"
+                found_subcommand=true
                 i=$((i + 2))
                 ;;
             -p)
@@ -572,13 +573,13 @@ parse_args() {
                         export MUTEX_ENABLED=true
                         ;;
                     all)
-                        # Enable all tests
+                        # Enable all tests except mutex
                         export CPU_ENABLED=true
                         export MEMORY_ENABLED=true
                         export IO_ENABLED=true
                         export NETWORK_ENABLED=true
                         export THREADS_ENABLED=true
-                        export MUTEX_ENABLED=true
+                        export MUTEX_ENABLED=false
                         ;;
                     check)
                         # Only run checks
@@ -632,14 +633,18 @@ parse_args() {
         esac
     done
     
-    # If no subcommand specified, enable all tests
+    # Require explicit subcommand to prevent accidental execution
     if [ "$found_subcommand" = "false" ]; then
-        export CPU_ENABLED=true
-        export MEMORY_ENABLED=true
-        export IO_ENABLED=true
-        export NETWORK_ENABLED=true
-        export THREADS_ENABLED=true
-        export MUTEX_ENABLED=true
+        echo "Error: No test type specified. Please explicitly specify one or more test types."
+        echo "Usage: ./oscheckperf <test_type> [options]"
+        echo "Available test types: cpu, mem, io, network, threads, all, check, hardware"
+        echo ""
+        echo "Examples:"
+        echo "  ./oscheckperf all                          # Run all tests (excluding mutex)"
+        echo "  ./oscheckperf cpu mem io                   # Run specific tests"
+        echo "  ./oscheckperf network -f all-servers       # Run network test on multiple servers"
+        echo "  ./oscheckperf check -f all-servers         # Check dependencies on multiple servers"
+        exit 1
     fi
     # Set default for hardware info in report
     export REPORT_HARDWARE_INFO="${REPORT_HARDWARE_INFO:-true}"
@@ -677,7 +682,7 @@ show_help() {
     echo "Usage: $0 [options] [command] [KEY=VALUE ...]"
     echo ""
     echo "Commands:"
-    echo "  all           Run all tests (default)"
+    echo "  all           Run all tests"
     echo "  cpu           Run only CPU test"
     echo "  mem           Run only memory test"
     echo "  io            Run only IO test"
@@ -1114,6 +1119,9 @@ print_timer_summary() {
     
     local total_ms=0
     for phase in "${!TIMER_ACCUMULATED[@]}"; do
+        if [ "$phase" = "main_total" ]; then
+            continue
+        fi
         local elapsed_ms="${TIMER_ACCUMULATED[$phase]}"
         local elapsed_sec=$(awk "BEGIN {printf \"%.2f\", $elapsed_ms / 1000}")
         log_info "         $phase: ${elapsed_sec}s"
@@ -1299,23 +1307,33 @@ run_all_selected_tests() {
     local include_network="${1:-false}"
 
     if [ "$CPU_ENABLED" != "false" ]; then
+        start_timer "cpu_test"
         run_cpu_test
+        end_timer "cpu_test"
     fi
 
     if [ "$MEMORY_ENABLED" != "false" ]; then
+        start_timer "memory_test"
         run_memory_test
+        end_timer "memory_test"
     fi
 
     if [ "$IO_ENABLED" != "false" ]; then
+        start_timer "io_test"
         run_io_test
+        end_timer "io_test"
     fi
 
     if [ "$include_network" = "true" ] && [ "$NETWORK_ENABLED" != "false" ]; then
+        start_timer "network_test"
         run_network_test
+        end_timer "network_test"
     fi
 
     if [ "$THREADS_ENABLED" != "false" ]; then
+        start_timer "threads_test"
         run_threads_test
+        end_timer "threads_test"
     fi
 
     if [ "$MUTEX_ENABLED" != "false" ]; then

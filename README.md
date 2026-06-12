@@ -6,22 +6,7 @@
 
 ### 1. 安装依赖
 
-**方式一：直接安装依赖包**
-
-#### CentOS 系统为例
-
-```bash
-# 基础安装包
-yum install -y sysbench iperf3 fio jq
-
-# 非免密环境需额外安装
-yum install -y sshpass
-
-# 扩展查看更多硬件资源安装
-yum install ethtool numactl
-```
-
-**方式二：工具自动编译安装**
+**方式一：工具自动编译安装（推荐）**
 
 **编译安装说明**：
 
@@ -61,19 +46,32 @@ yum install ethtool numactl
 | 宽松模式（默认） | `false` | ✅ 允许         | ❌ 拒绝          | ✅ 允许          |
 | 严格模式     | `true`  | ❌ 拒绝         | ❌ 拒绝          | ❌ 拒绝          |
 
+**方式二：直接安装依赖包**
+
+#### CentOS 系统为例
+
+```bash
+# 基础安装包
+yum install -y sysbench iperf3 fio jq
+
+# 非免密环境需额外安装
+yum install -y sshpass
+
+# 扩展查看更多硬件资源安装
+yum install ethtool numactl
+```
+
 ### 2. 运行测试
 
 ```bash
+#命令行必须指定测试类型参数
 #单机运行
-# 等同于执行./oscheckperf all 根据默认值执行所有测试项（不包括网络）
-./oscheckperf
 # 单机运行，例如：
 ./oscheckperf cpu           # 仅 CPU 测试
 ./oscheckperf cpu mem io    #  MEM和IO 测试
 ./oscheckperf network       # 仅网络测试
 # 参数和配置文件同时配置时，参数优先级大于配置文件
 ./oscheckperf -p parameter.conf cpu
-
 
 #多机运行
 # 检查模式配合调试
@@ -139,25 +137,19 @@ yum install ethtool numactl
 
 #### 查看测试结果
 
-```bash
-# 查看最终性能报告（文本格式）
-cat output/report_benchmark_*.log
+测试完成后，`output` 目录下生成三类文件：
 
-# 查看终端输出日志
-cat output/data_*_all_results.log
-
-# 查看原始测试数据
-cat output/original_data_*_all_results.log
-```
+| 文件类型       | 路径                              | 说明          | 用途        |
+| :--------- | :------------------------------ | :---------- | :-------- |
+| **原始测试数据** | `output/original_data_*.log`    | 所有测试的完整原始输出 | 问题排查、追溯   |
+| **命令输出结果** | `output/data_*.log`             | 结构化的测试结果    | 数据处理、二次分析 |
+| **最终报告**   | `output/report_benchmark_*.log` | 格式化的性能报告    | 直接查看、分享   |
 
 #### 生成 HTML 评估报告
 
 ```bash
-# 自动读取最新日志生成 HTML 报告
-./oscheckperf --report
-
 # 执行测试后自动生成 HTML 报告
-./oscheckperf -f server_list IO_PATH=/data/io_test --report
+./oscheckperf -f server_list IO_PATH=/data/io_test all --report
 
 ```
 
@@ -169,17 +161,14 @@ python3 tools/SKILL/report_eval.py \
   output/report_benchmark_xxx.log \
   output/report_benchmark_yyy.log \
   -o output
-
-# 使用通配符比较多个报告
-python3 tools/SKILL/report_eval.py output/report_benchmark_*.log -o output
 ```
 
 #### 报告说明
 
-| 报告类型 | 文件位置 | 说明 |
-|---------|---------|------|
-| HTML 报告 | `output/report_eval_<timestamp>.html` | 单报告评估（含智能分析） |
-| 对比报告 | `output/report_compare_<timestamp>.html` | 多报告对比（含智能分析） |
+| 报告类型    | 文件位置                                     | 说明           |
+| ------- | ---------------------------------------- | ------------ |
+| HTML 报告 | `output/report_eval_<timestamp>.html`    | 单报告评估（含智能分析） |
+| 对比报告    | `output/report_compare_<timestamp>.html` | 多报告对比（含智能分析） |
 
 - HTML 报告包含：CPU、内存、磁盘 IO、线程、网络性能评估，智能分析报告
 - 阈值判断：基于预定义的基线值进行达成率评估
@@ -243,22 +232,22 @@ python3 tools/SKILL/report_eval.py output/report_benchmark_*.log -o output
 
 #### CPU 参数
 
-| 参数              | 默认值           | 说明                                  |
-| --------------- | ------------- | ----------------------------------- |
-| `CPU_THREADS`   | `0`           | CPU 测试线程数，0=自动（与CPU核心数一致）          |
-| `CPU_MAX_PRIME` | `20000`       | CPU 测试最大质数（越大测试越耗时）                 |
+| 参数              | 默认值     | 说明                        |
+| --------------- | ------- | ------------------------- |
+| `CPU_THREADS`   | `0`     | CPU 测试线程数，0=自动（与CPU核心数一致） |
+| `CPU_MAX_PRIME` | `20000` | CPU 测试最大质数（越大测试越耗时）       |
 
 #### 通用参数
 
-| 参数                 | 默认值                         | 说明                                                                       |
-| ------------------ | --------------------------- | ------------------------------------------------------------------------ |
-| `DURATION`         | `90`                        | 统一测试时长（秒）                                                           |
-| `OUTPUT_DIR`       | `./output`                  | 测试结果输出目录                                                              |
-| `SSH_PORT`         | `22`                        | 远程服务器 SSH 端口                                                           |
-| `REPORT_HARDWARE_INFO` | `true`                  | 报告中是否包含硬件信息（true/false）                                               |
-| `IO_PATH`          | `$HOME/oscheckperf/io_test` | 测试文件目录，默认`$HOME/oscheckperf/io_test`                                     |
-| `IO_TOTAL_SIZE`    | 动态计算（剩余空间的70%，最小1G，最大100G） | 测试文件总大小（sysbench 和 fio 通用），默认根据 IO\_PATH 对应文件系统剩余空间的70%动态计算，最小1G，最大100G |
-| `IO_TOOL`          | `fio`                       | IO 测试工具（sysbench/fio）                                                    |
+| 参数                     | 默认值                         | 说明                                                                      |
+| ---------------------- | --------------------------- | ----------------------------------------------------------------------- |
+| `DURATION`             | `90`                        | 统一测试时长（秒）                                                               |
+| `OUTPUT_DIR`           | `./output`                  | 测试结果输出目录                                                                |
+| `SSH_PORT`             | `22`                        | 远程服务器 SSH 端口                                                            |
+| `REPORT_HARDWARE_INFO` | `true`                      | 报告中是否包含硬件信息（true/false）                                                 |
+| `IO_PATH`              | `$HOME/oscheckperf/io_test` | 测试文件目录，默认`$HOME/oscheckperf/io_test`                                    |
+| `IO_TOTAL_SIZE`        | 动态计算（剩余空间的70%，最小1G，最大100G）  | 测试文件总大小（sysbench 和 fio 通用），默认根据 IO\_PATH 对应文件系统剩余空间的70%动态计算，最小1G，最大100G |
+| `IO_TOOL`              | `fio`                       | IO 测试工具（sysbench/fio）                                                   |
 
 #### 网络测试参数
 
@@ -361,16 +350,6 @@ python3 tools/SKILL/report_eval.py output/report_benchmark_*.log -o output
 - **P95 Latency**：95 百分位延迟（越低越好）
 - **Sum Latency**：累计延迟（越低越好）
 
-## 输出文件说明
-
-测试完成后，`output` 目录下生成三类文件：
-
-| 文件类型       | 路径                              | 说明          | 用途        |
-| :--------- | :------------------------------ | :---------- | :-------- |
-| **原始测试数据** | `output/original_data_*.log`    | 所有测试的完整原始输出 | 问题排查、追溯   |
-| **命令输出结果** | `output/data_*.log`             | 结构化的测试结果    | 数据处理、二次分析 |
-| **最终报告**   | `output/report_benchmark_*.log` | 格式化的性能报告    | 直接查看、分享   |
-
 ## 场景示例
 
 ### IO场景测试
@@ -407,8 +386,6 @@ python3 tools/SKILL/report_eval.py output/report_benchmark_*.log -o output
 | 4   | 2        | 6    | 3    | 1     |
 | 6   | 3        | 15   | 5    | 1     |
 | 8   | 4        | 28   | 7    | 1     |
-
-<br />
 
 ```shellscript
 # 仅测试网络信息（多机）
