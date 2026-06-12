@@ -6222,11 +6222,6 @@ install_components() {
         all)
             install_all=true
             install_script=true
-            # Delete existing directory for clean install
-            if [ -d "$install_dir" ]; then
-                echo "  Removing existing installation directory: $install_dir"
-                rm -rf "$install_dir"
-            fi
             ;;
         *)
             echo "Error: Invalid installation target '$target'"
@@ -6235,21 +6230,22 @@ install_components() {
             ;;
     esac
     
-    # Check build dependencies if installing all
-    if [ "$install_all" = "true" ]; then
-        check_build_dependencies || exit 1
-    fi
-    
     # Local installation
     if [ "$install_all" = "true" ]; then
-        install_sysbench || exit 1
-        install_sshpass || exit 1
-        install_fio || exit 1
-        install_iperf3 || exit 1
-        install_numactl || exit 1
-        install_ethtool || exit 1
-        install_jq || exit 1
-        install_oscheckperf_script || exit 1
+        if [ -d "$install_dir" ]; then
+            echo "  Local installation already exists: $install_dir"
+            echo "  Skipping compilation, proceeding to distribution..."
+        else
+            check_build_dependencies || exit 1
+            install_sysbench || exit 1
+            install_sshpass || exit 1
+            install_fio || exit 1
+            install_iperf3 || exit 1
+            install_numactl || exit 1
+            install_ethtool || exit 1
+            install_jq || exit 1
+            install_oscheckperf_script || exit 1
+        fi
     elif [ "$install_script" = "true" ]; then
         install_oscheckperf_script || exit 1
     fi
